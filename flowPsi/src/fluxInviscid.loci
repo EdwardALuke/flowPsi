@@ -17,7 +17,6 @@ namespace flowPsi {
     const real e0l = h0l-Rt*Tl ;
     const real e0r = h0r-Rt*Tr ;
   
-    //  const real r_ = sqrt(rl*rr) ;        // Roe average density
     const real srl = sqrt(rl) ;          // coefficents used for
     const real srr = sqrt(rr) ;          //  Roe averaging
     const real roe_factor = 1./(srl+srr) ;
@@ -28,8 +27,8 @@ namespace flowPsi {
     const real ut_ = dot(U_,an)-Us_n ; 
 
     const real h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
+    // Roe sound speed
     const real a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
-    //    cout << "aroe = " << a_ << endl ;
 
     const real evl_ = ut_-a_ ;
     const real evr_ = ut_+a_ ;
@@ -95,6 +94,7 @@ namespace flowPsi {
     iflux[4] += AM*(CR*re0r_star + CL*re0l_star) ;
     
   }
+  
   // jacobian with respect to right side variables (negative going information)
   void hllc_fjm(Mat<real_fj> fj,
 		real pgl, real Tl, vect3d Ul,
