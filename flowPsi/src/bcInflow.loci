@@ -293,7 +293,7 @@ namespace flowPsi {
 		  area,us_n,
 		  Pambient,gamma,Rtilde),
     constraint(farfield_BC) {
-    const real uit = dot($ci->$u,$area.n) ;
+    const real uit = dot($ci->$u,$area.n) - $us_n ;
     const real ai = sqrt($gamma*$Rtilde*$ci->$temperature) ;
     const real a0 = sqrt($gamma*$Rtilde*$temperatureRef)  ;
     if(uit > 0) { // outflow
@@ -358,7 +358,7 @@ namespace flowPsi {
 		  area,us_n,
 		  Pambient,gamma,Rtilde),
     constraint(inflow_BC) {
-    const real uit = dot($ci->$u,$area.n) ;
+    const real uit = dot($ci->$u,$area.n) - $us_n ;
     const real a0 = sqrt($gamma*$Rtilde*$temperatureRef)  ;
     if(uit > 0) { // outflow just set dirichlet
       $gagePressure_f = $ci->$gagePressure ;
