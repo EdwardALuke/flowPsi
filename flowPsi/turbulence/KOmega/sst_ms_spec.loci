@@ -1,0 +1,117 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "kOmega_param.h"
+
+$include "flowPsi.lh"
+$include "kOmega.lh"
+
+#include <vector>
+using std::vector ;
+#include <string>
+using std::string ;
+
+namespace flowPsi {
+
+  $type MS_SPECTRUM Constraint ;
+  $type multi_scale param<std::string> ;
+
+  $rule constraint(MS_SPECTRUM<-multi_scale) {
+    $MS_SPECTRUM = EMPTY ;
+    int len = $multi_scale.size() ;
+    bool spectrum = false ;
+  //check for option LES_SPECTRUM or LES_SPECTRUM2D(X,Y, or Z)
+    if(len >= 3 && $multi_scale[len-9] == '_' &&
+       ($multi_scale[len-8] == 'S' || $multi_scale[len-8] == 's'))
+      spectrum = true ;
+    if(len >= 3 && $multi_scale[len-12] == '_' &&
+       ($multi_scale[len-11] == 'S' || $multi_scale[len-11] == 's'))
+      spectrum = true ;
+    if(spectrum)
+      $MS_SPECTRUM = $*multi_scale.domain() ;
+  }
+
+  $type LG store<real> ;
+//#define LG_GEOMETRIC_MEAN
+#ifdef LG_GEOMETRIC_MEAN
+//use geometric mean of cell size as mesh scale
+  $rule pointwise(spectrum::LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_SPECTRUM) {
+    real mult_d = 1.0 ;
+    real count = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *li=$upper.begin();li!=$upper.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      d = 2.0*norm (dist) ;
+      mult_d *= d ;
+      count += 1.0 ;
+    }
+    for(const Entity *ui=$lower.begin();ui!=$lower.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      d = 2.0*norm (dist) ;
+      mult_d *= d ;
+      count += 1.0 ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      d = 2.0*norm (dist) ;
+      mult_d *= d ;
+      count += 1.0 ;
+    }
+    $LG = pow(mult_d,1./count) ;
+  }
+#endif
+
+//kolmogorov scale eta
+  $type eta store<real> ;
+  $rule pointwise(eta<-k,w,muu,rho,sst1) {
+    const real nu3 = pow($muu/$rho,3) ;
+    const real cmu = $sst1.betas ;
+    const real eps = max(cmu*$k*$w,EPSILON) ;
+    $eta = pow(nu3/eps,0.25) ;
+  }
+
+//taylor scale reynolds number
+  $type rLambda store<real> ;
+  $rule  pointwise(rLambda<-k,w,muu,rho,sst1) {
+    const real nu = $muu/$rho ;
+    const real cmu = $sst1.betas ;
+    const real rel = $k/(cmu*$w*nu) ;
+    $rLambda = max(pow(20.*rel/3.,0.5),EPSILON) ;
+  }
+
+//grid based wave number
+  $type kd store<real> ;
+  $rule pointwise(kd<-eta,LG) {
+    $kd = 2.0*pi*$eta/$LG ;
+  }
+
+//latency factor k_sgs/k_rans
+  $type fd store<real> ;
+  $rule pointwise(fd<-rLambda,kd),
+    constraint(kd,MS_SPECTRUM) {
+    const real a0 = -0.966414 ;
+    const real a1 = -5.302081 ;
+    const real a2 = 6.993378 ;
+    const real a3 = 8.092169 ;
+//    const real a4 = 1.0 ;
+    const real a5 = -0.670434 ;
+    const real a6 = 1.006283 ;
+    const real x1 = log10($rLambda) ;
+    const real x2 = log10($kd) ;
+    const real poly = a1 + a2*x1 + a3*x2 + a5*x1*x2 ;
+    const real fit = a0/(1.+exp(-poly))+a6 ;
+    $fd = ((x1<1.0) || (x2<-5.0))?1.0:min(fit,1.0) ;
+  }
+
+  $type sst_tmuu store<real> ;
+  $rule pointwise(ms::kw::tmuu<-sst_tmuu,fd),
+    constraint(kd,MS_SPECTRUM) {
+    $tmuu = $fd*$sst_tmuu ;
+  }
+}

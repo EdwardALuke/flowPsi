@@ -1,0 +1,244 @@
+#include <Loci.h>
+#include <Tools/expr.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "readGrid.h"
+#include "flowPsiIO.h"
+
+#include <map>
+
+
+using std::map ;
+using std::string ;
+using std::vector;
+
+
+namespace flowPsi {
+  
+  
+  namespace {
+
+    class grid_options : public options_list {
+    public:
+      grid_options() :
+        options_list("bc_check") {} ;
+    } ;
+
+  }
+}
+
+namespace Loci {
+  template<> struct data_schema_traits<flowPsi::grid_options> {
+    typedef USER_DEFINED_CONVERTER Schema_Converter ;
+    
+    typedef char Converter_Base_Type ;
+    typedef StringStreamConverter<flowPsi::grid_options> Converter_Type ;
+  } ;
+
+}
+
+namespace flowPsi {
+
+  void read_grid(fact_db &facts, const rule_db &rdb, const char *filename,
+                 bool dryrun) {
+    
+    // Add grid_file_info and boundary condition info to fact database so
+    // that they can be specified in the vars file
+    param<grid_options> grid_file_info ;
+    facts.create_fact("grid_file_info",grid_file_info) ;
+
+    param<std::string> modelName ;
+    *modelName = string(filename) ;
+    facts.create_fact("modelName",modelName) ;
+
+    try {
+      char buf[512] ;
+      bzero(buf,512) ;
+      snprintf(buf,511,"%s.vars",filename) ;
+      ifstream ifile(buf,ios::in) ;
+      if(ifile.fail()) {
+        cerr<<"can't open " << buf << endl ;
+        Loci::Abort() ;
+      }
+      while(ifile.peek() != '{' && ifile.peek() != EOF) {
+        ifile.get() ;
+      }
+      facts.read_vars(ifile,rdb) ;
+    } catch(const Loci::BasicException &err) {
+      err.Print(cerr) ;
+      cerr << "aborted reading \"" << filename << ".vars\"" << endl ;
+      Loci::Abort() ;
+    }
+
+    param<flowPsi::list_input> plot_output ;
+    plot_output = (facts.get_variable("plot_output")) ;
+    param<flowPsi::list_input> plot_output_exclusive ;
+    plot_output_exclusive = (facts.get_variable("plot_output_exclusive")) ;
+
+    map<string,int> varplotlist ;
+
+    variableOperatorList::listset *p = variableOperatorList::varlist ;
+    while(p!=0) {
+      varplotlist[string(p->name)] = p->val ;
+      p=p->next ;
+    }
+    
+    if((*plot_output).namelist != "") {
+      Loci::expression::exprP ep = Loci::expression::create((*plot_output).namelist) ;
+      if(ep->op == Loci::OP_NAME) {
+	string varname = ep->name ;
+	if(varname == "P" || varname == "p")
+	  varname = "pg" ;
+        if(varplotlist.find(varname) == varplotlist.end()) {
+          if(Loci::MPI_rank == 0)
+            cerr << "WARNING: plot_output variable '" << ep->name << "' is invalid, ignoring." << endl ;
+        }
+        varplotlist[varname] = 1 ;
+      } else if(ep->op == Loci::OP_COMMA) {
+        Loci::expression::exprList::const_iterator li ;
+        for(li=ep->expr_list.begin();li!=ep->expr_list.end();++li) {
+          if((*li)->op == Loci::OP_NAME) {
+	    string varname = (*li)->name ;
+	    if(varname == "P" || varname == "p")
+	      varname = "pg" ;
+            if(varplotlist.find(varname) == varplotlist.end()) {
+              if(Loci::MPI_rank == 0)
+                cerr << "WARNING: plot_output variable '" << (*li)->name << "' is invalid, ignoring." << endl ;
+            }
+            varplotlist[varname] = 1 ;
+          } else {
+            cerr << "unable to interpret expression in 'plot_output'"
+                 << endl ;
+            (*li)->Print(cerr) ;
+            Loci::Abort() ;
+          }
+        }
+      } else {
+        cerr << "unable to interpret expression in 'plot_output'"
+             << endl ;
+        ep->Print(cerr) ;
+        Loci::Abort() ;
+      }
+    }
+
+    if((*plot_output_exclusive).namelist != "") {
+      map<string,int>::iterator mi ;
+      for(mi=varplotlist.begin();mi!=varplotlist.end();++mi) {
+        mi->second = 0 ;
+      }
+      
+      Loci::expression::exprP ep = Loci::expression::create((*plot_output_exclusive).namelist) ;
+      if(ep->op == Loci::OP_NAME) {
+	string varname = ep->name ;
+	if(varname == "P" || varname == "p")
+	  varname = "pg" ;
+        if(varplotlist.find(varname) == varplotlist.end()) {
+          if(Loci::MPI_rank == 0)
+            cerr << "WARNING: plot_output_exclusive variable '" << ep->name << "' is invalid, ignoring." << endl ;
+        }
+        varplotlist[varname] = 1 ;
+      } else if(ep->op == Loci::OP_COMMA) {
+        Loci::expression::exprList::const_iterator li ;
+        for(li=ep->expr_list.begin();li!=ep->expr_list.end();++li) {
+          if((*li)->op == Loci::OP_NAME) {
+	    string varname = (*li)->name ;
+	    if(varname == "P")
+	      varname = "pg" ;
+            if(varplotlist.find(varname) == varplotlist.end()) {
+              if(Loci::MPI_rank == 0)
+                cerr << "WARNING: plot_output_exclusive variable '" << (*li)->name << "' is invalid, ignoring." << endl ;
+            }
+            varplotlist[varname] = 1 ;
+          } else {
+            cerr << "unable to interpret expression in 'plot_output_exclusive'"
+                 << endl ;
+            (*li)->Print(cerr) ;
+            Loci::Abort() ;
+          }
+        }
+      } else {
+        cerr << "unable to interpret expression in 'plot_output_exclusive'"
+             << endl ;
+        ep->Print(cerr) ;
+        Loci::Abort() ;
+      }
+    }
+    
+    param<string> varPlotInfo ;
+    map<string,int>::const_iterator mi ;
+    for(mi=varplotlist.begin();mi!=varplotlist.end();) {
+      if(mi->second != 0) {
+        constraint x ;
+        x = ~EMPTY ;
+        string cname = string("plotOutput_") + mi->first ;
+        facts.create_fact(cname,x) ;
+        cname = string("scalarOutput_") + mi->first ;
+        facts.create_fact(cname,x) ;
+      }
+      *varPlotInfo += mi->first ;
+      if(mi->second == 0)
+        *varPlotInfo += string("=0") ;
+      else
+        *varPlotInfo += string("=1") ;
+      ++mi ;
+      if(mi != varplotlist.end())
+        *varPlotInfo += string(":") ;
+    }
+    facts.create_fact("varPlotInfo",varPlotInfo) ;
+    
+    if(check_boundary_conditions(facts)) {
+      cerr << "WARNING: boundary condition errors detected!" << endl ;
+      if((*grid_file_info).optionExists("bc_check")) {
+        string check ;
+        (*grid_file_info).getOption("bc_check",check) ;
+        if(check != "relaxed")
+          Loci::Abort() ;
+      } else
+        Loci::Abort() ;
+    }
+    
+    string extension = ".vog" ;
+    
+    if(dryrun)
+      return ;
+
+    // Read in the grid file
+    string file = string(filename) + extension ;
+    if(Loci::MPI_rank == 0)
+      cout << "Grid File Input, reading file = " << file << endl ;
+
+    if(!Loci::setupFVMGrid(facts,file)) {
+      // Failure to read file
+      if(Loci::MPI_rank == 0) {
+        cerr << "Reading grid file '" << file
+             <<"' failed in grid reader!" << endl ;
+      }	     
+      Loci::Abort() ;
+    }
+    
+    if(Loci::MPI_rank == 0)
+      cout << "Reading Grid File Complete" << endl ;
+
+
+    Loci::setupBoundaryConditions(facts) ;
+
+    Loci::createLowerUpper(facts) ;
+
+    param<std::string> gradStencil ;
+    gradStencil = facts.get_fact("gradStencil") ;
+    if(*gradStencil == "full" || facts.get_fact("use_cellStencil") !=0) 
+      create_cell_stencil(facts) ;
+
+    find_mind_noslip(facts) ;
+
+    // Find the mininmum distance to all faces for overset code
+    //    find_mind_surf(facts) ;
+    find_mind_surf_node(facts) ;
+
+    // Create constraint to indicate that this is the Loci/flowPsi code
+    constraint FLOWPSI ;
+    FLOWPSI = ~EMPTY ;
+    facts.create_fact("FLOWPSI",FLOWPSI) ;  
+  }
+}
+

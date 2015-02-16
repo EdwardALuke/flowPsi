@@ -1,0 +1,232 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "kOmega_param.h"
+
+$include "flowPsi.lh"
+$include "kOmega.lh"
+
+namespace flowPsi {
+  
+  $type sst_k_bc store<real> ;
+  $type sst_w_bc store<real> ;
+
+  // Work on this one some...
+  $rule pointwise(sst_k_bc,sst_w_bc<-BC_options) {
+    bool set_k = false ;
+    bool set_w = false ;
+    double k = 5e-6 ;
+    double w = 500 ;
+    const Loci::options_list &finput = $BC_options ;
+    vect3d u = vect3d(0,0,0);
+    if(finput.optionExists("u")) {
+      get_vect3dOption($BC_options,"u","m/s",u) ;
+    }
+    if(finput.optionExists("v")) {
+      get_vect3dOption($BC_options,"v","m/s",u) ;
+    }
+    if(finput.optionExists("M")) {
+      vect3d M = vect3d(0,0,0) ;
+      get_vect3dOption($BC_options,"M","",M) ;
+      u = 340.*M ;
+    }
+    // fraction of laminar values for
+    // kinetic energy and viscosity
+    const real beta = 1e-2 ;
+    real v = norm(u) ;
+    k = (3./2.)*(beta*v)*(beta*v) ;
+    k = max(k,1e-3) ;
+
+    if(finput.optionExists("k")) {
+      finput.getOption("k",k) ;
+      set_k = true ;
+    }
+
+    // Assumed reference viscosity
+    const real nu_frac = 1e-3 ;
+    const real nu = 1e-5 ;
+
+    w = 0.09*k/(nu_frac*nu) ;
+
+    if(finput.optionExists("w")) {
+      finput.getOption("w",w) ;
+      set_w = true ;
+    }
+    if(finput.optionExists("omega")) {
+      finput.getOption("omega",w) ;
+      set_w = true ;
+    }
+
+    if((!set_k || !set_w) && !(!set_k && !set_w)) {
+      cerr << "warning: Must set k and w for sst model!" << endl ;
+      Loci::Abort() ;
+    }
+
+    $sst_k_bc = k ;
+    $sst_w_bc = w ;
+  }
+
+  $rule pointwise(k_f,w_f<-area,u_f,ci->(k,w),
+		  ref->(sst_k_bc,sst_w_bc)),
+    constraint(SST_BSL_KW,area,ci->u) {
+    const vect3d n = $area.n ;
+    
+    $k_f = $ref->$sst_k_bc ;
+    $w_f = $ref->$sst_w_bc ;
+    
+    if(dot($u_f,n) >= -0.0){ 
+      $k_f = $ci->$k ;
+      $w_f = $ci->$w ;
+    }
+  } 
+
+
+  // $rule pointwise(prescribe::k_f,prescribe::w_f<-area,
+  // 		  u_f,us_n,
+  //                 ci->(k,w),prescribe_turb_ref,rho_f),
+  //   constraint(SST_BSL_KW,area,ci->u,prescribe_turb_ref) {
+  //   const vect3d n = $area.n ;
+    
+  //   $k_f = $prescribe_turb_ref[0] ;
+  //   real muut = $prescribe_turb_ref[1] ;
+    
+  //   $w_f = max($k_f*$rho_f/(muut+1e-10),1e-10) ;
+    
+  //   if(dot($u_f,n)+$us_n >= -0.0){ 
+  //     $k_f = $ci->$k ;
+  //     $w_f = $ci->$w ;
+  //   }
+  // } 
+
+  $rule pointwise(lam_tau_w<-gradv3d_f(u),muu_f,area),
+    constraint(viscousWall_BC){
+    symmetricTensor tau ;
+    real mu_lam = $muu_f ;
+    
+    real dudx = $gradv3d_f(u).x.x ;
+    real dvdy = $gradv3d_f(u).y.y ;
+    real dwdz = $gradv3d_f(u).z.z ;
+    real dvdx = $gradv3d_f(u).y.x ;
+    real dwdx = $gradv3d_f(u).z.x ;
+    real dwdy = $gradv3d_f(u).z.y ;
+    real dudy = $gradv3d_f(u).x.y ;
+    real dudz = $gradv3d_f(u).x.z ;
+    real dvdz = $gradv3d_f(u).y.z ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    tau.xx = 2.0*mu_lam*(dudx-divm) ;
+    tau.yy = 2.0*mu_lam*(dvdy-divm) ;
+    tau.zz = 2.0*mu_lam*(dwdz-divm) ;
+
+    tau.xy = mu_lam*(dudy+dvdx) ;
+    tau.xz = mu_lam*(dudz+dwdx) ;
+    tau.yz = mu_lam*(dvdz+dwdy) ;
+
+    const vect3d an = $area.n ;
+    const vect3d tau_w = vect3d(tau.xx*an.x + tau.xy*an.y + tau.xz*an.z,
+                                tau.xy*an.x + tau.yy*an.y + tau.yz*an.z,
+                                tau.xz*an.x + tau.yz*an.y + tau.zz*an.z) ;
+    $lam_tau_w = sqrt(dot(tau_w,tau_w)) ;
+  }
+
+  $rule pointwise(axi::lam_tau_w<-gradv3d_f(u),muu_f,area,u_f,facecenter),
+    constraint(viscousWall_BC,axisymmetricCoordinateModel,u_f) {
+    symmetricTensor tau ;
+    real mu_lam = $muu_f ;
+
+    real y = $facecenter.y+1e-33 ;
+    real v = $u_f.y ;
+    real w = $u_f.z ;
+
+    real dudx = $gradv3d_f(u).x.x ;
+    real dvdy = $gradv3d_f(u).y.y ;
+    real dwdz = v/y ;
+    real dvdx = $gradv3d_f(u).y.x ;
+    real dwdx = $gradv3d_f(u).z.x ;
+    real dwdy = $gradv3d_f(u).z.y-w/y ;
+    real dudy = $gradv3d_f(u).x.y ;
+    real dudz = 0.0 ;
+    real dvdz = 0.0 ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    tau.xx = 2.0*mu_lam*(dudx-divm) ;
+    tau.yy = 2.0*mu_lam*(dvdy-divm) ;
+    tau.zz = 2.0*mu_lam*(dwdz-divm) ;
+
+    tau.xy = mu_lam*(dudy+dvdx) ;
+    tau.xz = mu_lam*(dudz+dwdx) ;
+    tau.yz = mu_lam*(dvdz+dwdy) ;
+
+    const vect3d an = $area.n ;
+    const vect3d tau_w = vect3d(tau.xx*an.x + tau.xy*an.y + tau.xz*an.z,
+                                tau.xy*an.x + tau.yy*an.y + tau.yz*an.z,
+                                tau.xz*an.x + tau.yz*an.y + tau.zz*an.z) ;
+    $lam_tau_w = sqrt(dot(tau_w,tau_w)) ;
+  }
+
+  // menter's k-omega wall bc
+  $rule pointwise(viscousWall::prescribe::k_f,viscousWall::prescribe::w_f<-rho_f,
+                  sst1,ci->(muu,dist_noslip)),
+    constraint(viscousWall_BC,SST_BSL_KW) {
+    $k_f = 0.0 ;
+    $w_f = 10.0*6.0*$ci->$muu/($rho_f*$sst1.beta*
+                               pow($ci->$dist_noslip,2)) ;
+  }
+
+  $type RoughWallBC store<bool> ;
+  $rule pointwise(RoughWallBC),constraint(viscousWall_BC,ref->ks_BCoption) {}
+
+  $type ks_BC store<real> ;
+  $rule pointwise(ks_BC<-BC_options),constraint(ks_BCoption) {
+    $BC_options.getOptionUnits("ks","m",$ks_BC) ;
+    $ks_BC = max($ks_BC,1e-8) ;
+  }
+
+  $type ksRef store<real> ;
+  $rule pointwise(ksRef<-ref->ks_BC),constraint(RoughWallBC) {
+    $ksRef = $ref->$ks_BC ;
+  }
+
+  $type ksp store<real> ;
+  $rule pointwise(ksp<-rho_f,lam_tau_w,ksRef,muu_f),
+    constraint(RoughWallBC,SST_BSL_KW) {
+    const real nu_w = $muu_f/$rho_f ;
+    const real tau_w = $lam_tau_w ;
+    const real utau = sqrt(tau_w/$rho_f) ;
+    $ksp = max(utau*$ksRef/nu_w,1e-30) ;
+  }
+
+  $rule pointwise(rough::viscousWall::prescribe::k_f,rough::viscousWall::prescribe::w_f<-rho_f,
+                  lam_tau_w,ksp,muu_f),
+    constraint(RoughWallBC,SST_BSL_KW) {
+    $k_f = 0.0 ;
+
+    // computes omega wall value for smooth or rough surfaces depending
+    // on parameter ksp (equivalent sand roughness height: non-dimensional)
+    // SR is modified from original Wilcox formulation for slightly
+    // better prediction of transitionally rough surfaces
+
+    const real nu_w = $muu_f/$rho_f ;
+    const real tau_w = $lam_tau_w ;
+    const real utau = sqrt(tau_w/$rho_f) ;
+    const real blend1 = exp((5.-$ksp)/1.4) ;
+    const real blend2 = pow(1.35,0.5*(5.-$ksp)) ;
+    const real SR1 = 100./$ksp ;
+    real SR ;
+    if($ksp<5.) {
+      SR = pow(200./$ksp,2) ;
+    } else if($ksp<=10.) {
+      SR = SR1+blend1*(pow(200./$ksp,2)-SR1) ;
+    } else {
+      SR = SR1+blend2*(pow(200./$ksp,1.2)-SR1) ;
+    }
+    $w_f = utau*utau*SR/nu_w ;
+  }
+
+}
+ 
+

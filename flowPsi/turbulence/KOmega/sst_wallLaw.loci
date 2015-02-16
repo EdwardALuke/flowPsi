@@ -1,0 +1,534 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "kOmega_param.h"
+
+$include "flowPsi.lh"
+$include "kOmega.lh"
+//#include "wall_func_param.h"
+
+namespace flowPsi { 
+
+  class wallLaw_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "wallLaw" ; }
+    std::string variablesChecked() { return "adiabatic,Twall,prescribed" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      int count = 0 ;
+      if(bc_options.optionExists("adiabatic"))
+        count++ ;
+      if(bc_options.optionExists("Twall"))
+        count++ ;
+      if(bc_options.optionExists("prescribed"))
+        count++ ;
+
+      if(count != 1) {
+        error_message = "Must specify one of adiabatic, Twall, prescribed" ;
+        return false ;
+      }
+      
+      if(bc_options.optionExists("Twall")) {
+        if(!check_scalar_units(bc_options,"Twall","K")) {
+          error_message = "Wrong units for 'Twall'" ;
+          return false ;
+        }
+      }
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<wallLaw_check> register_BC_wallLaw_check ;
+
+
+#ifdef LATER
+
+  struct yplus_implicit_adiabatic {
+    real cp ;
+    real twall ;
+    real rb ;
+    real mu ;
+    real u ;
+    real y ;
+    real r ;
+    real kappa ;
+    real expkb ;
+    yplus_implicit_adiabatic(real CP,real TWALL,real RB,real MU,
+                             real U,real Y,real R,real KAPPA,real B) :
+      cp(CP),twall(TWALL),rb(RB),mu(MU),u(U),y(Y),r(R),kappa(KAPPA) {
+      expkb = exp(-kappa*B) ;
+    }
+
+    real operator()(real yplus) {
+      const real uplus = u*rb*y/(yplus*mu) ;
+      const real utau = u/(uplus+1e-30) ;
+      const real G = r*utau*utau/(2.*cp*twall) ;
+      const real sqrtG = sqrt(G)+1e-30 ;
+      if(uplus > 100)
+        return -1e30 ;
+      const real yplus_white = exp((kappa/sqrtG)*asin(sqrtG*uplus))*expkb ;
+      return yplus -(uplus + yplus_white -
+                     expkb*(1.+kappa*uplus +
+                            pow(kappa*uplus,2)/2. +
+                            pow(kappa*uplus,3)/6.)) ;
+    }
+  } ;
+  
+  void wall_law_bc(const real *mixture,
+                   const vect3d ui,
+                   const real ri,
+                   const real rb,
+		   const Area &area,
+		   const real mu,
+		   const real muu ,
+		   const vect3d &cellcenter,
+		   const vect3d &facecenter,
+		   const real cond ,
+		   const real cp ,
+		   const wall_func_param &wparam,
+		   const real twall ,
+		   const int MAX_ITER ,
+		   const real f_vel_guess ,
+		   vect3d &tw, real &w_wall, real &k_wall) 
+  {
+
+    const real r0 = ri ;
+    
+
+    // Normal component of ui
+    const real uit = dot(ui,area.n) ;
+
+    //using iterative method to compute s= f_vel 
+    
+    // Compute wall law boundary values
+    // ui inside tangential component
+    const vect3d ui_tan = ui - uit*area.n ;
+    const real ui_tan_mag = sqrt(dot(ui_tan,ui_tan)) ;
+    const real yp = -dot((cellcenter-facecenter),area.n) ;
+
+    
+    const real r = pow(muu*cp/cond,1.0/3.0) ;
+ 
+
+    real expkb = exp(-(wparam.kappa)*(wparam.B)) ;
+    yplus_implicit_adiabatic FUNC(cp,twall,rb,mu,ui_tan_mag,yp,r,
+                                  wparam.kappa, wparam.B) ;
+    if(FUNC(.01) > 0) { // Then switch to low-Re model
+      tw = ui_tan*(-muu/yp) ;
+      k_wall = 0 ;
+      w_wall = 10.0*6.0*muu/(r0*0.075*pow(yp,2)) ;
+      return ;
+    }
+    real yplus = 10000. ;
+    if(FUNC(yplus) < 0) {
+      BCErrorCode |= YPLUS_TOO_LARGE_IN_WALL_LAW ;
+      Loci::debugout << "yplus is greater than " << yplus <<"!" << endl ;
+    } else {
+      yplus = find_root(FUNC,.01,yplus,1e-8) ;
+    }
+
+    const real uplus = ui_tan_mag*rb*yp/(yplus*mu) ;
+    const real utau = ui_tan_mag/uplus ;
+    
+    const real tw_mag = rb*pow(utau,2) ;
+
+    tw = -tw_mag*ui_tan/(ui_tan_mag) ;
+
+    //    real uplus = ui_tan_mag/(utau);  
+    real mu_t = mu*wparam.kappa*
+      expkb*(0-
+	     1-wparam.kappa*uplus-
+	     pow(wparam.kappa*uplus,2)/2.0) ;
+    real  kapa = r*pow(utau,2)/(2.0*cp*twall) ;
+    //cout<<"kappa1"<<" "<<kapa<<" "<<uplus<<endl ;
+    real y_white = exp(wparam.kappa/sqrt(kapa)*asin(sqrt(kapa)*uplus))
+	*expkb ;
+    //cout<<"mixed"<<" "<< 1.0 - kapa*pow(uplus,2)<<endl ;
+    const real p_ywhite = y_white*wparam.kappa*
+      sqrt(max((1.0 - kapa*pow(uplus,2)),0.0)) ;
+
+    mu_t = (1.0 + p_ywhite - muu/mu)*mu + mu_t ;
+    const real w_i = 6.0*mu/(0.075*pow(yp,2)*rb) ;
+    const real w_o = utau/(sqrt(wparam.Cmu)*wparam.kappa*yp) ;
+    
+    w_wall = sqrt(pow(w_i,2)+pow(w_o,2)) ;
+    k_wall = w_wall*mu_t/r0 ;
+  }
+
+  struct yplus_implicit_full {
+    real cp ;
+    real twall ;
+    real tcell ;
+    real kwall ;
+    real rb ;
+    real mu ;
+    real u ;
+    real y ;
+    real r ;
+    real kappa ;
+    real expkb ;
+    yplus_implicit_full(real CP,real TWALL,real TCELL,real KWALL,
+                        real RB,real MU,
+                        real U,real Y,real R,real KAPPA,real B) :
+      cp(CP),twall(TWALL),tcell(TCELL),kwall(KWALL),rb(RB),mu(MU),
+      u(U),y(Y),r(R),kappa(KAPPA) {
+      expkb = exp(-kappa*B) ;
+    } 
+
+    real operator()(real yplus) {
+      const real uplus = u*rb*y/(yplus*mu) ;
+      if(uplus > 100.)
+        return -1e30 ;
+      const real utau = u/(uplus+1e-30) ;
+      const real utau2 = utau*utau ;
+      const real G = r*utau2/(2.*cp*twall) ;
+      const real qw = utau2*(tcell/twall-1.+r*u*u/(2.*cp*twall))*
+        (rb*twall*kwall)/(mu*(u+1e-30)) ;
+      const real Beta = qw*mu/(rb*twall*kwall*utau+1e-30) ;
+      const real Q = sqrt(Beta*Beta+4.*G)+1e-30 ;
+      const real phi = asin(-Beta/Q) ;
+      const real sqrtG = sqrt(G)+1e-30 ;
+      const real yplus_white = exp((kappa/sqrtG)*
+                                   (asin((2.*G*uplus -Beta)/Q)-phi))*expkb ;
+      return yplus -(uplus + yplus_white -
+                     expkb*(1.+kappa*uplus +
+                            pow(kappa*uplus,2)/2. +
+                            pow(kappa*uplus,3)/6.)) ;
+    }
+  } ;
+
+  void wall_law_nonadiabatic_bc(const real *mixture,
+                                const vect3d ui,
+                                const real r0,
+                                const real t0,
+                                const real rb,
+				const Area &area,
+				const real mu,
+				const real muu ,
+				const vect3d &cellcenter,
+				const vect3d &facecenter,
+				const wall_func_param &wparam,
+				const real cp ,
+				const real twall ,
+				const int MAX_ITER ,
+				const real cond ,
+				const real condi ,
+				const real f_vel_guess ,
+				vect3d &tw, real &w_wall, real &k_wall,
+				real &qwall) 
+  {
+
+    // Normal component of ui
+    const real uit = dot(ui,area.n) ;
+
+    //using iterative method to compute s= f_vel 
+    
+    // Compute wall law boundary values
+    // ui inside tangential component
+    const vect3d ui_tan = ui - uit*area.n ;
+    const real ui_tan_mag = sqrt(dot(ui_tan,ui_tan));
+    const real yp = -dot((cellcenter-facecenter),area.n) ;
+    const real r = pow(muu*cp/condi,1.0/3.0) ;
+
+    yplus_implicit_full FUNC(cp,twall,t0,cond,rb,mu,ui_tan_mag,yp,r,
+                             wparam.kappa,wparam.B) ;
+
+    // Fixed qwall sign for these exceptional cases, thanks to Jeff Wright
+    if(FUNC(.01) > 0) { // Then switch to low-Re model
+      tw = ui_tan*(-muu/yp) ;
+      k_wall = 0 ;
+      w_wall = 10.0*6.0*muu/(r0*0.075*pow(yp,2)) ;
+      qwall = -cond*(t0-twall)/dot(cellcenter-facecenter,area.n) ;
+      return ;
+    }
+    real yplus = 10000 ;
+    if(FUNC(yplus) < 0) {
+      BCErrorCode |= YPLUS_TOO_LARGE_IN_WALL_LAW ;
+      Loci::debugout << "yplus is greater than " << yplus <<"!" << endl ;
+    } else {
+      yplus = find_root(FUNC,.01,yplus,1e-8) ;
+    }
+
+    real expkb = exp(-(wparam.kappa)*(wparam.B)) ;
+
+    const real uplus = ui_tan_mag*rb*yp/(yplus*mu) ;
+    const real utau = ui_tan_mag/uplus ;
+
+    qwall = (t0/twall-1.0+r*pow(ui_tan_mag,2)/(2.0*cp*twall))*
+      (rb*twall*cond)/(mu*ui_tan_mag)*pow(utau,2) ;
+
+    const real tw_mag = rb*pow(utau,2) ;
+
+    tw = -tw_mag*ui_tan/ui_tan_mag ;
+
+    real mu_t = mu*wparam.kappa*expkb*(0-
+                                       1-wparam.kappa*uplus-
+                                       pow(wparam.kappa*uplus,2)/2.0) ;
+    const real  kapa = r*pow(utau,2)/(2.0*cp*twall) ;
+    const real qw = qwall ;
+    const real beta = qw*mu/(rb*twall*cond*utau) ;
+    const real qq = sqrt(pow(beta,2)+4*kapa) ;
+
+    const real phi = asin(-beta/qq) ;
+    const real y_white = exp(wparam.kappa/sqrt(kapa)*
+                             (asin((2.0*kapa*uplus-beta)/qq)-phi))*expkb ;
+
+    const real p_ywhite = 2.0*y_white*wparam.kappa*sqrt(kapa)/qq*
+      sqrt(max((1.0 - pow(2.0*kapa*uplus-beta,2)/pow(qq,2)),0.0)) ;
+
+    mu_t += (1.0 + p_ywhite - muu/mu)*mu ;
+    mu_t = max(mu_t,0.0) ;
+    const real w_i = 6.0*mu/(0.075*pow(yp,2)*rb) ;
+    const real w_o = utau/(sqrt(wparam.Cmu)*wparam.kappa*yp) ;
+    w_wall = sqrt(pow(w_i,2)+pow(w_o,2)) ;
+    k_wall = w_wall*mu_t/r0 ;
+
+  }
+
+  // $rule pointwise(u_f,temperature_f,gaugePressure_f,mixture_f,
+  // 		  tau_wall,q_wall,wall_law_k,wall_law_w<-Pambient,
+  // 		  ci->(u,mixture,rho,muu,gaugePressure,cp,kconduct,cellcenter),
+  // 		  muu(temp_wlaw,press_wlaw,mixture_f_wlaw),
+  // 		  wallVelocity,area,eos,facecenter,wall_law,temp_wlaw,sst1,us),
+  //   constraint(wallLaw_BC,ref->adiabatic_BCoption,SST_BSL_KW),
+  //   prelude {
+  //   $mixture_f.setVecSize($mixture.vecSize()) ;
+  // } compute {
+  //   real w_f=0,k_f=0 ;
+    
+  //   // Wall tangential velocity
+  //   const vect3d uwall = $wallVelocity ;
+  //   $u_f = uwall-dot(uwall,$area.n)*$area.n + $us;
+  //   const real ri = $ci->$rho ;
+  //   const real pi = $ci->$gaugePressure+$Pambient ;
+  //   EOS::State sb = $eos.State_from_mixture_p_T($ci->$mixture,pi,$temp_wlaw) ;
+  //   const real rb = sb.density() ;
+  //   wall_law_bc($ci->$mixture,$ci->$u-$u_f,ri,rb,
+  // 		$area,$muu(temp_wlaw,press_wlaw,mixture_f_wlaw),
+  // 		$ci->$muu,$ci->$cellcenter,
+  // 		$facecenter,$ci->$kconduct,$ci->$cp,$wall_law,
+  // 		$temp_wlaw,1000,10.0,$tau_wall,w_f,k_f) ;
+  //   $temperature_f = $temp_wlaw ;
+  //   $gaugePressure_f = $ci->$gaugePressure ;
+  //   $mixture_f = $ci->$mixture ;
+  //   $q_wall = 0.0 ;
+  //   $wall_law_k = k_f ;
+  //   $wall_law_w = w_f ;
+  // } 
+
+
+  // $rule pointwise(qf<-area,gaugePressure_f,qvi,eos,u_f,Pambient),
+  //     constraint(wallLaw_BC),
+  //     prelude {
+  //   $qf.setVecSize($qvi->vectorSize()) ;
+  // } compute {
+  //   const int vs = $qvi.vectorSize() ;
+  //   const int mi = $qvi.momentumIndex() ;
+  //   const int ei = $qvi.totalEnergyIndex() ;
+  //   for(int i=0;i<vs;++i)
+  //     $qf[i] = 0 ;
+  //   const real p = $gaugePressure_f ;
+    
+  //   const vect3d a = $area.n*$area.sada ;
+  //   $qf[mi+0] = p*a.x ;
+  //   $qf[mi+1] = p*a.y ;
+  //   $qf[mi+2] = p*a.z ;
+  //   const real pg = $gaugePressure_f + $Pambient ;
+  //   $qf[ei] = pg*$area.sada*dot($u_f,$area.n) ;
+  // } 
+  
+
+  // $rule apply(ci->pc_srcJ<-area,qvi,u_f)[Loci::Summation],
+  // 		constraint(wallLaw_BC,gauss_seidel_iter) {
+  //   const int mi = $qvi.momentumIndex() ;
+  //   const int ei = $qvi.totalEnergyIndex() ;
+    
+  //   $ci->$pc_srcJ[mi+0][ei] -= $area.n.x*$area.sada ;
+  //   $ci->$pc_srcJ[mi+1][ei] -= $area.n.y*$area.sada ;
+  //   $ci->$pc_srcJ[mi+2][ei] -= $area.n.z*$area.sada ;
+  //   $ci->$pc_srcJ[ei][ei] -= $area.sada*dot($u_f,$area.n) ;
+  // } 
+	
+
+  // $rule pointwise(nonAdiabaticWall),constraint(ref->Twall_BCoption){
+  // } 
+  
+
+  // $rule pointwise(nonAdiabaticWall),constraint(ref->prescribed_BCoption){
+  // } 
+
+
+  // $rule pointwise(heat::u_f,heat::temperature_f,heat::gaugePressure_f,heat::mixture_f,
+  // 		  heat::tau_wall,heat::q_wall,wall_law_k,wall_law_w<-Pambient,wallVelocity,area,eos,
+  // 		  ci->(u,rho,temperature,muu,mixture,gaugePressure),
+  // 		  muu(temp_wlaw,press_wlaw,mixture_f_wlaw),
+  // 		  kconduct(temp_wlaw,press_wlaw,mixture_f_wlaw),
+  // 		  ci->(cp,kconduct,cellcenter),
+  // 		  facecenter,wall_law,temp_wlaw,Twall,sst1,us),
+  //   constraint(wallLaw_BC,nonAdiabaticWall,SST_BSL_KW),
+  //   prelude {
+  //   $mixture_f.setVecSize($mixture.vecSize()) ;
+  // } compute {
+  //   real w_f = 0, k_f = 0 ;
+    
+  //   // Wall tangential velocity
+  //   const vect3d uwall = $wallVelocity ;
+  //   $u_f = uwall-dot(uwall,$area.n)*$area.n + $us ;
+
+  //   const real pi = $ci->$gaugePressure+$Pambient ;
+  //   EOS::State sb = $eos.State_from_mixture_p_T($ci->$mixture,pi,$temp_wlaw) ;
+  //   const real rb = sb.density() ;
+    
+  //   wall_law_nonadiabatic_bc($ci->$mixture,$ci->$u-$u_f,
+  // 			     $ci->$rho,$ci->$temperature,
+  // 			     rb,$area,
+  // 			     $muu(temp_wlaw,press_wlaw,mixture_f_wlaw),$ci->$muu,
+  // 			     $ci->$cellcenter,$facecenter,
+  // 			     $wall_law,$ci->$cp,
+  // 			     $temp_wlaw,100000, $kconduct(temp_wlaw,press_wlaw,mixture_f_wlaw),
+  // 			     $ci->$kconduct,
+  // 			     10.0,$tau_wall,
+  // 			     w_f,k_f,$q_wall) ;
+
+  //   $temperature_f = $temp_wlaw ;
+  //   real pgb = $ci->$gaugePressure ;
+  //   $gaugePressure_f = pgb ;
+  //   $mixture_f = $ci->$mixture ;
+  //   $wall_law_k = k_f ;
+  //   $wall_law_w = w_f ;
+  // } 
+
+  
+  // $rule pointwise(Twall<-ci->(u,temperature,muu,cp,kconduct),area,cp,us),
+  //   constraint(wallLaw_BC,ref->adiabatic_BCoption) { 
+  //   const vect3d ui = $ci->$u-$us ;
+  //   const real uit = dot(ui,$area.n) ;
+  //   const vect3d ui_tan = ui - uit*$area.n ;
+  //   const real ui_tan_mag = sqrt(dot(ui_tan,ui_tan)) ;
+  //   const real r =  pow($ci->$muu*$ci->$cp/$ci->$kconduct,1.0/3.0) ;
+  //   $Twall = $ci->$temperature + r* pow(ui_tan_mag,2)/(2.0*$cp) ;
+  // } 
+
+
+  // $rule pointwise(wl::vis_flux<-tau_wall,area,qvi,hflux,q_wall,u_f),
+  //   constraint(wallLaw_BC),
+  //   prelude {
+  //   $vis_flux.setVecSize($qvi->vectorSize()) ;
+  // } compute {
+  //   int ns,mi,ei ;
+  //   ns = $*qvi->numSpecies() ;
+  //   mi = $*qvi->momentumIndex() ;
+  //   ei = $*qvi->totalEnergyIndex() ;
+    
+  //   const real sada = $area.sada ;
+
+  //   for(int i=0; i<ns; ++i) {
+  //     $vis_flux[i] = 0.0 ;
+  //   }
+  //   //cout <<"tau_wall = " <<tau_wall[fc] <<endl ;
+  //   $vis_flux[mi+0] = $tau_wall.x*sada ;
+  //   $vis_flux[mi+1] = $tau_wall.y*sada ;
+  //   $vis_flux[mi+2] = $tau_wall.z*sada ;
+  //   $vis_flux[ei] = -$q_wall*sada +
+  //     ($u_f.x*$vis_flux[mi+0]+
+  //      $u_f.y*$vis_flux[mi+1]+
+  //      $u_f.z*$vis_flux[mi+2]) ;
+  // }
+
+
+  // $rule pointwise(hflux<-area) {
+  //   $hflux = 0.0 ;
+  // } 
+
+
+  // $rule pointwise(mixture_f_wlaw<-ci->mixture),
+  //   constraint(wallLaw_BC),
+  //   prelude {
+  //   $mixture_f_wlaw.setVecSize($mixture.vecSize()) ;
+  // } compute {
+  //   $mixture_f_wlaw = $ci->$mixture ;
+  // } 
+  
+  // $rule pointwise(temp_wlaw<-Twall),constraint(wallLaw_BC) {
+  //   $temp_wlaw = $Twall ;
+  // } 
+
+  // $type press_wlaw store<real> ;
+  // $rule pointwise(press_wlaw<-ci->pressure) {
+  //   $press_wlaw = $ci->$pressure ;
+  // } 
+
+  // $type  Twall_prescribed store<real> ;
+  // $rule pointwise(Twall<-Twall_prescribed),
+  //   constraint(wallLaw_BC,Twall_prescribed) {
+  //   $Twall = $Twall_prescribed ;
+  // } 
+
+  // $rule pointwise(ci->wall_cells),constraint(wallLaw_BC){
+  // } 
+
+
+  // $rule unit(isWallCell),constraint(vol) {
+  //   $isWallCell = 0 ;
+  // }
+
+  // // dummy apply rule to remove warning comlaint from Loci scheduler
+  // $rule apply(isWallCell)[Loci::Summation],constraint(vol), prelude {} ;
+
+  // $rule apply(ci->isWallCell)[Loci::Summation],constraint(wallLaw_BC) {
+  //   char c = 1 ;
+  //   join($ci->$isWallCell,c) ;
+  // }
+
+  // $rule  pointwise(wallLaw::prescribe::k_f<-wall_law_k),constraint(SST_BSL_KW,wallLaw_BC) {
+  //   $k_f = $wall_law_k ;
+  // }
+
+  // $rule  pointwise(wallLaw::prescribe::w_f<-wall_law_w),constraint(SST_BSL_KW,wallLaw_BC) {
+  //   $w_f = $wall_law_w ;
+  // }
+
+  // $type k_rhs store<real> ;
+  // $type w_rhs store<real> ;
+
+  // $rule pointwise(wallLaw::k_rhs),constraint(wall_cells,SST_BSL_KW) {
+  //   $k_rhs = 0 ;
+  // }
+
+  // $rule pointwise(wallLaw::w_rhs),constraint(wall_cells,SST_BSL_KW) {
+  //   $w_rhs = 0 ;
+  // }
+
+  // $type k_next store<real> ;
+  // $type w_next store<real> ;
+  // $rule pointwise(wallLaw::k_next<-min_cell2noslip->wall_law_k),
+  //   constraint(wall_cells,SST_BSL_KW) {
+  //   $k_next = $min_cell2noslip->$wall_law_k ;
+  // }
+
+  // $rule pointwise(wallLaw::w_next<-min_cell2noslip->wall_law_w),
+  //   constraint(wall_cells,SST_BSL_KW) {
+  //   $w_next = $min_cell2noslip->$wall_law_w ;
+  // }
+
+  // $type k_resid store<real> ;
+  // $type w_resid store<real> ;
+  // $rule pointwise(wallLaw::k_resid), constraint(wall_cells,SST_BSL_KW) {
+  //   $k_resid = 0 ;
+  // }
+  // $rule pointwise(wallLaw::w_resid), constraint(wall_cells,SST_BSL_KW) {
+  //   $w_resid = 0 ;
+  // }
+#endif
+
+}
+

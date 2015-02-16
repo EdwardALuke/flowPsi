@@ -1,0 +1,194 @@
+#include <Loci.h>
+#include "readGrid.h"
+#include "inviscidFlux.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  class impermeable_check_noarg : public BC_Check {
+  public:
+    std::string boundaryConditions() { return "impermeable,symmetry,reflecting" ; }
+    std::string variablesChecked() { return "" ; }
+    bool checkOptions(const options_list& bc_options) { return true ; }
+    std::ostream &ErrorMessage(std::ostream &s) { return s; }
+  } ;
+  register_BC<impermeable_check_noarg> register_BC_impermeable_check_noarg ;
+
+  class impermeable_check : public BC_Check {
+  public:
+    std::string boundaryConditions() { return "impermeable,reflecting,viscousWall,wallLaw" ; }
+    std::string variablesChecked() { return "firstOrder" ; }
+    bool checkOptions(const options_list& bc_options) { return true ; }
+    std::ostream &ErrorMessage(std::ostream &s) { return s; }
+  } ;
+
+  register_BC<impermeable_check> register_BC_impermeable_check ;
+
+  $rule pointwise(u_f<-area,ci->u,us_n),constraint(symmetry_BC) {
+    const real uit = dot($ci->$u,$area.n)-$us_n ;
+    $u_f = $ci->$u - uit*$area.n ;
+  }
+
+  $rule pointwise(gagePressure_f<-area,ci->(u,gagePressure,temperature),Pambient,Rtilde,us_n),
+    constraint(symmetry_BC) {
+    const real rho = ($ci->$gagePressure+$Pambient)/($Rtilde*$ci->$temperature) ;
+    const real U = norm($ci->$u) ;
+    const real uit = dot($ci->$u,$area.n)-$us_n ;
+    $gagePressure_f = $ci->$gagePressure + 0.5*rho*U*uit ;
+  }
+  
+  $rule pointwise(temperature_f<-ci->temperature),constraint(symmetry_BC) {
+    $temperature_f = $ci->$temperature ;
+  }
+  
+  $rule pointwise(iflux<-gagePressure_f, u_f, area),constraint(symmetry_BC) {
+    $iflux[0] = 0 ;
+    const real moment = $gagePressure_f*$area.sada ;
+    $iflux[1] = $area.n.x*moment ;
+    $iflux[2] = $area.n.y*moment ;
+    $iflux[3] = $area.n.z*moment ;
+    $iflux[4] = $area.sada*$gagePressure_f*dot($u_f,$area.n) ;
+  }
+  
+  $rule apply(ci->srcJ<-ci->(gagePressure,temperature,u),Rtilde,Pambient,area)[Loci::Summation],constraint(symmetry_BC) {
+    const real  p  = $ci->$gagePressure+$Pambient ;
+    const real  T  = $ci->$temperature ;
+    const real rho = p/($Rtilde*T) ;
+    const real drdt= -rho/T ;
+    const real drdp= rho/p ;
+    const int mi = 1;
+    const real U = norm($ci->$u) ;
+    const real uit = dot($area.n,$ci->$u) ;
+    const real sada = $area.sada ;
+    const real n[3] = {$area.n.x,$area.n.y,$area.n.z} ;
+    const real ui[3] = {$ci->$u.x,$ci->$u.y,$ci->$u.z} ;
+    const real coef1 = -0.5*rho*sada ;
+    const real coef2 = -0.5*sada ;
+    for(int j=0;j<3;++j) {
+      const real coefj = coef1*(ui[j]*uit/(U+1e-30) + n[j]*U) ;
+      for(int i=0;i<3;++i) 
+	$ci->$srcJ[mi+i][mi+j] += coefj*n[i] ;
+    }
+    for(int i=0;i<3;++i) {
+      real coefx = 0.5*U*uit ;
+      $ci->$srcJ[mi+i][0] += coef2*(coefx*drdt)*n[i] ;
+      $ci->$srcJ[mi+i][4] += coef2*(1.0+coefx*drdp)*n[i] ;
+    }
+  }
+
+
+
+  $rule pointwise(u_f<-area,ci->u,us_n),constraint(reflecting_BC) {
+    const real uit = dot($ci->$u,$area.n)-$us_n ;
+    $u_f = $ci->$u - uit*$area.n ;
+  }
+
+  $rule pointwise(gagePressure_f<-area,ci->(u,gagePressure,rho),us_n,Pambient),
+    constraint(reflecting_BC) {
+    const real uit = dot($ci->$u,$area.n)-$us_n ;
+    const real Pmin = 0.5*($ci->$gagePressure+$Pambient)-$Pambient ;
+    $gagePressure_f = max(Pmin,$ci->$gagePressure + 0.5*($ci->$rho)*uit*fabs(uit)) ;
+  }
+
+  $rule pointwise(temperature_f<-ci->temperature),constraint(reflecting_BC) {
+    $temperature_f = $ci->$temperature ;
+  }
+  
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma),constraint(reflecting_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = Tl ;
+    const real Pgr = Pgl ;
+    const real uit = dot(ul,$area.n)-$us_n ;
+    const vect3d ur = ul - 2.*uit*$area.n;
+    hllc_flux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+    $iflux[0] = 0 ; // Mass flux should be zero for this BC
+  }
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(reflecting_BC) {
+#define NUMERICAL
+#ifdef NUMERICAL
+    real vals[5] ;
+    real deltas[5] ;
+    real Tl = $leftsP(temperature,Zero) ;
+    real Pgl = $leftsP(gagePressure,minPg) ;
+    vect3d ul = $leftv3d(u) ;
+    real uit = dot(ul,$area.n)-$us_n ;
+    vect3d ur = ul - 2.*uit*$area.n;
+    Loci::Array<real,5> iflux ;
+    hllc_flux(iflux,Pgl,Tl,ul,Pgl,Tl,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+    
+    const real a2 = $gamma*$Rtilde*Tl ;
+    const real eps = 1e-5 ;
+    deltas[0] = Tl*eps ;
+    deltas[1] = sqrt(a2)*eps ;
+    deltas[2] = deltas[1] ;
+    deltas[3] = deltas[1] ;
+    deltas[4] = a2*eps ;
+    vals[0] = Tl ;
+    vals[1] = ul.x ;
+    vals[2] = ul.y ;
+    vals[3] = ul.z ;
+    vals[4] = Pgl ;
+
+
+    for(int j=0;j<5;++j) {
+      real tmp = vals[j] ;
+      vals[j] += deltas[j] ;
+      Tl = vals[0] ;
+      ul.x = vals[1] ;
+      ul.y = vals[2] ;
+      ul.z = vals[3] ;
+      uit = dot(ul,$area.n)-$us_n ;
+      ur = ul - 2.*uit*$area.n;
+      Pgl = vals[4] ;
+      Loci::Array<real,5> iflux2 ;
+      hllc_flux(iflux2,Pgl,Tl,ul,Pgl,Tl,ur,$area.n,$area.sada,$Pambient,
+		$Rtilde, $gamma,$us_n) ;
+      const real rh = 1./(tmp-vals[j]) ;
+      for(int i = 1;i<5;++i) {
+	$ci->$srcJ[i][j] -=(iflux[i]-iflux2[i])*rh ;
+      }
+      vals[j] = tmp ;
+    }
+#else
+      
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = Tl ;
+    const real Pgr = Pgl ;
+    const real uit = dot(ul,$area.n)-$us_n ;
+    const vect3d ur = ul - 2.*uit*$area.n;
+    real_fj tmp1[25],tmp2[25],tmp3[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    Mat<real_fj> fjm(&tmp2[0],5) ;
+    Mat<real_fj> fjr(&tmp3[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    fjm = mk_Scalar(0.) ;
+    fjr = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+    hllc_fjm(fjm,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+    const real n[3] = {$area.n.x,$area.n.y,$area.n.z} ;
+    const int mi = 1 ;
+    for(int i=0;i<5;++i)
+      fjr[i][i] = 1.0 ;
+    for(int i=0;i<3;++i)
+      for(int j=0;j<3;++j)
+	fjr[mi+i][mi+j] += -2.*n[i]*n[j] ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	for(int k=0;k<5;++k)
+	  fjp[i][j] += fjm[i][k]*fjr[k][j] ;
+    
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+#endif
+  }
+}

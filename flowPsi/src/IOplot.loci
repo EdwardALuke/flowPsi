@@ -1,0 +1,283 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+
+#include <list>
+#include <string>
+#include <sstream>
+#include <stdlib.h>
+
+using std::string ;
+using std::list ;
+using std::pair ;
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  $rule default(plot_modulo),
+    comments("Plot files are output indexed by the iteration number modulo this parameter. "), 
+    comments("A zero indicates that the files will be indexed only by iteration number.") 
+  {
+      $plot_modulo = 0 ;
+  } 
+
+  $rule default(plot_freq),
+    comments("Output plot files whenever the timestep number is divisible by this input.") 
+  {  $plot_freq=1000 ; }
+
+  $rule default(plot_output),comments("List extra optional variables to output in this input.") {
+    $plot_output.namelist = "" ;
+  }
+
+  $rule default(plot_output_exclusive), comments("List output variables here to disable default varaible outputs.") {
+    $plot_output_exclusive.namelist = "" ;
+  }    
+
+  $type plot param<int> ;
+  $rule singleton(plot{n,plot=0}<-ncycle{n}) {
+    $plot{n,plot=0} = $ncycle{n} ;
+  }
+  $rule singleton(plot{n,plot+1}<-plot{n,plot}) {
+    $plot{n,plot+1}=$plot{n,plot} ;
+  }
+
+  $type plotFinished param<bool> ;
+  $rule singleton(plotFinished{n,plot}<-$plot{n,plot},ncycle{n},plot_freq) {
+    $plotFinished{n,plot} = true ;
+    if((($ncycle{n})%$plot_freq) == 0) {
+      $plotFinished{n,plot} = ($$plot{n,plot} > 0) ;
+    }
+  }
+
+  $rule singleton(plot{n}<-plot{n,plot}),conditional(plotFinished{n,plot}) {
+    $plot{n} = $plot{n,plot} ;
+  }
+  $rule singleton(OUTPUT{n}<-plot{n}) {
+  }
+
+  $rule pointwise(temperature{n,plot}<-temperature{n},plot{n,plot}),
+    constraint(geom_cells,temperature{n}) {
+    $temperature{n,plot} = $temperature{n} ;
+  }
+  $rule pointwise(gagePressure{n,plot}<-gagePressure{n},plot{n,plot}),
+    constraint(geom_cells,gagePressure{n}) {
+    $gagePressure{n,plot} = $gagePressure{n} ;
+  }
+  $rule pointwise(u{n,plot}<-u{n},plot{n,plot}),
+    constraint(geom_cells,u{n}) {
+    $u{n,plot} = $u{n} ;
+  }
+
+  $rule singleton(do_plot{n,plot}<-ncycle{n},plot{n,plot},plot_freq) {
+    $do_plot{n,plot} = ((($ncycle{n})%$plot_freq) == 0) ;
+  }
+
+  $rule singleton(plot_postfix<-ncycle,plot_modulo) {
+    $plot_postfix = "" ;
+    int cycle = $ncycle ;
+    if($plot_modulo != 0) 
+      cycle = cycle % $plot_modulo ;
+    ostringstream oss ;
+    oss << cycle ;
+    $plot_postfix = oss.str() ;
+  }
+  
+  variableOperatorList::listset *variableOperatorList::varlist = 0 ;
+  
+
+  void dump_scalar(const sequence &seq,const_store<float> &c2n,
+                   string plot_postfix,
+                   string modelName,
+                   string type,
+                   string sname) {
+
+    ostringstream oss ;
+    oss << "output/" << sname << "_" << type << "." << plot_postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+  
+  scalar_node_output::scalar_node_output(const char *vname,
+                                         const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string var_name_time = var_name; 
+    string constraint_name = string("plotOutput_") + value_name ;
+    name_store(var_name_time, c2n) ;
+    name_store("modelName",modelName) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    
+    conditional("do_plot") ;
+    constraint("pos") ;
+    input("modelName") ;
+    input("plot_postfix") ;
+    input(var_name_time);
+    constraint(constraint_name) ;
+    output("OUTPUT") ;
+  }
+  void scalar_node_output::compute(const sequence &seq) {
+
+    dump_scalar(seq,c2n,*plot_postfix,*modelName,"sca",value_name) ;
+  }	
+
+  class scalar_bndry_value : public pointwise_rule {
+    string var_name ;
+    string var_name_f ;
+    const_store<real> vn ;
+    const_Map ci ;
+    store<real> vn_f ;
+  public:
+    scalar_bndry_value(const char *vname, const char *vname_f) ;
+    void calculate (Entity fc) {
+      vn_f[fc] = vn[ci[fc]] ;
+    }
+    virtual void compute(const sequence &seq) ;
+  } ;
+  
+  scalar_bndry_value::scalar_bndry_value(const char *vname, const char *vname_f) {
+    var_name = string(vname) ;
+    var_name_f = string(vname_f) ;
+    string var_name_cell = var_name ;
+    string var_input = string("ci->") + var_name_cell ;
+    name_store(var_name_cell, vn) ;
+    name_store(var_name_f, vn_f) ;
+    name_store("ci",ci) ;
+    
+    input(var_input) ;
+    output(var_name_f) ;
+  }
+  void scalar_bndry_value::compute(const sequence &seq) {
+    do_loop(seq,this) ;
+  }	
+
+    void dump_vector(const sequence &seq,const_store<vector3d<float> > &c2n,
+                     string postfix,
+                     string modelName,
+                     string type,
+                     string sname) {
+    
+    ostringstream oss ;
+    
+    oss << "output/" << sname << "_" << type << "." << postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+  
+  
+  vector_node_output::vector_node_output(const char *vname,
+                                         const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string var_name_time = var_name; 
+    string constraint_name = string("plotOutput_") + value_name ;
+    name_store(var_name_time, c2n) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("modelName",modelName) ;
+    input("modelName") ;
+    name_store("OUTPUT",OUTPUT) ;
+    
+    conditional("do_plot") ;
+    constraint("pos") ;
+    input("plot_postfix") ;
+    input(var_name_time);
+    constraint(constraint_name) ;
+    output("OUTPUT") ;
+  }
+  void vector_node_output::compute(const sequence &seq) {
+    dump_vector(seq,c2n,*plot_postfix,*modelName,
+                "vec",value_name) ;
+  }	
+
+
+  void dump_scalard(const sequence &seq,const_store<double> &c2n,
+                    string postfix,
+                   string modelName,
+                   string type,
+                   string sname) {
+    
+    ostringstream oss ;
+    oss << "output/" << sname << "_" << type << "." << postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+  
+  OUTPUT_SCALAR_ALWAYS("cell2node(temperature)",t) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(gagePressure)",pg) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(rho)",r) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(soundSpeed)",a) ;
+  OUTPUT_VECTOR_ALWAYS("cell2node_v3d(u)",v) ;
+
+  void solver_dump_var(const sequence &seq,
+                       Loci::storeRepP var,
+                       string postfix,
+                       string modelName,
+                       string type,
+                       string sname) {
+
+    
+    ostringstream oss ;
+    
+    oss << "output/" << sname << "_" << type << "." << postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,sname,var) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+
+  $rule singleton(OUTPUT<-plot_postfix,modelName,Pambient),conditional(do_plot),
+    option(disable_threading) {
+    solver_dump_var(seq,$*Pambient.Rep(),$plot_postfix,$modelName,"par","Pambient") ;
+  }
+}
+

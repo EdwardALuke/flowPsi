@@ -1,0 +1,657 @@
+#include "inviscidFlux.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  void hllc_flux(Loci::Array<real, 5> &iflux,
+		 real pgl, real Tl, vect3d Ul,
+		 real pgr, real Tr, vect3d Ur,
+		 vect3d an, real area,
+		 real pambient, real Rt,real gamma, real Us_n) {
+    real gm1 = gamma-1 ;
+    real rl = (pgl+pambient)/(Rt*Tl) ;
+    real rr = (pgr+pambient)/(Rt*Tr) ;
+    
+    real h0l = Rt*Tl*gamma/gm1 + 0.5*dot(Ul,Ul) ;
+    real h0r = Rt*Tr*gamma/gm1 + 0.5*dot(Ur,Ur) ;
+    const real e0l = h0l-Rt*Tl ;
+    const real e0r = h0r-Rt*Tr ;
+  
+    //  const real r_ = sqrt(rl*rr) ;        // Roe average density
+    const real srl = sqrt(rl) ;          // coefficents used for
+    const real srr = sqrt(rr) ;          //  Roe averaging
+    const real roe_factor = 1./(srl+srr) ;
+
+#define RAVG(vl,vr) (((vl)*srl+(vr)*srr)*roe_factor) // Roe average
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real ut_ = dot(U_,an)-Us_n ; 
+
+    const real h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
+    const real a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
+    //    cout << "aroe = " << a_ << endl ;
+
+    const real evl_ = ut_-a_ ;
+    const real evr_ = ut_+a_ ;
+
+    const real al = sqrt(gamma*Rt*Tl) ;
+    const real ar = sqrt(gamma*Rt*Tr) ;
+    const real utla = dot(Ul,an) ;
+    const real utra = dot(Ur,an) ;
+    const real utl = utla-Us_n ; 
+    const real utr = utra-Us_n ; 
+
+    // right and left wave speeds
+    real SR = max(evr_,utr+ar) ;
+    real SL = min(evl_,utl-al) ;
+    real lmdot = rl*utl ;
+    real rmdot = rr*utr ;
+    real pl = pgl+pambient ;
+    real pr = pgr+pambient ;
+    double coef = 0.5*area ;
+    double AL = coef*((SL > 0) ? (SR < 0 ? 1.:2.) : ( SR < 0 ? 0.:1. )) ;
+    double AR = coef*((SR < 0) ? (SL > 0 ? 1.:2.) : ( SL > 0 ? 0.:1. )) ;
+    double AM = coef*((SL > 0 || SR < 0) ? 0.:1.) ;
+
+    // Build up iflux first and F_l + F_r, 
+    iflux[0] = AL*lmdot+AR*rmdot ;
+    iflux[1] = AL*lmdot*Ul.x + AR*rmdot*Ur.x + an.x*(AL*pgl+AR*pgr) ;
+    iflux[2] = AL*lmdot*Ul.y + AR*rmdot*Ur.y + an.y*(AL*pgl+AR*pgr) ;
+    iflux[3] = AL*lmdot*Ul.z + AR*rmdot*Ur.z + an.z*(AL*pgl+AR*pgr) ;
+    iflux[4] = AL*(lmdot*e0l + pl*utla) + AR*(rmdot*e0r + pr*utra) ;
+
+
+    // subtract off SL*Ul and SR*Ur
+    iflux[0] -= AM*(SL*rl + SR*rr) ;
+    iflux[1] -= AM*(SL*rl*Ul.x + SR*rr*Ur.x) ;
+    iflux[2] -= AM*(SL*rl*Ul.y + SR*rr*Ur.y) ;
+    iflux[3] -= AM*(SL*rl*Ul.z + SR*rr*Ur.z) ;
+    iflux[4] -= AM*(SL*rl*e0l  + SR*rr*e0r) ;
+
+    // contact (middle) wave speed
+    const real SM = ((rr*utr*(SR-utr)-rl*utl*(SL-utl)+pgl-pgr)/
+		     (rr*(SR-utr)-rl*(SL-utl))) ;
+
+    // Now compute U_star_l and U_star_r
+    const real rl_star = rl*(SL-utl)/(SL-SM) ;
+    const real rr_star = rr*(SR-utr)/(SR-SM) ;
+    const real pg_star = rl*(utl-SL)*(utl-SM)+pgl ;
+    const real p_star = pg_star+pambient ;
+    const real rul_star = ((SL-utl)*rl*Ul.x + (pg_star-pgl)*an.x)/(SL-SM) ;
+    const real rvl_star = ((SL-utl)*rl*Ul.y + (pg_star-pgl)*an.y)/(SL-SM) ;
+    const real rwl_star = ((SL-utl)*rl*Ul.z + (pg_star-pgl)*an.z)/(SL-SM) ;
+    const real rur_star = ((SR-utr)*rr*Ur.x + (pg_star-pgr)*an.x)/(SR-SM) ;
+    const real rvr_star = ((SR-utr)*rr*Ur.y + (pg_star-pgr)*an.y)/(SR-SM) ;
+    const real rwr_star = ((SR-utr)*rr*Ur.z + (pg_star-pgr)*an.z)/(SR-SM) ;
+    const real re0l_star = ((SL-utl)*rl*e0l - pl*utl + p_star*SM)/(SL-SM) ;
+    const real re0r_star = ((SR-utr)*rr*e0r - pr*utr + p_star*SM)/(SR-SM) ;
+
+    const real CR = SR-abs(SM) ;
+    const real CL = SL+abs(SM) ;
+    iflux[0] += AM*(CR*rr_star   + CL*rl_star) ;
+    iflux[1] += AM*(CR*rur_star  + CL*rul_star) ;
+    iflux[2] += AM*(CR*rvr_star  + CL*rvl_star) ;
+    iflux[3] += AM*(CR*rwr_star  + CL*rwl_star) ;
+    iflux[4] += AM*(CR*re0r_star + CL*re0l_star) ;
+    
+  }
+  // jacobian with respect to right side variables (negative going information)
+  void hllc_fjm(Mat<real_fj> fj,
+		real pgl, real Tl, vect3d Ul,
+		real pgr, real Tr, vect3d Ur,
+		vect3d an, real area,
+		real pambient, real Rt,real gamma, real Us_n) {
+    const real_fj gm1 = gamma-1 ;
+    const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
+    const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
+    const real_fj drdp = 1./(Rt*Tr) ;
+    const real_fj drdT = -rl/Tr ;
+
+    
+    const real_fj h0l = Rt*Tl*gamma/gm1 + 0.5*dot(Ul,Ul) ;
+    const real_fj h0r = Rt*Tr*gamma/gm1 + 0.5*dot(Ur,Ur) ;
+    const real_fj dh0dT = Rt*gamma/gm1 ;
+    // Note dh0du = u
+    const real_fj e0l = h0l-Rt*Tl ;
+    const real_fj e0r = h0r-Rt*Tr ;
+    const real_fj de0dT = dh0dT-Rt ;
+
+    const real_fj srl = sqrt(rl) ;          // coefficents used for
+    const real_fj srr = sqrt(rr) ;          //  Roe averaging
+    const real_fj roe_factor = 1./(srl+srr) ;
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real_fj ut_ = dot(U_,an)-Us_n ; 
+
+    const real_fj h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
+    const real_fj a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
+
+    const real_fj evl_ = ut_-a_ ;
+    const real_fj evr_ = ut_+a_ ;
+
+    const real_fj al = sqrt(gamma*Rt*Tl) ;
+    const real_fj ar = sqrt(gamma*Rt*Tr) ;
+    const real_fj utla = dot(Ul,an) ;
+    const real_fj utra = dot(Ur,an) ;
+    const real_fj utl = utla-Us_n ; 
+    const real_fj utr = utra-Us_n ; 
+
+    // right and left wave speeds
+    const real_fj SR = max(evr_,utr+ar) ;
+    const real_fj SL = min(evl_,utl-al) ;
+    // contact (middle) wave speed
+    const real_fj rbot = 1./(rr*(SR-utr)-rl*(SL-utl)) ;
+    const real_fj SM = (rr*utr*(SR-utr)-rl*utl*(SL-utl)+pgl-pgr)*rbot ;
+    const real_fj dSMdT = rbot*drdT*(SR-utr)*(utr-SM) ;
+    const real_fj dSMdp = rbot*(drdp*(SR-utl)*(utr - SM)-1.) ;
+    const real_fj dSMdu = rbot*rr*(SR-2.*utr+SM) ;
+
+    const real_fj rmdot = rr*utr ;
+    const real_fj pl = pgl+pambient ;
+    const real_fj pr = pgr+pambient ;
+    const real_fj coef = 0.5*area ;
+    const real_fj AR = coef*((SR < 0) ? (SL > 0 ? 1.:2.) : ( SL > 0 ? 0.:1. )) ;
+    const real_fj AM = coef*((SL > 0 || SR < 0) ? 0.:1.) ;
+
+    // Build up iflux first and F_l + F_r, 
+    //    iflux[0] = AL*lmdot+AR*rmdot ;
+    //    iflux[1] = AL*lmdot*Ul.x + AR*rmdot*Ur.x + an.x*(AL*pgl+AR*pgr) ;
+    //    iflux[2] = AL*lmdot*Ul.y + AR*rmdot*Ur.y + an.y*(AL*pgl+AR*pgr) ;
+    //    iflux[3] = AL*lmdot*Ul.z + AR*rmdot*Ur.z + an.z*(AL*pgl+AR*pgr) ;
+    //    iflux[4] = AL*(lmdot*e0l + pl*utla) + AR*(rmdot*e0r + pr*utra) ;
+
+    fj[0][0] += AR*drdT*utr ;
+    fj[0][1] += AR*rr*an.x ;
+    fj[0][2] += AR*rr*an.y ;
+    fj[0][3] += AR*rr*an.z ;
+    fj[0][4] += AR*drdp*utr ;
+
+    fj[1][0] += AR*drdT*utr*Ur.x ;
+    fj[1][1] += AR*(rr*an.x*Ur.x + rmdot) ;
+    fj[1][2] += AR*rr*an.y*Ur.x ;
+    fj[1][3] += AR*rr*an.z*Ur.x ;
+    fj[1][4] += AR*(drdp*utr*Ur.x + an.x) ;
+
+    fj[2][0] += AR*drdT*utr*Ur.y ;
+    fj[2][1] += AR*rr*an.x*Ur.y ;
+    fj[2][2] += AR*(rr*an.y*Ur.y + rmdot) ;
+    fj[2][3] += AR*rr*an.z*Ur.y ;
+    fj[2][4] += AR*(drdp*utr*Ur.y + an.y) ;
+
+    fj[3][0] += AR*drdT*utr*Ur.z ;
+    fj[3][1] += AR*rr*an.x*Ur.z ;
+    fj[3][2] += AR*rr*an.y*Ur.z ;
+    fj[3][3] += AR*(rr*an.z*Ur.z + rmdot) ;
+    fj[3][4] += AR*(drdp*utr*Ur.z + an.z) ;
+
+    fj[4][0] += AR*(drdT*utr*e0r + rmdot*de0dT) ;
+    fj[4][1] += AR*(rmdot*Ur.x + an.x*(rr*e0r + pr)) ;
+    fj[4][2] += AR*(rmdot*Ur.y + an.y*(rr*e0r + pr)) ;
+    fj[4][3] += AR*(rmdot*Ur.z + an.z*(rr*e0r + pr)) ;
+    fj[4][4] += AR*(drdp*e0r*utr + utra) ;
+    // subtract off SL*Ul and SR*Ur
+    //    iflux[0] -= AM*(SL*rl + SR*rr) ;
+    //    iflux[1] -= AM*(SL*rl*Ul.x + SR*rr*Ur.x) ;
+    //    iflux[2] -= AM*(SL*rl*Ul.y + SR*rr*Ur.y) ;
+    //    iflux[3] -= AM*(SL*rl*Ul.z + SR*rr*Ur.z) ;
+    //    iflux[4] -= AM*(SL*rl*e0l  + SR*rr*e0r) ;
+    fj[0][0] -= AM*SR*drdT ;
+    fj[0][4] -= AM*SR*drdp ;
+    fj[1][0] -= AM*SR*Ur.x*drdT;
+    fj[1][1] -= AM*SR*rr ;
+    fj[1][4] -= AM*SR*Ur.x*drdp ;
+    fj[2][0] -= AM*SR*Ur.y*drdT ;
+    fj[2][2] -= AM*SR*rr ;
+    fj[2][4] -= AM*SR*Ur.y*drdp ;
+    fj[3][0] -= AM*SR*Ur.z*drdT ;
+    fj[3][3] -= AM*SR*rr ;
+    fj[3][4] -= AM*SR*Ur.z*drdp ;
+    fj[4][0] -= AM*SR*(drdT*e0r + de0dT*rr) ;
+    fj[4][1] -= AM*SR*rr*Ur.x ;
+    fj[4][2] -= AM*SR*rr*Ur.y ;
+    fj[4][3] -= AM*SR*rr*Ur.z ;
+    fj[4][4] -= AM*SR*drdp*e0r ;
+
+    // Now compute U_star_l and U_star_r
+    const real_fj CR = SR-abs(SM) ;
+    const real_fj CL = SL+abs(SM) ;
+    const real_fj dabsSMdT = (SM>0)?dSMdT:-dSMdT ;
+    const real_fj dabsSMdp = (SM>0)?dSMdp:-dSMdp ;
+    const real_fj dabsSMdu = (SM>0)?dSMdu:-dSMdu ;
+
+    const real_fj rl_star = rl*(SL-utl)/(SL-SM) ;
+    const real_fj rr_star = rr*(SR-utr)/(SR-SM) ;
+    const real_fj drr_stardT = rr_star*(drdT/rr + dSMdT/(SR-SM)) ;
+    const real_fj drr_stardp = rr_star*(drdp/rr + dSMdp/(SR-SM)) ;
+    const real_fj drr_stardu = (rr_star*dSMdu - rr)/(SR-SM);
+    const real_fj drl_stardT = rl_star*dSMdT/(SL-SM) ;
+    const real_fj drl_stardp = rl_star*dSMdp/(SL-SM) ;
+    const real_fj drl_stardu = rl_star*dSMdu/(SL-SM) ;
+    fj[0][0] += AM*(dabsSMdT*rl_star - dabsSMdT*rr_star +
+		    CR*drr_stardT + CL*drl_stardT) ;
+    const real_fj d0term = AM*(dabsSMdu*rl_star - dabsSMdu*rr_star +
+			    CR*drr_stardu + CL*drl_stardu) ;
+    fj[0][1] += an.x*d0term ;
+    fj[0][2] += an.y*d0term ;
+    fj[0][3] += an.z*d0term ;
+
+    fj[0][4] += AM*(dabsSMdp*rl_star - dabsSMdp*rr_star +
+		    CR*drr_stardp + CL*drl_stardp) ;
+
+    //    iflux[0] += AM*(CR*rr_star   + CL*rl_star) ;
+
+    const real_fj pg_star = rl*(utl-SL)*(utl-SM)+pgl ;
+    const real_fj dpg_stardT = rl*(SL-utl)*dSMdT ;
+    const real_fj dpg_stardp = rl*(SL-utl)*dSMdp ;
+    const real_fj dpg_stardu = rl*(SL-utl)*dSMdu ;
+    const real_fj p_star = pg_star+pambient ;
+    const real_fj rul_star = ((SL-utl)*rl*Ul.x + (pg_star-pgl)*an.x)/(SL-SM) ;
+    const real_fj rvl_star = ((SL-utl)*rl*Ul.y + (pg_star-pgl)*an.y)/(SL-SM) ;
+    const real_fj rwl_star = ((SL-utl)*rl*Ul.z + (pg_star-pgl)*an.z)/(SL-SM) ;
+    const real_fj rur_star = ((SR-utr)*rr*Ur.x + (pg_star-pgr)*an.x)/(SR-SM) ;
+    const real_fj rvr_star = ((SR-utr)*rr*Ur.y + (pg_star-pgr)*an.y)/(SR-SM) ;
+    const real_fj rwr_star = ((SR-utr)*rr*Ur.z + (pg_star-pgr)*an.z)/(SR-SM) ;
+    
+    fj[1][0] += AM*(dabsSMdT*rul_star - dabsSMdT*rur_star) ;
+    fj[1][1] += an.x*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][2] += an.y*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][3] += an.z*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][4] += AM*(dabsSMdp*rul_star - dabsSMdp*rur_star) ;
+
+    const real_fj drur_stardT = (Ur.x*(SR-utr)*drdT + an.x*dpg_stardT + 
+			      dSMdT*rur_star)/(SR-SM) ;
+    const real_fj drul_stardT = (an.x*dpg_stardT + dSMdT*rul_star)/(SL-SM) ;
+
+    fj[1][0] += AM*(CR*drur_stardT + CL*drul_stardT) ;
+    
+    const real_fj drur_stardut = (an.x*dpg_stardu -Ur.x*rr +
+			       rur_star*dSMdu)/(SR-SM) ;
+    const real_fj drul_stardut = (an.x*dpg_stardu + rul_star*dSMdu)/(SL-SM) ;
+    fj[1][1] += AM*(an.x*(CR*drur_stardut + CL*drul_stardut)+
+		    CR*(SR-utr)*rr/(SR-SM)) ;
+    fj[1][2] += AM*(an.y*(CR*drur_stardut + CL*drul_stardut)) ;
+    fj[1][3] += AM*(an.z*(CR*drur_stardut + CL*drul_stardut)) ;
+
+    const real_fj drur_stardp = (Ur.x*(SR-utr)*drdp + an.x*dpg_stardp + 
+			      dSMdp*rur_star-an.x)/(SR-SM) ;
+    const real_fj drul_stardp = (an.x*dpg_stardp + dSMdp*rul_star)/(SL-SM) ;
+    fj[1][4] += AM*(CR*drur_stardp + CL*drul_stardp) ;
+    
+    fj[2][0] += AM*(dabsSMdT*rvl_star - dabsSMdT*rvr_star) ;
+    fj[2][1] += an.x*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][2] += an.y*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][3] += an.z*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][4] += AM*(dabsSMdp*rvl_star - dabsSMdp*rvr_star) ;
+
+    const real_fj drvr_stardT = (Ur.y*(SR-utr)*drdT + an.y*dpg_stardT + 
+			      dSMdT*rvr_star)/(SR-SM) ;
+    const real_fj drvl_stardT = (an.y*dpg_stardT + dSMdT*rvl_star)/(SL-SM) ;
+    const real_fj drvr_stardp = (Ur.y*(SR-utl)*drdp + an.y*dpg_stardp + 
+			      dSMdp*rvr_star-an.y)/(SR-SM) ;
+    const real_fj drvl_stardp = (an.y*dpg_stardp + dSMdp*rvr_star)/(SL-SM) ;
+    fj[2][0] += AM*(CR*drvr_stardT + CL*drvl_stardT) ;
+
+    const real_fj drvr_stardut = (an.y*dpg_stardu -Ur.y*rr +
+			       rvr_star*dSMdu)/(SR-SM) ;
+    const real_fj drvl_stardut = (an.y*dpg_stardu + rvl_star*dSMdu)/(SL-SM) ;
+    fj[2][1] += AM*(an.x*(CR*drvr_stardut + CL*drvl_stardut)) ;
+    fj[2][2] += AM*(an.y*(CR*drvr_stardut + CL*drvl_stardut)+
+		    CR*(SR-utr)*rl/(SR-SM)) ; ;
+    fj[2][3] += AM*(an.z*(CR*drvr_stardut + CL*drvl_stardut)) ;
+
+    fj[2][4] += AM*(CR*drvr_stardp + CL*drvl_stardp) ;
+
+    fj[3][0] += AM*(dabsSMdT*rwl_star - dabsSMdT*rwr_star) ;
+    fj[3][1] += an.x*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][2] += an.y*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][3] += an.z*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][4] += AM*(dabsSMdp*rwl_star - dabsSMdp*rwr_star) ;
+
+    const real_fj drwr_stardT = (Ur.z*(SR-utr)*drdT + an.z*dpg_stardT + 
+			      dSMdT*rwr_star)/(SR-SM) ;
+    const real_fj drwl_stardT = (an.z*dpg_stardT + dSMdT*rwl_star)/(SL-SM) ;
+    const real_fj drwr_stardp = (Ur.z*(SR-utr)*drdp + an.z*dpg_stardp + 
+			      dSMdp*rwr_star-an.z)/(SR-SM) ;
+    const real_fj drwl_stardp = (an.z*dpg_stardp + dSMdp*rwl_star)/(SL-SM) ;
+    fj[3][0] += AM*(CR*drwr_stardT + CL*drwl_stardT) ;
+
+    const real_fj drwr_stardut = (an.z*dpg_stardu -Ur.z*rr +
+			       rwr_star*dSMdu)/(SR-SM) ;
+    const real_fj drwl_stardut = (an.z*dpg_stardu + rwl_star*dSMdu)/(SL-SM) ;
+    fj[3][1] += AM*(an.x*(CR*drwr_stardut + CL*drwl_stardut)) ;
+    fj[3][2] += AM*(an.y*(CR*drwr_stardut + CL*drwl_stardut)) ;
+    fj[3][3] += AM*(an.z*(CR*drwr_stardut + CL*drwl_stardut)+
+		    CR*(SR-utr)*rr/(SR-SM)) ; 
+    fj[3][4] += AM*(CR*drwr_stardp + CL*drwl_stardp) ;
+
+    //    iflux[1] += AM*(CR*rur_star  + CL*rul_star) ;
+    //    iflux[2] += AM*(CR*rvr_star  + CL*rvl_star) ;
+    //    iflux[3] += AM*(CR*rwr_star  + CL*rwl_star) ;
+    const real_fj re0l_star = ((SL-utl)*rl*e0l - pl*utl + p_star*SM)/(SL-SM) ;
+    const real_fj re0r_star = ((SR-utr)*rr*e0r - pr*utr + p_star*SM)/(SR-SM) ;
+    const real_fj dre0l_stardT = (dSMdT*(p_star + re0l_star) + 
+			       SM*dpg_stardT)/(SL-SM) ;
+    const real_fj dre0r_stardT =  ((drdT*e0r + de0dT*rr)*(SR - utr) + 
+				dSMdT*(p_star +re0r_star)+
+				SM*dpg_stardT)/(SR-SM) ;
+    const real_fj dre0l_stardp = (dSMdp*(p_star + re0l_star) + 
+				SM*dpg_stardp)/(SL-SM) ;
+    const real_fj dre0r_stardp =  (drdp*(e0r*(SR - utr)) - utr + SM*dpg_stardp + 
+			       dSMdp*(p_star + re0r_star))/(SR-SM) ;
+    const real_fj dre0l_stardux = (dSMdu*p_star + SM*dpg_stardu + 
+				dSMdu*re0l_star)/(SL-SM) ;
+    const real_fj dre0r_stardux = (-(e0r*rr) - pr + SM*dpg_stardu +
+				 dSMdu*p_star +	dSMdu*re0r_star)/(SR-SM) ;
+    fj[4][0] += AM*(dabsSMdT*re0l_star - dabsSMdT*re0r_star +
+    		    CR*dre0r_stardT + CL*dre0l_stardT) ;
+    const real_fj d1term = (dabsSMdu*re0l_star - dabsSMdu*re0r_star +
+		    CR*dre0r_stardux + CL*dre0l_stardux) ;
+    fj[4][1] += AM*(an.x*d1term + CR*rr*Ur.x*(SR-utr)/(SR-SM)) ;
+    fj[4][2] += AM*(an.y*d1term + CR*rr*Ur.y*(SR-utr)/(SR-SM)) ;
+    fj[4][3] += AM*(an.z*d1term + CR*rr*Ur.z*(SR-utr)/(SR-SM)) ;
+
+    fj[4][4] += AM*(dabsSMdp*re0l_star - dabsSMdp*re0r_star +
+    		    CR*dre0r_stardp + CL*dre0l_stardp) ;
+  }
+  // jacobian with respect to left side variables (positive going information)
+  void hllc_fjp(Mat<real_fj> fj,
+		real pgl, real Tl, vect3d Ul,
+		real pgr, real Tr, vect3d Ur,
+		vect3d an, real area,
+		real pambient, real Rt,real gamma, real Us_n) {
+    const real_fj gm1 = gamma-1 ;
+    const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
+    const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
+    const real_fj drdp = 1./(Rt*Tl) ;
+    const real_fj drdT = -rl/Tl ;
+
+    
+    const real_fj h0l = Rt*Tl*gamma/gm1 + 0.5*dot(Ul,Ul) ;
+    const real_fj h0r = Rt*Tr*gamma/gm1 + 0.5*dot(Ur,Ur) ;
+    const real_fj dh0dT = Rt*gamma/gm1 ;
+    // Note dh0du = u
+    const real_fj e0l = h0l-Rt*Tl ;
+    const real_fj e0r = h0r-Rt*Tr ;
+    const real_fj de0dT = dh0dT-Rt ;
+
+    const real_fj srl = sqrt(rl) ;          // coefficents used for
+    const real_fj srr = sqrt(rr) ;          //  Roe averaging
+    const real_fj roe_factor = 1./(srl+srr) ;
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real_fj ut_ = dot(U_,an)-Us_n ; 
+
+    const real_fj h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
+    const real_fj a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
+
+    const real_fj evl_ = ut_-a_ ;
+    const real_fj evr_ = ut_+a_ ;
+
+    const real_fj al = sqrt(gamma*Rt*Tl) ;
+    const real_fj ar = sqrt(gamma*Rt*Tr) ;
+    const real_fj utla = dot(Ul,an) ;
+    const real_fj utra = dot(Ur,an) ;
+    const real_fj utl = utla-Us_n ; 
+    const real_fj utr = utra-Us_n ; 
+
+    // right and left wave speeds
+    const real_fj SR = max(evr_,utr+ar) ;
+    const real_fj SL = min(evl_,utl-al) ;
+    // contact (middle) wave speed
+    const real_fj rbot = 1./(rr*(SR-utr)-rl*(SL-utl)) ;
+    const real_fj SM = (rr*utr*(SR-utr)-rl*utl*(SL-utl)+pgl-pgr)*rbot ;
+    const real_fj dSMdT = -rbot*drdT*(SL-utl)*(utl-SM) ;
+    const real_fj dSMdp = rbot*(1. - drdp*(SL-utl)*(utl - SM)) ;
+    const real_fj dSMdu = rbot*((rl*(2.*utl - SL)) - rl*SM) ;
+
+    const real_fj lmdot = rl*utl ;
+    const real_fj pl = pgl+pambient ;
+    const real_fj pr = pgr+pambient ;
+    const real_fj coef = 0.5*area ;
+    const real_fj AL = coef*((SL > 0) ? (SR < 0 ? 1.:2.) : ( SR < 0 ? 0.:1. )) ;
+    const real_fj AM = coef*((SL > 0 || SR < 0) ? 0.:1.) ;
+
+    // Build up iflux first and F_l + F_r, 
+    //    iflux[0] = AL*lmdot+AR*rmdot ;
+    //    iflux[1] = AL*lmdot*Ul.x + AR*rmdot*Ur.x + an.x*(AL*pgl+AR*pgr) ;
+    //    iflux[2] = AL*lmdot*Ul.y + AR*rmdot*Ur.y + an.y*(AL*pgl+AR*pgr) ;
+    //    iflux[3] = AL*lmdot*Ul.z + AR*rmdot*Ur.z + an.z*(AL*pgl+AR*pgr) ;
+    //    iflux[4] = AL*(lmdot*e0l + pl*utla) + AR*(rmdot*e0r + pr*utra) ;
+
+    fj[0][0] += AL*drdT*utl ;
+    fj[0][1] += AL*rl*an.x ;
+    fj[0][2] += AL*rl*an.y ;
+    fj[0][3] += AL*rl*an.z ;
+    fj[0][4] += AL*drdp*utl ;
+
+    fj[1][0] += AL*drdT*utl*Ul.x ;
+    fj[1][1] += AL*(rl*an.x*Ul.x + lmdot) ;
+    fj[1][2] += AL*rl*an.y*Ul.x ;
+    fj[1][3] += AL*rl*an.z*Ul.x ;
+    fj[1][4] += AL*(drdp*utl*Ul.x + an.x) ;
+
+    fj[2][0] += AL*drdT*utl*Ul.y ;
+    fj[2][1] += AL*rl*an.x*Ul.y ;
+    fj[2][2] += AL*(rl*an.y*Ul.y + lmdot) ;
+    fj[2][3] += AL*rl*an.z*Ul.y ;
+    fj[2][4] += AL*(drdp*utl*Ul.y + an.y) ;
+
+    fj[3][0] += AL*drdT*utl*Ul.z ;
+    fj[3][1] += AL*rl*an.x*Ul.z ;
+    fj[3][2] += AL*rl*an.y*Ul.z ;
+    fj[3][3] += AL*(rl*an.z*Ul.z + lmdot) ;
+    fj[3][4] += AL*(drdp*utl*Ul.z + an.z) ;
+
+    fj[4][0] += AL*(drdT*utl*e0l + lmdot*de0dT) ;
+    fj[4][1] += AL*(lmdot*Ul.x + an.x*(rl*e0l + pl)) ;
+    fj[4][2] += AL*(lmdot*Ul.y + an.y*(rl*e0l + pl)) ;
+    fj[4][3] += AL*(lmdot*Ul.z + an.z*(rl*e0l + pl)) ;
+    fj[4][4] += AL*(drdp*e0l*utl + utla) ;
+    // subtract off SL*Ul and SR*Ur
+    //    iflux[0] -= AM*(SL*rl + SR*rr) ;
+    //    iflux[1] -= AM*(SL*rl*Ul.x + SR*rr*Ur.x) ;
+    //    iflux[2] -= AM*(SL*rl*Ul.y + SR*rr*Ur.y) ;
+    //    iflux[3] -= AM*(SL*rl*Ul.z + SR*rr*Ur.z) ;
+    //    iflux[4] -= AM*(SL*rl*e0l  + SR*rr*e0r) ;
+    fj[0][0] -= AM*SL*drdT ;
+    fj[0][4] -= AM*SL*drdp ;
+    fj[1][0] -= AM*SL*Ul.x*drdT;
+    fj[1][1] -= AM*SL*rl ;
+    fj[1][4] -= AM*SL*Ul.x*drdp ;
+    fj[2][0] -= AM*SL*Ul.y*drdT ;
+    fj[2][2] -= AM*SL*rl ;
+    fj[2][4] -= AM*SL*Ul.y*drdp ;
+    fj[3][0] -= AM*SL*Ul.z*drdT ;
+    fj[3][3] -= AM*SL*rl ;
+    fj[3][4] -= AM*SL*Ul.z*drdp ;
+    fj[4][0] -= AM*SL*(drdT*e0l + de0dT*rl) ;
+    fj[4][1] -= AM*SL*rl*Ul.x ;
+    fj[4][2] -= AM*SL*rl*Ul.y ;
+    fj[4][3] -= AM*SL*rl*Ul.z ;
+    fj[4][4] -= AM*SL*drdp*e0l ;
+
+    // Now compute U_star_l and U_star_r
+    const real_fj CR = SR-abs(SM) ;
+    const real_fj CL = SL+abs(SM) ;
+    const real_fj dabsSMdT = (SM>0)?dSMdT:-dSMdT ;
+    const real_fj dabsSMdp = (SM>0)?dSMdp:-dSMdp ;
+    const real_fj dabsSMdu = (SM>0)?dSMdu:-dSMdu ;
+
+    const real_fj rl_star = rl*(SL-utl)/(SL-SM) ;
+    const real_fj rr_star = rr*(SR-utr)/(SR-SM) ;
+    const real_fj drl_stardT = rl_star*(drdT/rl + dSMdT/(SL-SM)) ;
+    const real_fj drl_stardp = rl_star*(drdp/rl + dSMdp/(SL-SM)) ;
+    const real_fj drl_stardu = rl_star*dSMdu/(SL-SM) -rl/(SL-SM);
+    const real_fj drr_stardT = rr_star*dSMdT/(SR-SM) ;
+    const real_fj drr_stardp = rr_star*dSMdp/(SR-SM) ;
+    const real_fj drr_stardu = rr_star*dSMdu/(SR-SM) ;
+    fj[0][0] += AM*(dabsSMdT*rl_star - dabsSMdT*rr_star +
+		    CR*drr_stardT + CL*drl_stardT) ;
+    const real_fj d0term = AM*(dabsSMdu*rl_star - dabsSMdu*rr_star +
+			    CR*drr_stardu + CL*drl_stardu) ;
+    fj[0][1] += an.x*d0term ;
+    fj[0][2] += an.y*d0term ;
+    fj[0][3] += an.z*d0term ;
+
+    fj[0][4] += AM*(dabsSMdp*rl_star - dabsSMdp*rr_star +
+		    CR*drr_stardp + CL*drl_stardp) ;
+
+    //    iflux[0] += AM*(CR*rr_star   + CL*rl_star) ;
+
+    const real_fj pg_star = rl*(utl-SL)*(utl-SM)+pgl ;
+    const real_fj dpg_stardT = (utl-SL)*(drdT*(utl-SM) - dSMdT*rl) ;
+    const real_fj dpg_stardp = (utl-SL)*(drdp*(utl-SM) - dSMdp*rl) + 1. ;
+    const real_fj dpg_stardu = rl*(utl-SM+(1.-dSMdu)*(utl-SL)) ;
+    const real_fj p_star = pg_star+pambient ;
+    const real_fj rul_star = ((SL-utl)*rl*Ul.x + (pg_star-pgl)*an.x)/(SL-SM) ;
+    const real_fj rvl_star = ((SL-utl)*rl*Ul.y + (pg_star-pgl)*an.y)/(SL-SM) ;
+    const real_fj rwl_star = ((SL-utl)*rl*Ul.z + (pg_star-pgl)*an.z)/(SL-SM) ;
+    const real_fj rur_star = ((SR-utr)*rr*Ur.x + (pg_star-pgr)*an.x)/(SR-SM) ;
+    const real_fj rvr_star = ((SR-utr)*rr*Ur.y + (pg_star-pgr)*an.y)/(SR-SM) ;
+    const real_fj rwr_star = ((SR-utr)*rr*Ur.z + (pg_star-pgr)*an.z)/(SR-SM) ;
+    
+    fj[1][0] += AM*(dabsSMdT*rul_star - dabsSMdT*rur_star) ;
+    fj[1][1] += an.x*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][2] += an.y*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][3] += an.z*AM*(dabsSMdu*rul_star - dabsSMdu*rur_star) ;
+    fj[1][4] += AM*(dabsSMdp*rul_star - dabsSMdp*rur_star) ;
+
+    const real_fj drur_stardT = (an.x*dpg_stardT + dSMdT*rur_star)/(SR-SM) ;
+    const real_fj drul_stardT = (Ul.x*(SL-utl)*drdT + an.x*dpg_stardT + 
+			      dSMdT*rul_star)/(SL-SM) ;
+    fj[1][0] += AM*(CR*drur_stardT + CL*drul_stardT) ;
+    
+    const real_fj drur_stardut = (an.x*dpg_stardu + rur_star*dSMdu)/(SR-SM) ;
+    const real_fj drul_stardut = (an.x*dpg_stardu -Ul.x*rl +
+			       rul_star*dSMdu)/(SL-SM) ;
+    fj[1][1] += AM*(an.x*(CR*drur_stardut + CL*drul_stardut)+
+		    CL*(SL-utl)*rl/(SL-SM)) ;
+    fj[1][2] += AM*(an.y*(CR*drur_stardut + CL*drul_stardut)) ;
+    fj[1][3] += AM*(an.z*(CR*drur_stardut + CL*drul_stardut)) ;
+
+    const real_fj drur_stardp = (an.x*dpg_stardp + dSMdp*rur_star)/(SR-SM) ;
+    const real_fj drul_stardp = (Ul.x*(SL-utl)*drdp + an.x*dpg_stardp + 
+			      dSMdp*rul_star-an.x)/(SL-SM) ;
+    fj[1][4] += AM*(CR*drur_stardp + CL*drul_stardp) ;
+    
+    fj[2][0] += AM*(dabsSMdT*rvl_star - dabsSMdT*rvr_star) ;
+    fj[2][1] += an.x*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][2] += an.y*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][3] += an.z*AM*(dabsSMdu*rvl_star - dabsSMdu*rvr_star) ;
+    fj[2][4] += AM*(dabsSMdp*rvl_star - dabsSMdp*rvr_star) ;
+
+    const real_fj drvr_stardT = (an.y*dpg_stardT + dSMdT*rvr_star)/(SR-SM) ;
+    const real_fj drvl_stardT = (Ul.y*(SL-utl)*drdT + an.y*dpg_stardT + 
+			      dSMdT*rvl_star)/(SL-SM) ;
+    const real_fj drvr_stardp = (an.y*dpg_stardp + dSMdp*rvr_star)/(SR-SM) ;
+    const real_fj drvl_stardp = (Ul.y*(SL-utl)*drdp + an.y*dpg_stardp + 
+			      dSMdp*rvl_star-an.y)/(SL-SM) ;
+    fj[2][0] += AM*(CR*drvr_stardT + CL*drvl_stardT) ;
+
+    const real_fj drvr_stardut = (an.y*dpg_stardu + rvr_star*dSMdu)/(SR-SM) ;
+    const real_fj drvl_stardut = (an.y*dpg_stardu -Ul.y*rl +
+			       rvl_star*dSMdu)/(SL-SM) ;
+    fj[2][1] += AM*(an.x*(CR*drvr_stardut + CL*drvl_stardut)) ;
+    fj[2][2] += AM*(an.y*(CR*drvr_stardut + CL*drvl_stardut)+
+		    CL*(SL-utl)*rl/(SL-SM)) ; ;
+    fj[2][3] += AM*(an.z*(CR*drvr_stardut + CL*drvl_stardut)) ;
+
+    fj[2][4] += AM*(CR*drvr_stardp + CL*drvl_stardp) ;
+
+    fj[3][0] += AM*(dabsSMdT*rwl_star - dabsSMdT*rwr_star) ;
+    fj[3][1] += an.x*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][2] += an.y*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][3] += an.z*AM*(dabsSMdu*rwl_star - dabsSMdu*rwr_star) ;
+    fj[3][4] += AM*(dabsSMdp*rwl_star - dabsSMdp*rwr_star) ;
+
+    const real_fj drwr_stardT = (an.z*dpg_stardT + dSMdT*rwr_star)/(SR-SM) ;
+    const real_fj drwl_stardT = (Ul.z*(SL-utl)*drdT + an.z*dpg_stardT + 
+			      dSMdT*rwl_star)/(SL-SM) ;
+    const real_fj drwr_stardp = (an.z*dpg_stardp + dSMdp*rwr_star)/(SR-SM) ;
+    const real_fj drwl_stardp = (Ul.z*(SL-utl)*drdp + an.z*dpg_stardp + 
+			      dSMdp*rwl_star-an.z)/(SL-SM) ;
+    fj[3][0] += AM*(CR*drwr_stardT + CL*drwl_stardT) ;
+
+    const real_fj drwr_stardut = (an.z*dpg_stardu + rwr_star*dSMdu)/(SR-SM) ;
+    const real_fj drwl_stardut = (an.z*dpg_stardu -Ul.z*rl +
+			       rwl_star*dSMdu)/(SL-SM) ;
+    fj[3][1] += AM*(an.x*(CR*drwr_stardut + CL*drwl_stardut)) ;
+    fj[3][2] += AM*(an.y*(CR*drwr_stardut + CL*drwl_stardut)) ;
+    fj[3][3] += AM*(an.z*(CR*drwr_stardut + CL*drwl_stardut)+
+		    CL*(SL-utl)*rl/(SL-SM)) ; 
+    fj[3][4] += AM*(CR*drwr_stardp + CL*drwl_stardp) ;
+      //    		    CR*dre0r_stardT + CL*dre0l_stardT) ;
+    //    iflux[1] += AM*(CR*rur_star  + CL*rul_star) ;
+    //    iflux[2] += AM*(CR*rvr_star  + CL*rvl_star) ;
+    //    iflux[3] += AM*(CR*rwr_star  + CL*rwl_star) ;
+    const real_fj re0l_star = ((SL-utl)*rl*e0l - pl*utl + p_star*SM)/(SL-SM) ;
+    const real_fj re0r_star = ((SR-utr)*rr*e0r - pr*utr + p_star*SM)/(SR-SM) ;
+    const real_fj dre0l_stardT =  ((drdT*e0l + de0dT*rl)*(SL - utl) + 
+				dSMdT*(p_star +re0l_star)+
+				SM*dpg_stardT)/(SL-SM) ;
+    const real_fj dre0r_stardT = (dSMdT*(p_star + re0r_star) + 
+			       SM*dpg_stardT)/(SR-SM) ;
+    const real_fj dre0l_stardp = (drdp*(e0l*(SL - utl)) - utl + SM*dpg_stardp + 
+			       dSMdp*(p_star + re0l_star))/(SL-SM) ;
+    const real_fj dre0r_stardp =  (dSMdp*(p_star + re0r_star) + 
+				SM*dpg_stardp)/(SR-SM) ;
+    const real_fj dre0l_stardux = (-(e0l*rl) - pl + SM*dpg_stardu +
+				 dSMdu*p_star +	dSMdu*re0l_star)/(SL-SM) ;
+    const real_fj dre0r_stardux = (dSMdu*p_star + SM*dpg_stardu + 
+				dSMdu*re0r_star)/(SR-SM) ;
+    fj[4][0] += AM*(dabsSMdT*re0l_star - dabsSMdT*re0r_star +
+    		    CR*dre0r_stardT + CL*dre0l_stardT) ;
+    const real_fj d1term = (dabsSMdu*re0l_star - dabsSMdu*re0r_star +
+		    CR*dre0r_stardux + CL*dre0l_stardux) ;
+    fj[4][1] += AM*(an.x*d1term + CL*rl*Ul.x*(SL-utl)/(SL-SM)) ;
+    fj[4][2] += AM*(an.y*d1term + CL*rl*Ul.y*(SL-utl)/(SL-SM)) ;
+    fj[4][3] += AM*(an.z*d1term + CL*rl*Ul.z*(SL-utl)/(SL-SM)) ;
+
+    fj[4][4] += AM*(dabsSMdp*re0l_star - dabsSMdp*re0r_star +
+    		    CR*dre0r_stardp + CL*dre0l_stardp) ;
+  }
+
+  $rule pointwise(iflux <- 
+		  leftv3d(u),leftsP(temperature,Zero),
+		  leftsP(gagePressure,minPg),
+		  rightv3d(u),rightsP(temperature,Zero),
+		  rightsP(gagePressure,minPg),
+		  area,Pambient,Rtilde,gamma,us_n),
+    constraint((cl,cr)->(u,temperature,gagePressure)) {
+    hllc_flux($iflux,
+	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+	      $leftv3d(u),
+	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+	      $rightv3d(u),
+	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+  }
+
+  $rule apply(fjp <- 
+		  leftv3d(u),leftsP(temperature,Zero),
+		  leftsP(gagePressure,minPg),
+		  rightv3d(u),rightsP(temperature,Zero),
+		  rightsP(gagePressure,minPg),
+	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
+    constraint((cl,cr)->(u,temperature,gagePressure)) {
+    hllc_fjp($fjp,
+	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+	      $leftv3d(u),
+	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+	      $rightv3d(u),
+	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+  }
+  $rule apply(fjm <- 
+		  leftv3d(u),leftsP(temperature,Zero),
+		  leftsP(gagePressure,minPg),
+		  rightv3d(u),rightsP(temperature,Zero),
+		  rightsP(gagePressure,minPg),
+	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
+    constraint((cl,cr)->(u,temperature,gagePressure)) {
+    hllc_fjm($fjm,
+	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+	      $leftv3d(u),
+	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+	      $rightv3d(u),
+	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+  }
+}

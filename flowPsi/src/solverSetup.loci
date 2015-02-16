@@ -1,0 +1,64 @@
+#include <Loci.h>
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  $rule unit(src),constraint(geom_cells) {
+    for(int i=0;i<5;++i)
+      $src[i] = 0 ;
+  }
+
+  // Inviscid flux contributions for interior faces
+  $rule apply((cl,cr)->src<-iflux)[Loci::Summation], 
+      constraint((cl,cr)->geom_cells) {
+    $cl->$src -= $iflux ;
+    $cr->$src += $iflux ;
+  }
+
+  // Inviscid flux contributions for boundary faces
+  $rule apply(cl->src<-iflux)[Loci::Summation],constraint(boundary_faces) {
+    $cl->$src -= $iflux ;
+  }
+  
+  $rule default(urelax), comments("under relaxation factor used to compute local timestep based on estimated change in temperature and pressure") {
+    $urelax = 0.2 ;
+  }
+
+  $rule default(dtmax), comments("setting of maximum timestep") {
+    $dtmax.val = 1.0 ;
+  }
+  // Compute local timestep by using linearization of change in pressure and temperature by
+  // urelax factor
+  // using  \delta q = \delta t * \partial q/\partial Q src
+  $rule pointwise(dtau<-vol,src,temperature,gagePressure,u,gamma,urelax,dtmax,Pambient,Rtilde) {
+    real dt = $dtmax ;
+    const real q = 0.5*dot($u,$u) ;
+    const real p = $gagePressure+$Pambient ;
+    const real T = $temperature ;
+    const real gm1 = $gamma -1. ;
+    const real coeft = T/(p*gm1) ;
+    const real coeft2 = T*$Rtilde*gm1 ;
+    const real rvol = 1./$vol ;
+    double factor = rvol*(q*$src[0]-$u.x*$src[1]-$u.y*$src[2]-$u.z*$src[3]+
+			  $src[4]) ;
+    const real trate = coeft*(factor - coeft2*$src[0]) ;
+    dt = min(dt,$urelax*T/(fabs(trate)+1e-30)) ;
+    const real prate = factor/gm1 ;
+    dt = min(dt,$urelax*p/(fabs(prate)+1e-30)) ;
+    $dtau = dt ;
+  }
+
+  // Compute rhs of Newton step 
+  $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtau{n,it},vol{n,it},Pambient,Rtilde,gamma),
+    inplace(rhs{n,it}|src{n,it}) {
+    const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
+    const real rhonp = ($gagePressure{n,it}+$Pambient)/($Rtilde*$temperature{n,it}) ;
+    const real e0n = $Rtilde*$temperature{n}/($gamma-1.) + .5*dot($u{n},$u{n}) ;
+    const real e0np = $Rtilde*$temperature{n,it}/($gamma-1.) + .5*dot($u{n,it},$u{n,it}) ;
+    const real rdtvol = $vol{n,it}/$dtau{n,it} ;
+    $rhs{n,it}[0] = $src{n,it}[0] - (rhonp-rhon)*rdtvol ;
+    $rhs{n,it}[1] = $src{n,it}[1] - (rhonp*$u{n,it}.x - rhon*$u{n}.x)*rdtvol ;
+    $rhs{n,it}[2] = $src{n,it}[2] - (rhonp*$u{n,it}.y - rhon*$u{n}.y)*rdtvol ;
+    $rhs{n,it}[3] = $src{n,it}[3] - (rhonp*$u{n,it}.z - rhon*$u{n}.z)*rdtvol ;
+    $rhs{n,it}[4] = $src{n,it}[4] - (rhonp*e0np - rhon*e0n)*rdtvol ;
+  }
+}

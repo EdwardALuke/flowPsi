@@ -1,0 +1,39 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+
+$include "flowPsi.lh"
+
+
+namespace flowPsi {
+
+  // Initial conditions for general cells
+  $type nuTilde_ic store<real> ;
+  $type icRegionInfo blackbox<ICparsedInitRegion> ;
+
+//  $rule pointwise(nuTilde_ic<-icRegionInfo,cellcenter),
+//    constraint(geom_cells) {
+//    double nu_t ;
+//    
+//    $icRegionInfo.defaultState.get_nu_t(nu_t) ;
+//
+//    $nuTilde_ic = nu_t ;
+//  }
+
+  $rule pointwise(nuTilde_ic<-cellcenter) {
+    $nuTilde_ic = 1e-6 ;
+  }
+
+  $type rho_ic store<real> ;
+  $type tmuu_ic store<real> ;
+
+  $rule pointwise(ic_file::nuTilde_ic<-rho_ic,tmuu_ic),
+    constraint(geom_cells,rho_ic,tmuu_ic) {
+    $nuTilde_ic = $tmuu_ic/$rho_ic ; // rho*nu_t
+  }
+
+}
+
+
+

@@ -1,0 +1,231 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "kOmega_param.h"
+
+$include "flowPsi.lh"
+$include "kOmega.lh"
+
+namespace flowPsi {
+  $type MS_LG_3D Constraint ;
+  $type multi_scale param<std::string> ;
+
+  $rule constraint(MS_LG_3D<-multi_scale) {
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+         
+    $MS_LG_3D = EMPTY ;
+    if(!(len==0 || is2d))
+      $MS_LG_3D = $*multi_scale.domain() ;
+  }
+
+  $type MS_LG_2DX Constraint ;
+  $type MS_LG_2DY Constraint ;
+  $type MS_LG_2DZ Constraint ;
+
+  $rule constraint(MS_LG_2DX<-multi_scale) {
+    $MS_LG_2DX = EMPTY ;
+    
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'X' ||
+                $multi_scale[len-1] == 'x'))
+      $MS_LG_2DX = $*multi_scale.domain() ;
+  }
+
+  $rule constraint(MS_LG_2DY<-multi_scale) {
+    $MS_LG_2DY = EMPTY ;
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'Y' ||
+                $multi_scale[len-1] == 'y'))
+      $MS_LG_2DY = $*multi_scale.domain() ;
+  }
+
+  $rule constraint(MS_LG_2DZ<-multi_scale) {
+    $MS_LG_2DZ = EMPTY ;
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'Z' ||
+                $multi_scale[len-1] == 'z'))
+      $MS_LG_2DZ = $*multi_scale.domain() ;
+  }
+
+  $type LG store<real> ;
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_3D) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *li=$upper.begin();li!=$upper.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *ui=$lower.begin();ui!=$lower.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DX) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DY) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DZ) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $type sst_tmuu store<real> ;
+  $type bF3 store<real> ;
+  $rule pointwise(sst_tmuu<-rho,k,w,sst1,bF2,bF3,strainRate) {
+    const real S = $strainRate ;
+    $sst_tmuu = $rho*$sst1.a1*$k/max($sst1.a1*$w,S*$bF2*$bF3) ;
+  }
+
+  $rule pointwise(wilcox08::sst_tmuu<-rho,k,w,sst1,strainRate,divu),
+    constraint(k,w,Wilcox08Model) {
+    const real clim = 7./8. ;
+    const real S2 = $strainRate*$strainRate ;
+    const real Sbar = S2 - 2./3.*$divu*$divu ;
+    const real wbar = max($w,clim*sqrt(Sbar/$sst1.betas)) ;
+    $sst_tmuu = $rho*$k/(wbar+EPSILON) ;
+  }
+
+  $type LT store<real> ;
+  $rule pointwise(LT<-sst1,fBetaS,sst_tmuu,vortMag,k,w,rho),
+    constraint(k,w,MS_SST_BSL_KW) {
+    const real nut_rans = $sst_tmuu/$rho ;
+    const real BetaS = $sst1.betas*$fBetaS ;
+
+    $LT = max(6.0*sqrt(nut_rans/($vortMag+EPSILON)),
+	      sqrt($k)/(BetaS*$w)) ;
+  }
+
+  $type fd store<real> ;
+
+  $rule pointwise(fd<-LT,LG) {
+    const real lenrat = pow(0.5*$LT/$LG,4.0/3.0) ;
+    const real blending = 1.0/(1.0+lenrat) ;
+    $fd = (1.0+tanh(2.0*pi*(blending-0.5)))/2.0 ;
+  }
+
+  $type les_tmuu store<real> ;
+  $type C_LES_NN param<real> ;
+
+  $rule default(C_LES_NN),comments("Nichols & Nelson LES coefficient") {
+    $C_LES_NN = 0.0854 ;
+  }
+  
+  $rule pointwise(les_tmuu<-fd,LG,sst_tmuu,rho,k,C_LES_NN),
+    constraint(k,fd,LG,MS_SST_BSL_KW) {
+    const real k_les = $k*$fd ;
+    const real nut_rans = $sst_tmuu/$rho ;
+    $les_tmuu = $rho*min($C_LES_NN*$LG*sqrt(k_les),nut_rans) ;
+  }
+
+  $rule pointwise(ms::kw::tmuu<-les_tmuu,sst_tmuu,fd),
+    constraint(k,fd,sst_tmuu,MS_SST_BSL_KW) {
+    $tmuu = $fd*$sst_tmuu + (1.0-$fd)*$les_tmuu ;
+  }
+  $type kw_tmuu store<real> ;
+  $rule pointwise(ms::wilcox08::kw_tmuu<-les_tmuu,sst_tmuu,fd),
+    constraint(k,fd,sst_tmuu,MS_SST_BSL_KW_OLD) {
+    $kw_tmuu = $fd*$sst_tmuu + (1.0-$fd)*$les_tmuu ;
+  }
+
+}

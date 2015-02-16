@@ -1,0 +1,390 @@
+#include <Loci.h>
+#include <Tools/tools.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  $type flowRegime param<string> ;
+  $rule default(flowRegime), comments("Select flow regime to simulate, may be either inviscid, laminar, or turbulent") {
+    $flowRegime = "not-set" ;
+  }
+
+  $type LaminarSimulation Constraint ;
+  $type TurbulentSimulation Constraint ;
+  $type ViscousSimulation Constraint ;
+  $rule constraint(LaminarSimulation,TurbulentSimulation,ViscousSimulation<-
+		   flowRegime) {
+    $LaminarSimulation = EMPTY ;
+    $TurbulentSimulation = EMPTY ;
+    $ViscousSimulation = EMPTY ;
+    if($flowRegime == "inviscid") {
+      // Everything is set
+    } else if($flowRegime == "laminar") {
+      $LaminarSimulation = ~EMPTY ;
+      $ViscousSimulation = ~EMPTY ;
+    } else if($flowRegime == "turbulent") {
+      $TurbulentSimulation = ~EMPTY ;
+      $ViscousSimulation = ~EMPTY ;
+    } else {
+      if(Loci::MPI_rank == 0) {
+	std::cerr << "Unknown setting for flowRegime!  flowRegime = '" << $flowRegime <<"'" << std::endl ;
+      }
+      Loci::Abort() ;
+    }
+  }
+
+  class sutherol : public options_list {
+  public:
+    sutherol() : options_list("a1:a2:a3:k1:k2:k3") {}
+  } ;
+  
+  struct Sutherland_param { 
+    double a1,a2,a3 ; //coefficients in Sutherland transport model
+    double k1,k2,k3 ; // Conductivity Parameters
+    Sutherland_param() {
+      a1 = 1.458e-6 ; // Sutherland Coefficients for air
+      a2 = 1.5 ;
+      a3 = 110.4 ;
+      k1 = 2.495e-3 ;
+      k2 = 1.5 ;
+      k3 = 194.0 ;
+    }
+    std::istream &Input(std::istream &s)  {
+      sutherol finput ;
+      s >> finput ;
+      a1=1.458e-6 ; a2=1.5 ; a3=110.4 ;
+      if(finput.optionExists("a1")) finput.getOption("a1",a1) ;
+      if(finput.optionExists("a2")) finput.getOption("a2",a2) ;
+      if(finput.optionExists("a3")) finput.getOption("a3",a3) ;
+      k1=2.495e-3 ;  k2=1.5 ;   k3=194.0 ;
+      if(finput.optionExists("k1")) finput.getOption("k1",k1) ;
+      if(finput.optionExists("k2")) finput.getOption("k2",k2) ;
+      if(finput.optionExists("k3")) finput.getOption("k3",k3) ;
+      return s ;
+    }
+    std::ostream &Print(std::ostream &s) const {
+      s<<"<a1=" <<a1<<", a2=" <<a2<<",a3= "<<a3<<
+        ",k1="<<k1<<",k2="<<k2<<",k3="<<k3<<">"<<std::endl ;
+      return s ;
+    }
+  } ;
+  
+}
+namespace Loci {
+  template<> struct data_schema_traits<flowPsi::Sutherland_param> {
+    typedef IDENTITY_CONVERTER Schema_Converter ;
+    static DatatypeP get_type() {
+      CompoundDatatypeP ct = CompoundFactory(flowPsi::Sutherland_param()) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,a1) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,a2) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,a3) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,k1) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,k2) ;
+      LOCI_INSERT_TYPE(ct,flowPsi::Sutherland_param,k3) ;
+      return DatatypeP(ct) ;
+    }
+  } ;
+
+}
+namespace flowPsi {
+  $type sutherlandParameters param<Sutherland_param> ;
+  $rule default(sutherlandParameters),comments("Use to change parameters for sutherland law for viscosity and conductivity") {
+  }
+
+  $rule pointwise(mu<-temperature,sutherlandParameters) {
+    const real T = $temperature ;
+    const real a1 = $sutherlandParameters.a1 ;
+    const real a2 = $sutherlandParameters.a2 ;
+    const real a3 = $sutherlandParameters.a3 ;
+    $mu = a1*pow(T,a2)/(T+a3) ;
+  }
+
+  $rule pointwise(mu_f<-temperature_f,ci->vol,sutherlandParameters) {
+    const real T = $temperature_f ;
+    const real a1 = $sutherlandParameters.a1 ;
+    const real a2 = $sutherlandParameters.a2 ;
+    const real a3 = $sutherlandParameters.a3 ;
+    $mu_f = a1*pow(T,a2)/(T+a3) ;
+  }
+  
+  $rule pointwise(mu_f<-(cr,cl)->(mu,vol)) {
+    const real vl = $cl->$vol ;
+    const real vr = $cr->$vol ;
+    $mu_f = (vl*$cr->$mu+vr*$cl->$mu)/(vl+vr) ;
+  }    
+
+  $rule pointwise(kconduct<-temperature,sutherlandParameters) {
+    const real T = $temperature ;
+    const real k1 = $sutherlandParameters.k1 ;
+    const real k2 = $sutherlandParameters.k2 ;
+    const real k3 = $sutherlandParameters.k3 ;
+    $kconduct = k1*pow(T,k2)/(T+k3) ;
+  }
+
+  $rule pointwise(kconduct_f<-temperature_f,ci->vol,sutherlandParameters) {
+    const real T = $temperature_f ;
+    const real k1 = $sutherlandParameters.k1 ;
+    const real k2 = $sutherlandParameters.k2 ;
+    const real k3 = $sutherlandParameters.k3 ;
+    $kconduct_f = k1*pow(T,k2)/(T+k3) ;
+  }
+  
+  $rule pointwise(kconduct_f<-(cr,cl)->(kconduct,vol)) {
+    const real vl = $cl->$vol ;
+    const real vr = $cr->$vol ;
+    $kconduct_f = (vl*$cr->$kconduct+vr*$cl->$kconduct)/(vl+vr) ;
+  }    
+
+  $rule pointwise(muTotal<-mu),inplace(muTotal|mu),constraint(LaminarSimulation,mu), prelude {} ;
+  
+$rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulation,mu) {
+    $muTotal = $mu + $tmu ;
+  }
+
+  $rule pointwise(muTotal_f<-mu_f),inplace(muTotal_f|mu_f),constraint(LaminarSimulation,area), prelude {} ;
+
+  $rule pointwise(muTotal_f<-mu_f,tmu_f),inplace(muTotal_f|mu_f),constraint(TurbulentSimulation,area) {
+    $muTotal_f = $mu_f + $tmu_f ;
+  }
+
+  $rule pointwise(tmu_f<-(cr,cl)->(vol,tmu)) { 
+    $tmu_f=($cr->$tmu*$cl->$vol+$cl->$tmu*$cr->$vol)/($cr->$vol+$cl->$vol) ;
+  }
+
+  $rule pointwise(tmu_f<-ci->tmu) { 
+      $tmu_f = $ci->$tmu ;
+  }
+  $rule pointwise(noslip::tmu_f),constraint(viscousWall_BC) {
+    $tmu_f = 0.0 ;
+  }
+
+  $rule pointwise(u_f<-(cl,cr)->(vol,u)) {
+    const real vl = $cl->$vol ;
+    const real vr = $cr->$vol ;
+    const real factor = 1./(vl+vr) ;
+    $u_f = factor*(vl*$cr->$u+vr*$cl->$u) ;
+  }
+
+  $rule pointwise(rho_f<-(cl,cr)->(vol,rho)) {
+    const real vl = $cl->$vol ;
+    const real vr = $cr->$vol ;
+    const real factor = 1./(vl+vr) ;
+    $rho_f = factor*(vl*$cr->$rho+vr*$cl->$rho) ;
+  }
+
+  $rule pointwise(tau<-gradv3d_f(u),muTotal_f),constraint(ViscousSimulation,area) {
+    real mu_total = $muTotal_f ;
+
+    real dudx = $gradv3d_f(u).x.x ;
+    real dvdy = $gradv3d_f(u).y.y ;
+    real dwdz = $gradv3d_f(u).z.z ;
+    real dvdx = $gradv3d_f(u).y.x ;
+    real dwdx = $gradv3d_f(u).z.x ;
+    real dwdy = $gradv3d_f(u).z.y ;
+    real dudy = $gradv3d_f(u).x.y ;
+    real dudz = $gradv3d_f(u).x.z ;
+    real dvdz = $gradv3d_f(u).y.z ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    $tau.xx = 2.0*mu_total*(dudx-divm) ;
+    $tau.yy = 2.0*mu_total*(dvdy-divm) ;
+    $tau.zz = 2.0*mu_total*(dwdz-divm) ;
+
+    $tau.xy = mu_total*(dudy+dvdx) ;
+    $tau.xz = mu_total*(dudz+dwdx) ;
+    $tau.yz = mu_total*(dvdz+dwdy) ;
+  }
+
+  $rule pointwise(axi::tau<-gradv3d_f(u),muTotal_f,u_f,facecenter),
+    constraint(axisymmetricCoordinateModel,area,ViscousSimulation) {
+    real mu_total = $muTotal_f ;
+
+    real y = $facecenter.y+1e-33 ;
+    real v = $u_f.y ;
+    real w = $u_f.z ;
+
+    real dudx = $gradv3d_f(u).x.x ;
+    real dvdy = $gradv3d_f(u).y.y ;
+    real dwdz = v/y ;
+    real dvdx = $gradv3d_f(u).y.x ;
+    real dwdx = $gradv3d_f(u).z.x ;
+    real dwdy = $gradv3d_f(u).z.y-w/y ;
+    real dudy = $gradv3d_f(u).x.y ;
+    real dudz = 0.0 ;
+    real dvdz = 0.0 ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    $tau.xx = 2.0*mu_total*(dudx-divm) ;
+    $tau.yy = 2.0*mu_total*(dvdy-divm) ;
+    $tau.zz = 2.0*mu_total*(dwdz-divm) ;
+
+    $tau.xy = mu_total*(dudy+dvdx) ;
+    $tau.xz = mu_total*(dudz+dwdx) ;
+    $tau.yz = mu_total*(dvdz+dwdy) ;
+  }
+
+  $rule default(turbulentPrandtlNumber) {
+    $turbulentPrandtlNumber = 0.9 ;
+  }
+
+  $type kconductTotal store<real> ;
+  $rule pointwise(kconductTotal<-kconduct_f),inplace(kconductTotal|kconduct_f),constraint(area,LaminarSimulation),prelude {} ;
+  
+  $rule pointwise(kconductTotal<-kconduct_f,Cp,tmu_f,turbulentPrandtlNumber),
+    inplace(kconductTotal|kconduct_f),constraint(area,TurbulentSimulation) {
+    $kconductTotal = $kconduct_f +  $tmu_f*$Cp/$turbulentPrandtlNumber ;
+  }
+  $rule pointwise(vflux<-area,tau,u_f, grads_f(temperature),kconductTotal),
+      constraint(area) {
+    const vect3d an = $area.n ;
+    const real sada = $area.sada ;
+    $vflux[0] = ($tau.xx*an.x + $tau.xy*an.y + $tau.xz*an.z)*sada ;
+    $vflux[1] = ($tau.xy*an.x + $tau.yy*an.y + $tau.yz*an.z)*sada ;
+    $vflux[2] = ($tau.xz*an.x + $tau.yz*an.y + $tau.zz*an.z)*sada ;
+    //total work done by viscous shear (tau),including heat dissipation
+    //and deformation work
+    $vflux[3] =($u_f.x*$vflux[0]+$u_f.y*$vflux[1]+$u_f.z*$vflux[2]) ;
+    //conduction term in the energy part of viscous flux
+    const real ktotal = $kconductTotal ;
+    $vflux[3] += dot($grads_f(temperature),an)*ktotal*sada ;
+  }
+  
+  $rule pointwise(sym::vflux<-area),constraint(symmetry_BC) {
+    for(int i=0;i<4;++i)
+      $vflux[i] = 0 ;
+  }
+  //Add viscous flux at face fc to cl[fc] cells.
+  $rule apply(cl->src<-vflux)[Loci::Summation],
+    constraint(cl->geom_cells,ViscousSimulation) {
+    for(int i=0;i<4;++i)
+      $cl->$src[i+1] += $vflux[i] ;
+  }
+
+  //add viscous flux at face fc to cr[fc] cells
+  $rule apply(cr->src<-vflux)[Loci::Summation], 
+    constraint(cr->geom_cells,ViscousSimulation) {
+    for(int i=0;i<4;++i)
+      $cr->$src[i+1] -= $vflux[i] ;
+  }
+  
+  
+//   //compute analytical viscous flux Jacobian at interior faces based on
+//   //thin layer linear approximation of gradients
+  $rule apply(fjm<-u_f,vflux,area,muTotal_f,kconductTotal,
+	      cr->u,(cr,cl)->cellcenter,us_n)[Loci::Summation],
+     constraint((cr,cl)->vol,ViscousSimulation) {
+     const int mi=1 ;
+     const int ei=4 ;
+     const int ru=mi+0 ;
+     const int rv=mi+1 ;
+     const int rw=mi+2 ;
+     const vect3d an=$area.n ;
+     const real sada=$area.sada ;
+     const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
+     const real coef = $muTotal_f*sada/dist ;
+     $fjm[ru][ru] -= coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+     $fjm[ru][rv] -= coef*an.x*an.y*(1./3.) ;
+     $fjm[ru][rw] -= coef*an.x*an.z*(1./3.) ;
+     $fjm[rv][ru] -= coef*an.y*an.x*(1./3.) ;
+     $fjm[rv][rv] -= coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+     $fjm[rv][rw] -= coef*an.y*an.z*(1./3.) ;
+     $fjm[rw][ru] -= coef*an.z*an.x*(1./3.) ;
+     $fjm[rw][rv] -= coef*an.z*an.y*(1./3.) ;
+     $fjm[rw][rw] -= coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+
+     $fjm[ei][ru] -= $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+     $fjm[ei][ru] -= $u_f.y*coef*an.y*an.x*(1./3.) ;
+     $fjm[ei][ru] -= $u_f.z*coef*an.z*an.x*(1./3.) ;
+     $fjm[ei][rv] -= $u_f.x*coef*an.x*an.y*(1./3.) ;
+     $fjm[ei][rv] -= $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+     $fjm[ei][rv] -= $u_f.z*coef*an.z*an.y*(1./3.) ;
+     $fjm[ei][rw] -= $u_f.x*coef*an.x*an.z*(1./3.) ;
+     $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*(1./3.) ;
+     $fjm[ei][rw] -= $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     $fjm[ei][ru] -= .5*$vflux[0] ;
+     $fjm[ei][rv] -= .5*$vflux[1] ;
+     $fjm[ei][rw] -= .5*$vflux[2] ;
+
+      
+     const real factor = $kconductTotal*sada/dist ;
+     $fjm[ei][0] -= factor ;
+   }
+
+  $rule apply(fjp<-u_f,vflux,area,muTotal_f,kconductTotal,
+	      cl->(u),(cr,cl)->cellcenter,us_n)[Loci::Summation],
+    constraint((cr,cl)->vol,ViscousSimulation) {
+    const int mi=1 ;
+    const int ei=4 ;
+    const int ru=mi+0 ;
+    const int rv=mi+1 ;
+    const int rw=mi+2 ;
+    const vect3d an=$area.n ;
+    const real sada=$area.sada ;
+    const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
+    const real coef = $muTotal_f*sada/dist ;
+    $fjp[ru][ru] += coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+    $fjp[ru][rv] += coef*an.x*an.y*(1./3.) ;
+    $fjp[ru][rw] += coef*an.x*an.z*(1./3.) ;
+    $fjp[rv][ru] += coef*an.y*an.x*(1./3.) ;
+    $fjp[rv][rv] += coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+    $fjp[rv][rw] += coef*an.y*an.z*(1./3.) ;
+    $fjp[rw][ru] += coef*an.z*an.x*(1./3.) ;
+    $fjp[rw][rv] += coef*an.z*an.y*(1./3.) ;
+    $fjp[rw][rw] += coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+
+    $fjp[ei][ru] += $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+    $fjp[ei][ru] += $u_f.y*coef*an.y*an.x*(1./3.) ;
+    $fjp[ei][ru] += $u_f.z*coef*an.z*an.x*(1./3.) ;
+    $fjp[ei][rv] += $u_f.x*coef*an.x*an.y*(1./3.) ;
+    $fjp[ei][rv] += $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+    $fjp[ei][rv] += $u_f.z*coef*an.z*an.y*(1./3.) ;
+    $fjp[ei][rw] += $u_f.x*coef*an.x*an.z*(1./3.) ;
+    $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*(1./3.) ;
+    $fjp[ei][rw] += $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+    $fjp[ei][ru] += 0.5*$vflux[ru] ;
+    $fjp[ei][rv] += 0.5*$vflux[rv] ;
+    $fjp[ei][rw] += 0.5*$vflux[rw] ;
+
+     const real factor = $kconductTotal*sada/dist ;
+     $fjp[ei][0] += factor ;
+  }
+
+  $rule apply(ci->srcJ<-u_f,vflux,us_n,muTotal_f,kconductTotal,
+	      area,facecenter,ci->cellcenter, ci->u)[Loci::Summation], 
+     constraint(ci->geom_cells,ViscousSimulation) {
+    const int mi=1; 
+     const int ru=mi+0 ;
+     const int rv=mi+1 ;
+     const int rw=mi+2 ;
+     const int ei=4 ;
+     const vect3d an=$area.n ;
+     const real sada=$area.sada ;
+     const real dist= dot(an,$facecenter-$ci->$cellcenter) ;
+     real coef = $muTotal_f*sada/dist ;
+     $ci->$srcJ[ru][ru] -= coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+     $ci->$srcJ[ru][rv] -= coef*an.x*an.y*(1./3.) ;
+     $ci->$srcJ[ru][rw] -= coef*an.x*an.z*(1./3.) ;
+     $ci->$srcJ[rv][ru] -= coef*an.y*an.x*(1./3.) ;
+     $ci->$srcJ[rv][rv] -= coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+     $ci->$srcJ[rv][rw] -= coef*an.y*an.z*(1./3.) ;
+     $ci->$srcJ[rw][ru] -= coef*an.z*an.x*(1./3.) ;
+     $ci->$srcJ[rw][rv] -= coef*an.z*an.y*(1./3.) ;
+     $ci->$srcJ[rw][rw] -= coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     $ci->$srcJ[ei][ru] -= $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
+     $ci->$srcJ[ei][ru] -= $u_f.y*coef*an.y*an.x*(1./3.) ;
+     $ci->$srcJ[ei][ru] -= $u_f.z*coef*an.z*an.x*(1./3.) ;
+     $ci->$srcJ[ei][rv] -= $u_f.x*coef*an.x*an.y*(1./3.) ;
+     $ci->$srcJ[ei][rv] -= $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
+     $ci->$srcJ[ei][rv] -= $u_f.z*coef*an.z*an.y*(1./3.) ;
+     $ci->$srcJ[ei][rw] -= $u_f.x*coef*an.x*an.z*(1./3.) ;
+     $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*(1./3.) ;
+     $ci->$srcJ[ei][rw] -= $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     $ci->$srcJ[ei][ru] -= .5*$vflux[ru] ;
+     $ci->$srcJ[ei][rv] -= .5*$vflux[rv] ;
+     $ci->$srcJ[ei][rw] -= .5*$vflux[rw] ;
+
+     const real factor = $kconductTotal*sada/dist ;
+     $ci->$srcJ[ei][0] -= factor ;
+   }
+
+}

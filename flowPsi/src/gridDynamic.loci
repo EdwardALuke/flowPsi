@@ -1,0 +1,16 @@
+#include <Loci.h>
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  
+  $rule pointwise(iblank),constraint(geom_cells) {
+    $iblank = 0 ;
+  }
+
+  $rule pointwise(us_n),constraint(area) {
+    $us_n = 0 ;
+  }
+  $rule pointwise(us), constraint(area) {
+    $us = vect3d(0,0,0) ;
+  }
+}

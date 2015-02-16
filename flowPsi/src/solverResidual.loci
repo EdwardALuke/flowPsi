@@ -1,0 +1,149 @@
+#include <Loci.h>
+$include "flowPsi.lh"
+#include "flowPsiIO.h"
+#include <Tools/stream.h>
+
+namespace flowPsi {
+  unsigned long BCErrorCode ;
+  
+
+  $type residual param<residual> ;
+  $rule unit(residual),constraint(geom_cells) {
+    $residual.rtrms = 0.0 ;
+    $residual.etrms = 0.0 ;
+    $residual.mtrms = 0.0 ;
+    $residual.etmax = 0.0 ;
+    $residual.rtmax = 0.0 ;
+    $residual.mtmax = 0.0 ;
+    $residual.ccmaxe_center = vect3d(0.0, 0.0, 0.0) ;
+    $residual.ccmaxr_center = vect3d(0.0, 0.0, 0.0) ;
+    $residual.bcErrorCode = 0 ;
+  }
+
+  template <class T> struct resid_join {
+    void operator()(T &r, const T &s) {
+      r.rtrms += s.rtrms ;
+      r.etrms += s.etrms ;
+      r.mtrms += s.mtrms ;
+      if(abs(r.etmax) < abs(s.etmax)) {
+        r.etmax = s.etmax ;
+	r.ccmaxe_center = s.ccmaxe_center ;
+      }
+      if(abs(r.rtmax) < abs(s.rtmax)) {
+        r.rtmax = s.rtmax ;
+	r.ccmaxr_center = s.ccmaxr_center ;
+      }
+      if(abs(r.mtmax) < abs(s.mtmax)) {
+        r.mtmax = s.mtmax ;
+      }
+      
+      r.bcErrorCode |= s.bcErrorCode ;
+    }
+  } ;
+
+
+  $rule unit(grid_vol_iblank),constraint(geom_cells) {
+    $grid_vol_iblank = 0 ;
+  }
+  $rule apply(grid_vol_iblank<-vol,iblank) [Loci::Summation] {
+    if($iblank < 2)
+      join($grid_vol_iblank,$vol) ;
+  }
+
+  $rule apply(residual<-src,cellcenter,vol,grid_vol_iblank,iblank)[resid_join],
+    constraint(geom_cells) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    if($iblank < 2) {
+      residual r ;
+      r.rtmax = 0 ;
+      r.ccmaxr_center = vect3d(0,0,0) ;
+    
+      real rvol = 1./$vol ;
+      real weight = $vol/$grid_vol_iblank ;
+      if(real(abs(r.rtmax)) < abs(rvol*$src[0])) {
+	r.rtmax = rvol*$src[0] ;
+	r.ccmaxr_center = $cellcenter ;
+      }
+      r.rtrms = 0 ;
+      r.rtrms+=square(real(rvol*$src[0])) ;
+      r.rtrms *= weight ;
+      
+
+      r.mtrms = 0 ;
+      r.mtmax = 0 ;
+
+      for(int i=0;i<3;++i) {
+        if(fabs(r.mtmax) < fabs(rvol*$src[mi+i]))
+          r.mtmax = rvol*$src[mi+i] ;
+        r.mtrms += square(real(rvol*$src[mi+i])) ;
+      }
+      r.mtrms *= weight/3.0 ;
+      
+      r.etrms=weight*square(real(rvol*$src[ei])) ;
+      r.etmax = rvol*$src[ei] ;
+      r.ccmaxe_center = $cellcenter ;
+
+      r.bcErrorCode = BCErrorCode ;
+      BCErrorCode = 0 ;
+      join($residual,r) ;
+    }
+  }
+	
+  $rule pointwise(OUTPUT{n,it}<-residual{n,it},ncycle{n},integratedOutputFileManager{n,it}),
+    prelude { 
+    if(Loci::MPI_rank == 0) {
+      real rtrms = sqrt($residual{n,it}->rtrms) ;
+      real etrms = sqrt($residual{n,it}->etrms) ;
+      real mtrms = sqrt($residual{n,it}->mtrms) ;
+      real etmax = $residual{n,it}->etmax ;
+      real rtmax = $residual{n,it}->rtmax ;
+      real mtmax = $residual{n,it}->mtmax ;
+      
+      printf("R:%3d |r|=%7.1e rinf=%8.1e |e|=%7.1e einf=%8.1e |m|=%7.1e\n",
+             *$ncycle{n},rtrms,rtmax,etrms,etmax,mtrms) ;
+
+      fflush(stdout) ;
+      Loci::debugout << " ncyc = " << *$ncycle{n} <<  "  Cell center max density residual = "  << $residual{n,it}->ccmaxr_center << endl ;
+      Loci::debugout << " ncyc = " << *$ncycle{n} <<  "  Cell center max energy residual = "  << $residual{n,it}->ccmaxe_center << endl ;
+
+      if((($residual{n,it}->bcErrorCode) & OUTFLOW_BECAME_INFLOW) != 0) {
+        cerr << "WARNING: outflow BC tried to become inflow!" << endl ;
+      }
+      if((($residual{n,it}->bcErrorCode) &YPLUS_TOO_LARGE_IN_WALL_LAW) != 0) {
+        cerr << "WARNING: wallLaw BC exceeded yplus limit!" << endl ;
+      }
+      if((($residual{n,it}->bcErrorCode) &FIXED_MASS_FAILED_CONVERGENCE) != 0) {
+        cerr << "WARNING: fixedMass BC failed to converge!" << endl ;
+      }
+      if((($residual{n,it}->bcErrorCode) &ISENTROPIC_INFLOW_FAILED_CONVERGENCE) != 0) {
+        cerr << "WARNING: isentropicInflow BC failed to converge!" << endl ;
+      }
+      
+      
+         
+      string filename = "output/resid.dat" ;
+      ofstream *ofile = getStreamFluxFile(filename, *$ncycle{n}==0) ;
+      if(!ofile->fail()) 
+        (*ofile) << *$ncycle{n} << ' '
+                                     << rtrms << ' '
+                                     << etrms << ' '
+                                     << mtrms  << endl ;
+      filename = "output/residlinf.dat" ;
+      ofile = getStreamFluxFile(filename, *$ncycle{n}==0) ;
+
+      if(!ofile->fail()) 
+        (*ofile) << *$ncycle{n} << ' '
+          << rtmax << ' '
+          << etmax << ' '
+          << mtmax << endl ;
+      
+      real tot = $residual{n,it}->rtrms+$residual{n,it}->etrms+$residual{n,it}->mtrms ;
+      if(tot != tot) { // No -ffast-math for this to work
+        if(Loci::MPI_rank == 0)
+          cerr << "NAN residual, aborting" << endl ;
+        Loci::Abort() ;
+      }
+    }
+  } ;
+}

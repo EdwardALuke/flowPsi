@@ -1,0 +1,237 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  class isentropic_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "isentropicInflow" ; }
+    std::string variablesChecked() { return "T0,p0,mixture"; }
+    bool checkOptions(const options_list &bc_options) {
+      error_message = "" ;
+      if(!bc_options.optionExists("p0") ||
+         !bc_options.optionExists("T0")) {
+        error_message = "both 'p0' and 'T0' are required" ;
+        return false ;
+      }
+      bool check = true ;
+      if(!check_scalar_units(bc_options,"p0","Pa")) {
+        error_message= "Units are incompatible for 'p0' " ;
+        check = false ;
+      }
+      if(!check_scalar_units(bc_options,"T0","K")) {
+        error_message += "Units are incompatible for 'T0'";
+        check = false ;
+      }
+      return check ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+
+  register_BC<isentropic_check> register_isentropic_check ;
+
+  
+  void fixed_p0t0_bc (real &unb, real &ab, const real uni,
+                      const real ai, const real a0,
+                      const real gamma0) {
+
+    const real gm1 = gamma0-1. ;
+    const real rim = uni-2.*ai/gm1 ;
+
+    // Use quadratic equation to solve
+    real a = (2./gm1 + 1) ;
+    real b = (2.*rim) ;
+    real c = (0.5*gm1*rim*rim - a0*a0) ;
+    real D = b*b - 4.*a*c ;
+    if(D < 0) {
+      ab = a0 ;
+      unb = rim+2.*ab/gm1 ;
+      return ;
+    }
+    ab = (-b + sqrt(D))/(2.*a) ;
+    // limit soundspeed to stay sufficiently large
+    //    ab = max(ab,min(a0,ai)) ;
+    ab = max(ab,.25*a0) ;
+
+    unb = rim+2.*ab/gm1 ;
+
+    return ;
+    
+  }
+  
+  void total_pressure_bc_imp(real &pb,real &Tb, vect3d &ub,
+                             real T0, real p0, real gamma0, real a0,
+                             vect3d ui, real ai, real ti,
+                             vect3d n, vect3d rigid_u) {
+
+    const real gm1 = gamma0-1. ;
+    const real uit = dot(ui,n) ;
+    real unb = uit ;
+
+    real ab = a0 ;
+    fixed_p0t0_bc(unb,ab,uit,ai,a0,gamma0) ; //finds boundary normal velocity and speed of sound
+
+    ub = unb*n + rigid_u ;
+    real M = norm(ub)/ab ;
+    const real maxMach = 1.0 ; // Maximum Mach number allowed at boundary
+    if(M>maxMach) {
+      // If the flow becomes supersonic, then we need to stop getting
+      // information from inside the domain.  So instead of extrapolating
+      // velocity, we compute velocity from the isentropic conditions for
+      // choked (Mach 1) flow
+      M=maxMach ;
+      const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
+      const real ur2 = dot(rigid_u,rigid_u) ;
+      const real un = sqrt(max(utot*utot-ur2,0.0)) ;
+      ub = un*n + rigid_u ;
+    }
+
+    Tb = T0/(1+.5*gm1*M*M) ;
+    pb = p0*pow(1.+.5*gm1*M*M,-gamma0/gm1) ;
+
+    // Isentropic inflow has a problem if the gas inside is too cold
+    // We detect if this is happening and if it does happen, we switch
+    // to a more robust way of imposing the isentropic conditions
+    double f = (Tb-ti)/max(ti,Tb)-.1 ;
+    if(f > 0) {
+      // Compute isentropic conditions assuming soundspeed stays the same
+      // as in the chamber (as a weighted average)
+      f = pow(f,.5) ;
+      ab = (1-f)*ab + f*a0 ;
+      unb = (1-f)*unb + f*uit ;
+      
+      ub = unb*n + rigid_u ;
+      real M = norm(ub)/ab ;
+      if(M>maxMach) {
+        // If the flow becomes supersonic, then we need to stop getting
+        // information from inside the domain.  So instead of extrapolating
+        // velocity, we compute velocity from the isentropic conditions for
+        // choked (Mach 1) flow
+        M=maxMach ;
+        const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
+        const real ur2 = dot(rigid_u,rigid_u) ;
+        const real un = sqrt(max(utot*utot-ur2,0.0)) ;
+        ub = un*n + rigid_u ;
+      }
+      
+      Tb = T0/(1+.5*gm1*M*M) ;
+      pb = p0*pow(1.+.5*gm1*M*M,-gamma0/gm1) ;
+    }    
+    
+    
+    return ;
+  }
+
+  $rule pointwise(u_f,gagePressure_f,temperature_f<-ci->u,
+                  ci->temperature,flow_direction,rigid_u,
+                  p0Ref,T0Ref,Pambient,gamma,Rtilde,area),
+    constraint(isentropicInflow_BC) {
+
+    real pb, Tb ;
+    vect3d ub ;
+    
+    real p0 = $p0Ref ;
+    real T0 = $T0Ref ;
+    real gamma0 = $gamma ;
+    real a0 = sqrt(gamma0*$Rtilde*T0) ;
+    vect3d ui = $ci->$u ;
+    real ai = sqrt(gamma0*$Rtilde*$ci->$temperature) ;
+    // compute total pressure and total temperature assuming ideal gas
+    // isotropy relations
+    
+    total_pressure_bc_imp(pb,Tb,ub,T0,p0,gamma0,a0,
+                          ui,ai,$ci->$temperature,
+                          $flow_direction,$rigid_u) ;
+    
+    $u_f = ub ;
+    $gagePressure_f = pb-$Pambient ;
+    $temperature_f = Tb ;
+  } 
+
+  $rule pointwise(iflux<-area,gagePressure_f,temperature_f,u_f,Pambient,us_n,
+		  gamma,Rtilde),
+    constraint(isentropicInflow_BC) {
+    inviscidFlux($iflux,$gagePressure_f,$temperature_f,$u_f,
+		 $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+  }
+
+  
+  
+  $rule apply(ci->srcJ<-flow_direction,rigid_u,
+	      Pambient,us_n,p0Ref,T0Ref,
+              ci->(gagePressure,temperature,u),
+	      area,gamma,Rtilde)[Loci::Summation],
+    constraint(isentropicInflow_BC) {
+    real vals[5] ;
+    vals[0] = $ci->$temperature ;
+    vals[1] = $ci->$u.x ;
+    vals[2] = $ci->$u.y ;
+    vals[3] = $ci->$u.z ;
+    vals[4] = $ci->$gagePressure ;
+    
+    real pb, Tb ;
+    vect3d ub ;
+    
+    real p0 = $p0Ref ;
+    real T0 = $T0Ref ;
+    real gamma0 = $gamma ;
+    real a0 = sqrt(gamma0*$Rtilde*T0) ;
+    vect3d ui(vals[1],vals[2],vals[3]) ;
+    real Ti = vals[0] ;
+    real ai = sqrt(gamma0*$Rtilde*Ti) ;
+    total_pressure_bc_imp(pb,Tb,ub,
+			  T0,p0,gamma0,a0,
+                          ui,ai,Ti,
+                          $flow_direction,$rigid_u) ;
+    Loci::Array<real,5> iflux ;
+    inviscidFlux(iflux,pb-$Pambient,Tb,ub,
+		 $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    
+    
+    real deltas[5] ;
+    const real eps = 1e-5 ;
+    deltas[0] = Ti*eps ;
+    deltas[1] = ai*eps ;
+    deltas[2] = deltas[1] ;
+    deltas[3] = deltas[1] ;
+    deltas[4] = ai*ai*eps ;
+
+    for(int j=0;j<5;++j) {
+      real tmp = vals[j] ;
+      vals[j] += deltas[j] ;
+      vect3d ui(vals[1],vals[2],vals[3]) ;
+      real Ti = vals[0] ;
+      real ai = sqrt(gamma0*$Rtilde*Ti) ;
+      total_pressure_bc_imp(pb,Tb,ub,
+			    T0,p0,gamma0,a0,
+			    ui,ai,Ti,
+			    $flow_direction,$rigid_u) ;
+      Loci::Array<real,5> iflux2 ;
+      inviscidFlux(iflux2,pb-$Pambient,Tb,ub,
+		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+      const real rh = 1./(tmp-vals[j]) ;
+      for(int i = 0;i<5;++i) {
+	$ci->$srcJ[i][j] -= (iflux[i]-iflux2[i])*rh ;
+      }
+      vals[j] = tmp ;
+
+    }
+  }
+  $rule pointwise(p0Ref<-ref->p0_BC) {
+    $p0Ref = $ref->$p0_BC ;
+  } 
+
+  $rule pointwise(T0Ref<-ref->T0_BC) {
+    $T0Ref = $ref->$T0_BC ;
+  } 
+  
+}

@@ -1,0 +1,40 @@
+// Spalart Allmaras Variables
+$type spalart param<Spa_All_param> ;
+
+// turbulent kinematic viscosity
+$type nu_t              store<flowPsi::real> ;
+$type nu_t_f            store<flowPsi::real> ;
+$type nu_t_bc           store<flowPsi::real> ;
+// Chi coefficeint for SA model
+$type xcoeff            store<flowPsi::real> ;
+// SA model coefficeitns
+$type fv1               store<flowPsi::real> ;
+$type fv1_f             store<flowPsi::real> ;
+$type fv2               store<flowPsi::real> ;
+$type S_tilda           store<flowPsi::real> ;
+$type rcoeff            store<flowPsi::real> ;
+$type rpcoeff           store<flowPsi::real> ;
+$type gcoeff            store<flowPsi::real> ;
+$type gpcoeff           store<flowPsi::real> ;
+$type fw                store<flowPsi::real> ;
+$type fwp               store<flowPsi::real> ;
+$type cw1               store<flowPsi::real> ;
+// convection, diffusion, and source terms
+$type SA_src            store<flowPsi::real> ;
+// turmbulent destruction
+$type SA_destruct       store<flowPsi::real> ;
+// flux jacobians
+$type SA_fjm            store<flowPsi::real> ;
+$type SA_fjp            store<flowPsi::real> ;
+// diagonal jacobian term
+$type SA_srcJ           store<flowPsi::real> ;
+// right hand side of newton method
+$type SA_rhs            store<flowPsi::real> ;
+// SA matrix
+$type SA_B              store<flowPsi::real> ;
+$type SA_dq             store<flowPsi::real> ;
+$type SA_L              store<flowPsi::real> ;
+$type SA_D              store<flowPsi::real> ;
+$type SA_U              store<flowPsi::real> ;
+$type SA_qi             store<flowPsi::real> ;
+

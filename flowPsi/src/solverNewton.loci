@@ -1,0 +1,110 @@
+#include <Loci.h>
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  using std::cerr ;
+  using std::endl ;
+
+  // Initialize newton to past timestep value
+  $rule pointwise(temperature{n,it=0}<-temperature{n}),
+    constraint(geom_cells) {
+    $temperature{n,it=0}= $temperature{n} ;
+  }
+  $rule pointwise(gagePressure{n,it=0}<-gagePressure{n}),
+    constraint(geom_cells) {
+    $gagePressure{n,it=0} = $gagePressure{n} ;
+  }
+  $rule pointwise(u{n,it=0}<-u{n}),
+    constraint(geom_cells) {
+    $u{n,it=0} = $u{n} ;
+  }
+
+  $type dfluid storeVec<real> ;
+  $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
+		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
+		  Pambient),
+		  inplace(temperature{n,it+1}|temperature{n,it}),
+		  inplace(gagePressure{n,it+1}|gagePressure{n,it}),
+		  inplace(u{n,it+1}|u{n,it}) {
+    const real dT = $dfluid{n,it}[0] ;
+    const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
+    const real dp = $dfluid{n,it}[4] ;
+    real alpha = 1.0 ;
+    alpha = min(alpha,0.9*$temperature{n,it}/(fabs(dT)+1e-30)) ;
+    alpha = min(alpha,0.9*($gagePressure{n,it}+$Pambient)/(fabs(dp)+1e-30)) ;
+    $temperature{n,it+1} = $temperature{n,it} + alpha*dT;
+    $gagePressure{n,it+1} = $gagePressure{n,it} + alpha*dp ;
+    $u{n,it+1} = $u{n,it} + alpha*du ;
+  }
+
+
+  $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
+		  temperature{n,it},gagePressure{n,it},u{n,it}),
+    inplace(temperature{n+1}|temperature{n,it}),
+    inplace(gagePressure{n+1}|gagePressure{n,it}),
+    inplace(u{n+1}|u{n,it}),
+    constraint(geom_cells),
+    conditional(newtonFinished{n,it}), prelude { } ;
+
+  $type newtonFinished param<bool> ;
+  $rule singleton(newtonFinished{n,it}<-$it{n,it}) {
+    $newtonFinished{n,it} = ($$it{n,it} > 0) ;
+  }
+      
+
+  $type fluidLinearSolver param<std::string> ;
+  $rule default(fluidLinearSolver),
+    comments("Select the type of linear solver to use when solving the mean flow equations. Options are 'sgs' for symmetric gauss seidel, 'fsgs' for a fast symmetric gauss seidel that uses more memory, 'lsgs' for a robustline symmetric gauss seidel solver, or 'petsc' for the petsc GMRES solver. The default is 'lsgs'") 
+  {
+    $fluidLinearSolver = "lsgs" ;
+  }
+
+  $type fluidLinearSolverSGS Constraint ;
+  $type fluidLinearSolverFSGS Constraint ;
+  $type fluidLinearSolverLSGS Constraint ;
+  $type fluidLinearSolverPETSC Constraint ;
+
+  $rule constraint(fluidLinearSolverSGS,fluidLinearSolverLSGS,fluidLinearSolverFSGS,
+		fluidLinearSolverPETSC<-fluidLinearSolver) {
+    $fluidLinearSolverSGS = EMPTY ;
+    $fluidLinearSolverFSGS = EMPTY ;
+    $fluidLinearSolverLSGS = EMPTY ;
+    $fluidLinearSolverPETSC = EMPTY ;
+    if($fluidLinearSolver == "petsc") {
+#ifndef USE_PETSC
+      cerr << "petsc not installed!" << endl ;
+      Loci::Abort() ;
+#endif
+      $fluidLinearSolverPETSC = ~EMPTY ;
+    } else if ($fluidLinearSolver == "lsgs") {
+      $fluidLinearSolverLSGS = ~EMPTY ;
+    } else if ($fluidLinearSolver == "fsgs") {
+      $fluidLinearSolverFSGS = ~EMPTY ;
+    } else {
+      $fluidLinearSolverSGS = ~EMPTY ;
+    }
+  }
+	 
+
+  $type SGSBlockedSSolve(fluid) storeVec<real> ;
+  $rule pointwise(dfluid<-SGSBlockedSSolve(fluid)),
+    constraint(geom_cells,fluidLinearSolverSGS),
+    inplace(dfluid|SGSBlockedSSolve(fluid)) {}
+
+  $type LSGSBlockedSSolve(fluid,fluid_B) storeVec<real> ;
+  $rule pointwise(dfluid<-LSGSBlockedSSolve(fluid,fluid_B)),
+    constraint(geom_cells,fluidLinearSolverLSGS),
+    inplace(dfluid|LSGSBlockedSSolve(fluid,fluid_B)) {}
+
+  $type FSGSBlockedSSolve(fluid) storeVec<real> ;
+  $rule pointwise(dfluid<-FSGSBlockedSSolve(fluid)),
+    constraint(geom_cells,fluidLinearSolverFSGS),
+    inplace(dfluid|FSGSBlockedSSolve(fluid)) {}
+
+  $type petscBlockedSSolve(fluid) storeVec<real> ;
+  $rule pointwise(dfluid<-petscBlockedSSolve(fluid)), 
+    constraint(geom_cells,fluidLinearSolverPETSC),
+    inplace(dfluid|petscBlockedSSolve(fluid)){} 
+
+
+}

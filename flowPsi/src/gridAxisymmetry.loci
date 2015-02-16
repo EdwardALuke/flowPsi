@@ -1,0 +1,101 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+
+  /////////////////////////////////////////////////////////////////////////////
+  //
+  // Conservative axisymmetric formulation
+  //
+
+  // axi_dyda represents the deficit area in the y direction of a cell
+  $type axi_dyda store<real> ;
+  $rule pointwise(axi_dyda<-(upper,lower,boundary_map)->area) {
+    real iY = 0 ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      iY += $upper[i]->$area.n.y*$upper[i]->$area.sada ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      iY -= $lower[i]->$area.n.y*$lower[i]->$area.sada ;
+    int bsz =$boundary_map.size() ;
+    for(int i=0;i<bsz;++i)
+      iY += $boundary_map[i]->$area.n.y*$boundary_map[i]->$area.sada ;
+    $axi_dyda = iY ;
+  }
+    
+  
+  $rule apply(src<-gagePressure,rho,u,vol,axi_dyda)[Loci::Summation],
+    constraint(axisymmetricCoordinateModel,src){
+    const int mi=1 ;
+    // Note axi_dyda is equiv to vol/y
+    $src[mi+1] += ($gagePressure+$rho*$u.z*$u.z)*$axi_dyda ; 
+    $src[mi+2] -= $rho*$u.y*$u.z*$axi_dyda ; 
+  }
+
+  $rule apply(srcJ<-gagePressure,temperature,Pambient,rho,u,vol,axi_dyda)[Loci::Summation],
+    constraint(axisymmetricCoordinateModel,srcJ) {
+    const int mi=1 ;
+    const int pi=4 ;
+    const int ti=0 ;
+
+    double v = $u.y ;
+    double w = $u.z ;
+    double w2 = w*w ;
+    real rp = $rho/($Pambient+$gagePressure) ;
+    real rt = -$rho/$temperature ;
+    $srcJ[mi+1][pi]   += $axi_dyda*(1.+w2*rp) ;
+    $srcJ[mi+1][ti]   += $axi_dyda*w2*rt ;
+    $srcJ[mi+1][mi+2] += 2.*$axi_dyda*$rho*w ;
+    
+    $srcJ[mi+2][pi]   -= rp*v*w*$axi_dyda ;
+    $srcJ[mi+2][ti]   -= rt*v*w*$axi_dyda ;
+    $srcJ[mi+2][mi+1] -= $rho*w*$axi_dyda ;
+    $srcJ[mi+2][mi+2] -= $rho*v*$axi_dyda ;
+  }
+
+//Nonconservative viscous terms
+  $rule apply(src<-u,muTotal,cellcenter,gradv3d(u),axi_dyda)[Loci::Summation],
+    constraint(axisymmetricCoordinateModel,src,ViscousSimulation) {
+
+    int mi = 1 ;
+
+     real v = $u.y ;
+     real w = $u.z ;
+     real y = $cellcenter.y ;
+     real mu_total = $muTotal ;
+
+     real dudx = $gradv3d(u).x.x ;
+     real dvdy = $gradv3d(u).y.y ;
+     real dwdz = v/y ;
+     real dwdy = $gradv3d(u).z.y-w/y ;
+     real dvdz = 0.0 ;
+
+     real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+     real tyz = mu_total*(dvdz+dwdy) ;
+     real tzz = 2.0*mu_total*(dwdz-divm) ;
+
+     $src[mi+1] -= tzz*$axi_dyda ;
+     $src[mi+2] += tyz*$axi_dyda ;
+  }
+
+   $rule apply(srcJ<-u,muTotal,cellcenter,axi_dyda)[Loci::Summation],
+    constraint(axisymmetricCoordinateModel,srcJ,ViscousSimulation) {
+
+     int mi = 1 ;
+
+     real y = $cellcenter.y ;
+     real mu_total = $muTotal ;
+
+     $srcJ[mi+1][mi+1] -= (4./3.)*mu_total*$axi_dyda/y ;
+     $srcJ[mi+2][mi+2] -= mu_total*$axi_dyda/y ;
+   }
+
+}

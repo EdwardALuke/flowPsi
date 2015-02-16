@@ -1,0 +1,146 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  
+  $rule optional(initialConditions), comments("Specify constant initial conditions settings") {
+  }
+
+  string toString(const Loci::UNIT_type &vu) {
+    ostringstream oss ;
+    oss << vu ;
+    return oss.str() ;
+  }
+  using Loci::StringError ;
+
+  $type initialConditionsTemperature param<real> ;
+  $type initialConditionsGagePressure param<real> ;
+  $type initialConditionsU param<vect3d> ;
+
+  $rule singleton(initialConditionsTemperature,initialConditionsGagePressure,
+		  initialConditionsU<-initialConditions,Rtilde,Pambient,gamma) {
+    bool T_set = false ;
+    bool p_set = false ;
+    bool rho_set = false ;
+    double T = 0 ;
+    double p = 0 ;
+    double rho = 0 ;
+    const Loci::options_list finput = $initialConditions ;
+    if(finput.optionExists("rho")) {
+      if(finput.getOptionValueType("rho") == Loci::REAL) {
+        finput.getOption("rho",rho) ;
+        rho_set = true ;
+      } else if(finput.getOptionValueType("rho") == Loci::UNIT_VALUE) {
+        Loci::UNIT_type rhou ;
+        finput.getOption("rho",rhou) ;
+        if(!rhou.is_compatible("kg/m/m/m")) {
+          string err = "wrong type of unit for density: " + toString(rhou) ;
+          throw StringError(err) ;
+        } else {
+          rho = rhou.get_value_in("kg/m/m/m") ;
+          rho_set = true ;
+        }
+      } else {
+        throw StringError("incorrect type for 'rho' in initialConditions") ;
+      }
+    }
+    if(finput.optionExists("T")) {
+      if(finput.getOptionValueType("T") == Loci::REAL) {
+        finput.getOption("T",T) ;
+        T_set = true ;
+      } else if(finput.getOptionValueType("T") == Loci::UNIT_VALUE) {
+        Loci::UNIT_type Tu ;
+        finput.getOption("T",Tu) ;
+        if(!Tu.is_compatible("kelvin")) {
+          string err = "wrong type of unit for temperature: " + toString(Tu) ;
+          throw StringError(err) ;
+        } else {
+          T = Tu.get_value_in("kelvin") ;
+          T_set = true ;
+        }
+      } else {
+        throw StringError("incorrect type for 'T' in fluidState") ;
+      }
+    }
+    
+    if(finput.optionExists("p")) {
+      if(finput.getOptionValueType("p") == Loci::REAL) {
+        finput.getOption("p",p) ;
+        p_set = true ;
+      } else if(finput.getOptionValueType("p") == Loci::UNIT_VALUE) {
+        Loci::UNIT_type pu ;
+        finput.getOption("p",pu) ;
+        if(!pu.is_compatible("Pa"))  {
+          string err = "wrong type of unit for pressure: " + toString(pu) ;
+          throw StringError(err) ;
+        } else {
+          p = pu.get_value_in("Pa") ;
+          p_set = true ;
+        }
+      } else {
+        throw StringError("incorrect type for 'p' in fluidState") ;
+      }
+    }
+    int cnt = 0 ;
+    if(rho_set)
+      cnt++ ;
+    if(p_set)
+      cnt++ ;
+    if(T_set)
+      cnt++ ;
+    if(cnt > 2) 
+      throw StringError("overspecification of rho,p, and T in initialConditions") ;
+    if(cnt < 2) 
+      throw StringError("underspecification of rho,p, and T in initialConditions") ;
+
+    if(p_set && rho_set) {
+      T = p/(rho*$Rtilde) ;
+    }
+    if(T_set && rho_set) {
+      p = rho*$Rtilde*T ;
+    }
+
+    $initialConditionsGagePressure = p-$Pambient ;
+    $initialConditionsTemperature = T ;
+    bool u_set = false ;
+    bool M_set = false ;
+    vect3d u = vect3d(0,0,0) ;
+
+    if(finput.optionExists("M")) {
+      get_vect3dOption(finput,"M","",u) ;
+      real soundSpeed = sqrt($gamma*$Rtilde*T) ;
+      u *= soundSpeed ;
+      M_set = true ;
+    }
+    
+    if(finput.optionExists("u")) {
+      get_vect3dOption(finput,"u","m/s",u) ;
+      u_set = true ;
+    }
+    if(M_set && u_set) {
+      throw StringError("overspecification of u and M in initialConditions") ;
+    }
+    if(!M_set && !u_set) {
+      throw StringError("must specify either  u or M in initialConditions") ;
+      
+    }
+    $initialConditionsU = u ;
+  }
+
+  $rule pointwise(temperature_ic,gagePressure_ic<-
+		  initialConditionsTemperature,
+		  initialConditionsGagePressure),
+    constraint(initialConditions,geom_cells) {
+    $gagePressure_ic = $initialConditionsGagePressure ;
+    $temperature_ic = $initialConditionsTemperature ;
+  }
+
+  $rule pointwise(u_ic<-initialConditionsU),
+    constraint(initialConditions,geom_cells) {
+    $u_ic = $initialConditionsU ;
+  }
+
+  
+}

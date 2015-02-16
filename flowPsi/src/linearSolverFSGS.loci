@@ -1,0 +1,1156 @@
+#include <Loci.h>
+#include <vector> 
+#include <algorithm>
+#include <set>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+
+
+// Scalar solver using modified line gauss seidel method
+namespace FGSI {
+  using std::vector ;
+  using std::sort ;
+  using std::swap ;
+  using std::set ;
+  using std::endl ;
+  using std::cerr ;
+  
+  typedef double real ;
+  // Scalar solve
+  $type X_B store<real> ;
+  $type X_D store<real> ;
+  $type X_L store<real> ;
+  $type X_U store<real> ;
+
+  $type FSGSmatrixInitialize blackbox<int> ;
+  $type FSGSmatrixTopology blackbox<int> ;
+
+  $type FSGSmatrixPeriodic blackbox<std::vector<pair<int,int> > > ;
+
+  $rule unit(FSGSmatrixPeriodic),constraint(UNIVERSE),prelude {
+    $FSGSmatrixPeriodic = vector<pair<int,int> >() ;
+  } ;
+
+  $rule apply(FSGSmatrixPeriodic)[Loci::NullOp],constraint(geom_cells), prelude { } ;
+  
+  $rule apply(FSGSmatrixPeriodic<-cr->fileNumber(geom_cells),pmap->cl->fileNumber(geom_cells))[Loci::NullOp], option(disable_threading), prelude {
+    Loci::entitySet pset = Loci::entitySet(seq) ;
+    FORALL(pset,ii) {
+      int i1 = $cr[ii] ;
+      int i2 = $cl[$pmap[ii]] ;
+      ($FSGSmatrixPeriodic)->push_back(pair<int,int>(i1,i2)) ;
+    } ENDFORALL ;
+  } ;
+
+
+  struct lineLayout {
+    int eqnstart,eqnend,Lstart,Ustart,OuterStart,OuterEnd ;
+  } ;
+
+  struct matrixStructure {
+    int access_counter ;
+    // equation variable map
+    int nmyeqn ;
+    vector<int> eql2g ; // Local to global map for equation information
+    // line information
+    vector<lineLayout> lineData ;
+    vector<int> foffsets ;
+    // maximum line length
+    int mxlinelen ;
+    // Global to local map for off diagonal matrix information
+    const_Map globalL2l,globalU2l ;
+    // connectivity information
+    vector<pair<int,int> > outerCLR ; // outer face left/right eqn numbers
+    
+    //
+    // Communication structure
+    vector<int> send_processors ;
+    vector<int> send_offsets ;
+    vector<int> send_entities ;
+    vector<int> send_entitiesl ;
+    vector<int> recv_processors ;
+    vector<int> recv_offsets ;
+    vector<int> recv_entities ;
+    vector<int> recv_entitiesl ;
+
+    vector<pair<int,int> > periodicCopy ;
+
+    matrixStructure(const matrixStructure &ms) {
+      access_counter = ms.access_counter ;
+      nmyeqn = ms.nmyeqn ;
+      eql2g = ms.eql2g ;
+      lineData = ms.lineData ;
+      foffsets = ms.foffsets ;
+      mxlinelen = ms.mxlinelen ;
+      outerCLR = ms.outerCLR ;
+      globalL2l.setRep(ms.globalL2l.Rep()) ;
+      globalU2l.setRep(ms.globalU2l.Rep()) ;
+      send_processors = ms.send_processors ;
+      send_offsets = ms.send_offsets ;
+      send_entities = ms.send_entities ;
+      send_entitiesl = ms.send_entitiesl ;
+      recv_processors = ms.recv_processors ;
+      recv_offsets = ms.recv_offsets ;
+      recv_entities = ms.recv_entities ;
+      recv_entitiesl = ms.recv_entitiesl ;
+      periodicCopy = ms.periodicCopy ;
+    }
+    matrixStructure &operator=(const matrixStructure &ms) {
+      access_counter = ms.access_counter ;
+      nmyeqn = ms.nmyeqn ;
+      eql2g = ms.eql2g ;
+      lineData = ms.lineData ;
+      foffsets = ms.foffsets ;
+      mxlinelen = ms.mxlinelen ;
+      outerCLR = ms.outerCLR ;
+      globalL2l.setRep(ms.globalL2l.Rep()) ;
+      globalU2l.setRep(ms.globalU2l.Rep()) ;
+      send_processors = ms.send_processors ;
+      send_offsets = ms.send_offsets ;
+      send_entities = ms.send_entities ;
+      send_entitiesl = ms.send_entitiesl ;
+      recv_processors = ms.recv_processors ;
+      recv_offsets = ms.recv_offsets ;
+      recv_entities = ms.recv_entities ;
+      recv_entitiesl = ms.recv_entitiesl ;
+      periodicCopy = ms.periodicCopy ;
+      return *this ;
+    }
+    matrixStructure() { access_counter = -1 ;}
+  } ;
+
+  vector<matrixStructure> matrixInfo ;
+
+  struct scalarMatrixData {
+    vector<double> B ;
+    vector<double> D ;
+    vector<double> F ;
+  } ;
+
+  $type FSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
+
+  $rule blackbox(FSGSmatrixInitialize),constraint(fluidLinearSolverFSGS),prelude {
+    $FSGSmatrixInitialize = matrixInfo.size() ;
+    matrixInfo.push_back(matrixStructure()) ;
+  } ;
+
+  
+  $rule blackbox(FSGSmatrixTopology<-cellcenter,FSGSmatrixPeriodic,
+		 lower->cl->cellcenter,upper->cr->cellcenter,
+		 (lower,upper)->area, FSGSmatrixInitialize),
+    option(disable_threading), prelude {
+    *$FSGSmatrixTopology = *$FSGSmatrixInitialize ;
+    struct matrixStructure &matrix = matrixInfo[*$FSGSmatrixInitialize] ;
+    if(matrix.access_counter < 0) { 
+	if(Loci::MPI_processes > 1) {
+	  Loci::fact_db::distribute_infoP df = 
+	    Loci::exec_current_fact_db->get_distribute_info() ;
+	  Map l2g ;
+	  l2g = df->l2g.Rep() ;
+	  entitySet dom = $cellcenter.domain() ;
+	  entitySet mydom = dom ;
+	  mydom &= df->my_entities ;
+	  Loci::MapRepP clm = Loci::MapRepP($cl.Rep()) ;
+	  Loci::MapRepP crm = Loci::MapRepP($cr.Rep()) ;
+	  Loci::MapRepP lowerm = Loci::MapRepP($lower.Rep()) ;
+	  Loci::MapRepP upperm = Loci::MapRepP($upper.Rep()) ;
+
+	  entitySet access_dom = (clm->image(lowerm->image(mydom)) +
+				  crm->image(upperm->image(mydom)) +
+				  mydom) ;
+      
+	  // Temporary map from global back to local
+	  std::map<int,int> g2l ;
+	  FORALL(access_dom,ii) {
+	    g2l[l2g[ii]] = ii ;
+	  } ENDFORALL ;
+
+	  // Entities that we access that we don't own in local numbering
+	  Loci::entitySet localcom = access_dom-df->my_entities ;
+	  // Entities that we need to recieve in global numbering
+	  Loci::entitySet rset = Loci::MapRepP(l2g.Rep())->image(localcom) ;
+	  std::vector<entitySet> &ptn = Loci::exec_current_fact_db->get_init_ptn() ;
+	  vector<pair<int,vector<int> > > recv_sets ;
+	  for(int i=0;i<Loci::MPI_processes;++i) {
+	    entitySet rpset = rset & ptn[i] ;
+	    if(rpset != EMPTY) {
+	      if(i == Loci::MPI_rank) {
+		cerr << "inconsistent self communcation found in line gsi code" << endl ;
+		Loci::Abort() ;
+	      }
+	      vector<int> recv_set(rpset.size()) ;
+	      int cnt = 0 ;
+	      Loci::entitySet::const_iterator ei ;
+	      for(ei=rpset.begin();ei!=rpset.end();++ei) {
+		recv_set[cnt] = *ei ;
+		cnt++ ;
+	      }
+	      recv_sets.push_back(pair<int,vector<int> >(i,recv_set)) ;
+	    }
+	  }
+	  vector<int> recv_cnts(Loci::MPI_processes,0) ;
+	  for(size_t i=0;i<recv_sets.size();++i) {
+	    recv_cnts[recv_sets[i].first] = recv_sets[i].second.size() ;
+	  }
+	  vector<int> send_cnts(Loci::MPI_processes,0) ;
+	  MPI_Alltoall(&recv_cnts[0],1,MPI_INT,&send_cnts[0],1,MPI_INT,
+		       MPI_COMM_WORLD) ;
+      
+	  int cc = 0 ;
+	  for(int i=0;i<Loci::MPI_processes;++i) {
+	    if(send_cnts[i] > 0) 
+	      cc++ ;
+	  }
+
+	  vector<pair<int,vector<int> > > send_sets(cc) ;
+	  vector<MPI_Request> requests(cc) ;
+	  
+	  cc = 0 ;
+	  for(int i=0;i<Loci::MPI_processes;++i) {
+	    if(send_cnts[i] > 0) {
+	      send_sets[cc] = pair<int,vector<int> >(i,vector<int>(send_cnts[i])) ;
+	      MPI_Irecv(&(send_sets[cc].second[0]),send_cnts[i],MPI_INT,i,99,
+			MPI_COMM_WORLD,&requests[cc]) ;
+	      cc++ ;
+	    }
+	  }
+	  for(size_t i=0;i<recv_sets.size();++i) {
+	    int p = recv_sets[i].first ;
+	    int sz = recv_sets[i].second.size() ;
+	    MPI_Send(&(recv_sets[i].second[0]),sz,MPI_INT,p,99,MPI_COMM_WORLD) ;
+	  }
+	  vector<MPI_Status> status(requests.size()) ;
+	  MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+    
+	  // Now convert send and recv lists to local numbering
+	  for(size_t i=0;i<recv_sets.size();++i) {
+	    int rsz = recv_sets[i].second.size() ;
+	    for(int j=0;j<rsz;++j) {
+	      std::map<int,int>::const_iterator ii = g2l.find(recv_sets[i].second[j]) ;
+	      if(ii == g2l.end()) {
+		cerr << "g2l undefined" << endl ;
+		Loci::Abort() ;
+	      }
+	      recv_sets[i].second[j] = ii->second ;
+	    }
+	  }
+	  for(size_t i=0;i<send_sets.size();++i) {
+	    int ssz = send_sets[i].second.size() ;
+	    for(int j=0;j<ssz;++j) {
+	      std::map<int,int>::const_iterator ii = g2l.find(send_sets[i].second[j]) ;
+	      if(ii == g2l.end()) {
+		cerr << "g2l undefined" << endl ;
+		Loci::Abort() ;
+	      }
+	      send_sets[i].second[j] = ii->second ;
+	    }
+	  }
+	  // Assign communication info
+	  matrix.send_processors = vector<int>(send_sets.size()) ;
+	  matrix.send_offsets = vector<int>(send_sets.size()+1) ;
+	  matrix.send_offsets[0] = 0 ;
+	  int sendsize = 0; 
+	  for(size_t i=0;i<send_sets.size();++i) {
+	    matrix.send_processors[i] = send_sets[i].first ;
+	    sendsize += send_sets[i].second.size() ;
+	    matrix.send_offsets[i+1] = sendsize ;
+	  }
+	  matrix.send_entities = vector<int>(sendsize) ;
+	  for(size_t i=0;i<send_sets.size();++i) 
+	    for(size_t j=0;j<send_sets[i].second.size();++j)
+	      matrix.send_entities[matrix.send_offsets[i]+j] 
+		= send_sets[i].second[j] ;
+
+	  matrix.recv_processors = vector<int>(recv_sets.size()) ;
+	  matrix.recv_offsets = vector<int>(recv_sets.size()+1) ;
+	  matrix.recv_offsets[0] = 0 ;
+	  int recvsize = 0; 
+	  for(size_t i=0;i<recv_sets.size();++i) {
+	    matrix.recv_processors[i] = recv_sets[i].first ;
+	    recvsize += recv_sets[i].second.size() ;
+	    matrix.recv_offsets[i+1] = recvsize ;
+	  }
+	  matrix.recv_entities = vector<int>(recvsize) ;
+	  for(size_t i=0;i<recv_sets.size();++i) 
+	    for(size_t j=0;j<recv_sets[i].second.size();++j)
+	      matrix.recv_entities[matrix.recv_offsets[i]+j] 
+		= recv_sets[i].second[j] ;
+	} else {
+	  // Assign communication info
+	  matrix.send_processors = vector<int>(0) ;
+	  matrix.send_offsets = vector<int>(1) ;
+	  matrix.send_offsets[0] = 0 ;
+	  matrix.send_entities = vector<int>(0) ;
+
+	  matrix.recv_processors = vector<int>(0) ;
+	  matrix.recv_offsets = vector<int>(1) ;
+	  matrix.recv_offsets[0] = 0 ;
+	  matrix.recv_entities = vector<int>(0) ;
+	}
+    }
+
+    if(matrix.access_counter < 0) {
+      matrix.access_counter = 0 ;
+      // Build temporary connectivity matrix
+      entitySet dom = ($lower.domain() & $upper.domain()) ;
+      entitySet mydom = dom ;
+	
+      if(Loci::MPI_processes > 1)
+        mydom &= Loci::exec_current_fact_db->get_distribute_info()->my_entities ;
+
+      Loci::MapRepP clm = Loci::MapRepP($cl.Rep()) ;
+      Loci::MapRepP crm = Loci::MapRepP($cr.Rep()) ;
+      Loci::MapRepP lowerm = Loci::MapRepP($lower.Rep()) ;
+      Loci::MapRepP upperm = Loci::MapRepP($upper.Rep()) ;
+      
+      entitySet access_dom = (clm->image(lowerm->image(mydom)) +
+			      crm->image(upperm->image(mydom)) +
+			      mydom) ;
+      dom += access_dom ;
+      if($FSGSmatrixPeriodic->size() > 0) {
+	vector<int> val($FSGSmatrixPeriodic->size()*2) ;
+	for(size_t i=0;i<$FSGSmatrixPeriodic->size();++i) {
+	  val[i*2] = (*$FSGSmatrixPeriodic)[i].first ;
+	  val[i*2+1] = (*$FSGSmatrixPeriodic)[i].second ;
+	}
+	entitySet pdom = create_entitySet(val.begin(),val.end()) ;
+	dom += pdom ;
+      }
+
+      vector<int> index(dom.size()) ;
+      Map toeqn ;
+      toeqn.allocate(dom) ;
+      int cnt = 0 ;
+      // First number all equations owned by this processor
+      int nmyeqn = mydom.size() ;
+      FORALL(mydom,ii) {
+        index[cnt] = ii ;
+        toeqn[ii] = cnt ;
+        cnt++ ;
+      } ENDFORALL ;
+      // Then number equations referenced by this processor
+      entitySet remainder = dom-mydom ;
+      FORALL(remainder,ii) {
+        index[cnt] = ii ;
+        toeqn[ii] = cnt ;
+        cnt++ ;
+      } ENDFORALL ;
+      //    cout << "nmyeqn=" << nmyeqn << ",rem = " << remainder.size() << endl ;
+      vector<int> offsets(nmyeqn+1) ;
+      offsets[0] = 0 ;
+      cnt = 1 ;
+      int totsz = 0 ;
+      FORALL(mydom,ii) {
+        const int lsz = $lower[ii].size() ;
+        const int usz = $upper[ii].size() ;
+        const int msz = lsz+usz ;
+        totsz += msz ;
+        offsets[cnt] = totsz ;
+        cnt++ ;
+      } ENDFORALL ;    
+
+      vector<pair<int,int> > couples ;
+      vector<int> neighbors(totsz) ;
+      cnt = 0 ;
+      FORALL(mydom,ii) {
+        const int lsz = $lower[ii].size() ;
+        const int usz = $upper[ii].size() ;
+        for(int i=0;i<lsz;++i) {
+          neighbors[offsets[cnt]+i] = toeqn[$cl[$lower[ii][i]]] ;
+        }
+        for(int i=0;i<usz;++i) {
+          neighbors[offsets[cnt]+i+lsz] = toeqn[$cr[$upper[ii][i]]] ;
+        }
+        cnt++ ;
+      } ENDFORALL ;
+
+      vector<pair<int,int> > connections(mydom.size()) ;
+      
+      for(int i=0;i<nmyeqn;++i) {
+        connections[i].first = -1 ;
+        connections[i].second = -1 ;
+      }
+      vector<int> lineNo(dom.size(),-2) ;
+      FORALL(mydom,ii) {
+        lineNo[toeqn[ii]] = -1 ;
+      } ENDFORALL ;
+      int lineno = 0 ;
+
+      for(int i=0;i<nmyeqn;++i) {
+	lineNo[i] = i ;
+	lineno++ ;
+      }
+      // Create list of lines
+      vector<pair<int,int> > lineinfo(lineno) ;
+      for(int i=0;i<nmyeqn;++i) {
+        if(connections[i].first == -1)
+          lineinfo[lineNo[i]].first = i ;
+        if(connections[i].second == -1)
+          lineinfo[lineNo[i]].second = i ;
+      }
+
+      // Order lines based on breadth first search.
+      vector<int> line_order ;
+      vector<int> line_visit(lineno,0) ;
+      set<int> linedata ;
+      int sp = 0 ;
+      while(int(line_order.size()) != lineno) {
+        if(linedata.empty()) {
+          while(sp < lineno && line_visit[sp] != 0)
+            sp++;
+          if(sp == lineno) {
+            // Finished with line list so exit loop
+            break ;
+          }
+          linedata.insert(sp) ;
+          line_visit[sp] = 1 ;
+        }
+        set<int> linedata_next ;
+        set<int>::const_iterator ii ;
+        for(ii=linedata.begin();ii!=linedata.end();++ii) {
+          int l = *ii ;
+          for(int j=lineinfo[l].first;j>=0;j=connections[j].second) {
+            for(int k=offsets[j];k<offsets[j+1];++k) {
+	      if(neighbors[k] < nmyeqn) {
+		int nl =lineNo[neighbors[k]] ;
+		if(line_visit[nl]==0) {
+		  line_visit[nl] = 1 ;
+		  linedata_next.insert(nl) ;
+		}
+              }
+            }
+          }
+          if(lineinfo[l].first >=0)
+            line_order.push_back(l) ;
+        }
+        linedata = linedata_next ;
+      }
+    
+      // Now lines are sorted for SGS sweeps in line_order, now reorder eqns and
+      // collect data structure for high performance implementation.
+    
+      vector<int> eqnorder(dom.size()) ;
+      vector<int> eqnvisit(dom.size(),0) ;
+      vector<int> line_offsets(line_order.size()+1) ;
+
+      line_offsets[0] = 0 ;
+      cnt = 0 ;
+      for(size_t i=0;i<line_order.size();++i) {
+        int ln = line_order[i] ;
+        for(int j=lineinfo[ln].first;j>=0;j=connections[j].second) {
+          if(eqnvisit[j] == 0) {
+            eqnorder[cnt] = j ;
+            cnt++ ;
+            eqnvisit[j] = 1 ;
+          } else {
+            cerr << "equation visited by more than one line!" << endl ;
+          }
+        }
+        line_offsets[i+1] = cnt ;
+      }
+      if(cnt != dom.size()) { // Number the remaining equations
+        // Sort in order of first visited while scanning lines
+        for(int i = nmyeqn-1;i>=0;--i) {
+          for(int k=offsets[eqnorder[i]];k<offsets[eqnorder[i]+1];++k)
+            if(neighbors[k] >= nmyeqn)
+              eqnorder[neighbors[k]] = eqnorder[i] ;
+        }
+        vector<pair<int,int> > vpairs(dom.size()-nmyeqn) ;
+        for(int i=nmyeqn;i<dom.size();++i) {
+          vpairs[i-nmyeqn].first = eqnorder[i] ;
+          vpairs[i-nmyeqn].second = i ;
+        }
+        sort(vpairs.begin(),vpairs.end()) ;
+        for(int i=nmyeqn;i<dom.size();++i) {
+          eqnorder[i] = vpairs[i-nmyeqn].second ;
+        }
+      }
+      
+      // build equation local 2 entity number map
+      vector<int> eql2l(dom.size()) ; // map from old local number 2 new one
+      { vector<int> eql2g(dom.size()) ;
+	std::map<int,int> g2eql ;
+        for(int i=0;i<dom.size();++i) {
+          eql2g[i] = index[eqnorder[i]] ;
+	  g2eql[eql2g[i]] = i ;
+          eql2l[eqnorder[i]] = i ;
+        }
+        matrix.eql2g.swap(eql2g) ;
+	vector<int> recv_entitiesl(matrix.recv_entities.size()) ;
+	for(size_t i=0;i<recv_entitiesl.size();++i)
+	  recv_entitiesl[i] = g2eql[matrix.recv_entities[i]] ;
+	matrix.recv_entitiesl.swap(recv_entitiesl) ;
+	vector<int> send_entitiesl(matrix.send_entities.size()) ;
+	for(size_t i=0;i<send_entitiesl.size();++i)
+	  send_entitiesl[i] = g2eql[matrix.send_entities[i]] ;
+	matrix.send_entitiesl.swap(send_entitiesl) ;
+	matrix.nmyeqn = nmyeqn ;
+
+	// Now handle periodic
+	int psz = (*$FSGSmatrixPeriodic).size() ;
+	vector<pair<int,int> > periodicCopy(psz) ;
+	for(int i=0;i<psz;++i) {
+	  periodicCopy[i].first = g2eql[(*$FSGSmatrixPeriodic)[i].first] ;
+	  periodicCopy[i].second = g2eql[(*$FSGSmatrixPeriodic)[i].second] ;
+	}
+	matrix.periodicCopy.swap(periodicCopy) ;
+      }
+      
+      // build line data structures
+      int nlines = line_order.size() ;
+      vector<lineLayout> lineData(nlines) ;
+
+      matrix.mxlinelen = 0 ;
+      cnt = 0 ;
+      for(int i=0;i<nlines;++i) {
+        int lsz = line_offsets[i+1]-line_offsets[i] ;
+        matrix.mxlinelen = max(matrix.mxlinelen,lsz) ;
+        lineData[i].eqnstart = line_offsets[i] ;
+        lineData[i].eqnend = line_offsets[i+1] ;
+        lineData[i].Lstart = cnt ;
+        cnt += lsz-1 ;
+        lineData[i].Ustart = cnt ;
+        cnt += lsz-1 ;
+        lineData[i].OuterStart = cnt ;
+        for(int j=line_offsets[i];j<line_offsets[i+1];++j)
+          cnt+= offsets[eqnorder[j]+1]-offsets[eqnorder[j]]-2 ;
+        cnt += 2 ;
+        lineData[i].OuterEnd = cnt ;
+      }
+      entitySet Ldom = Loci::MapRepP($lower.Rep())->image(mydom) ;
+      entitySet Udom = Loci::MapRepP($upper.Rep())->image(mydom) ;
+      Map globalL2l,globalU2l ;
+      globalL2l.allocate(Ldom) ;
+      globalU2l.allocate(Udom) ;
+      vector<pair<int,int> > outerCLR(cnt) ;
+      for(int i=0;i<nlines;++i) {
+        int ln = line_order[i] ;
+        // scan line and find line L and U
+        int c1=lineData[i].Lstart ;
+        int c2=lineData[i].Ustart ;
+        int c3=lineData[i].OuterStart ;
+        for(int j=lineinfo[ln].first;j>=0;j=connections[j].second) {
+          // scan neighbors of this equation
+          const int lsz = $lower[index[j]].size() ;
+          for(int k=offsets[j];k<offsets[j+1];++k) {
+
+            const int n =neighbors[k] ;
+            int localid = -1 ;
+            // find local id of this connection
+            if(n == connections[j].first) {
+              // L tridiagonal term
+              localid = c1++ ;
+            } else if(n == connections[j].second) {
+              localid = c2++ ;
+              // U tridiagonal term
+            } else {
+              // outer term
+              localid = c3++ ;
+            }
+            // store connectivity
+            outerCLR[localid].first = eql2l[j] ;
+            outerCLR[localid].second = eql2l[n] ;
+            int fid = (k-offsets[j]) ;
+            // fill in matrix injection maps
+            if(fid < lsz) {
+              globalL2l[$lower[index[j]][fid]] = localid ;
+            } else {
+              globalU2l[$upper[index[j]][fid-lsz]] = localid ;
+            }
+          }
+        }
+      }
+
+      matrix.globalL2l.setRep(globalL2l.Rep()) ;
+      matrix.globalU2l.setRep(globalU2l.Rep()) ;
+      matrix.outerCLR.swap(outerCLR) ;
+
+      matrix.lineData = lineData ;
+      vector<int> foffsets(lineData.size()+1) ;
+      foffsets[0] = 0 ;
+      for(size_t i=0;i<lineData.size();++i)
+	foffsets[i+1] = lineData[i].OuterEnd ;
+      matrix.foffsets.swap(foffsets) ;
+    }
+    
+    matrix.access_counter++ ;
+
+  } ;
+
+
+  $rule blackbox(FSGSscalarMatrix(X)<-FSGSmatrixTopology,
+		 X_B,X_D,upper->X_U,lower->X_L), prelude {
+    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    vector<double> B(matrix.eql2g.size()); 
+    vector<double> D(matrix.eql2g.size()); 
+    vector<double> F(matrix.outerCLR.size()); 
+    
+    // Copy matrix into data structure
+    for(int i=0;i<matrix.nmyeqn;++i) {
+      D[i] = $X_D[matrix.eql2g[i]] ;
+      B[i] = $X_B[matrix.eql2g[i]] ;
+    }
+    entitySet ldom  = matrix.globalL2l.domain() ;
+    FORALL(ldom,ii) {
+      F[matrix.globalL2l[ii]] = $X_L[ii] ;
+    } ENDFORALL ;
+    entitySet udom  = matrix.globalU2l.domain() ;
+    FORALL(udom,ii) {
+      F[matrix.globalU2l[ii]] = $X_U[ii] ;
+    } ENDFORALL ;
+
+    // Preprocess lines (recompute diagonal term)
+    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
+      double *L = &F[matrix.lineData[l].Lstart] ;
+      double *U = &F[matrix.lineData[l].Ustart] ;
+      double *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
+      int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
+      
+      //      D[0] = 1./(D[0]<0.0?min(D[0],-1e-30):max(D[0],1e-30)) ;
+      Dp[0] = 1./Dp[0] ;
+      for(int i=1;i<lsz;++i) {
+        double Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
+        Dp[i] = 1./(Dt<0.0?min(Dt,-1e-30):max(Dt,1e-30)) ;
+      }
+    }
+    $FSGSscalarMatrix(X)->B.swap(B) ; 
+    $FSGSscalarMatrix(X)->D.swap(D) ; 
+    $FSGSscalarMatrix(X)->F.swap(F) ; 
+    
+  } ;
+
+  $type FSGSScalarSolve(X)           store<real> ;
+
+
+  $type gauss_seidel_iter param<int> ;
+  $rule pointwise(FSGSScalarSolve(X)<-gauss_seidel_iter,
+		  FSGSscalarMatrix(X),FSGSmatrixTopology),
+                 option(disable_threading),
+                 prelude {
+    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    // Copy in x to our cache optimal ordering
+    vector<double> x1(matrix.eql2g.size(),0.0);
+
+    double * X = &x1[0] ;
+    vector<double> rhs(matrix.mxlinelen) ;
+    vector<double> send_data(matrix.send_entitiesl.size()) ;
+    vector<double> recv_data(matrix.recv_entitiesl.size()) ;
+    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
+    vector<MPI_Status> status(matrix.recv_processors.size()) ;
+    
+    int num_iter = *$gauss_seidel_iter ;
+    // do num_iter steps
+    for(int iter = 0;iter < num_iter;++iter) {
+      if(iter != 0) { // On first step, the values are just zero, no need to
+	// send anything
+        
+	int psz = matrix.periodicCopy.size() ;
+	for(int i=0;i<psz;++i)
+	  X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
+
+	// copy send data 
+	for(size_t i=0;i<send_data.size();++i)
+	  send_data[i] = X[matrix.send_entitiesl[i]] ;
+	
+	for(size_t i=0;i<matrix.recv_processors.size();++i) {
+	  int rs = matrix.recv_offsets[i] ;
+	  int re = matrix.recv_offsets[i+1] ;
+	  int rsz = re-rs ;
+	  int p = matrix.recv_processors[i] ;
+	  MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+		    MPI_COMM_WORLD,&requests[i]) ;
+	}
+	for(size_t i=0;i<matrix.send_processors.size();++i) {
+	  int ss = matrix.send_offsets[i] ;
+	  int se = matrix.send_offsets[i+1] ;
+	  int ssz = se-ss ;
+	  int p = matrix.send_processors[i] ;
+	  MPI_Send(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD) ;
+	}
+	MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+	// copy recieved data 
+	for(size_t i=0;i<recv_data.size();++i)
+	  X[matrix.recv_entitiesl[i]] = recv_data[i] ;
+	for(int i=0;i<psz;++i)
+	  X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
+      }
+      
+      // Forward sweep
+      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
+	const double *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const double *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const double *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const double *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const double *F = &$FSGSscalarMatrix(X)->F[0] ;
+
+	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
+
+	const int eqb = matrix.lineData[l].eqnstart ;
+
+	// First compute rhs ;
+	for(int i=0;i<lsz;++i)
+	  rhs[i] = B[i] ;
+
+	const int   os = matrix.lineData[l].OuterStart ;
+	const int   oe = matrix.lineData[l].OuterEnd ;
+	for(int i=os;i<oe;++i) {
+	  rhs[matrix.outerCLR[i].first-eqb] -= X[matrix.outerCLR[i].second]*F[i] ;
+	}
+      
+
+	double *restrict x = &X[eqb] ;
+	// now solve line
+	// forward solve 
+	x[0] = rhs[0] ;
+	for(int i=1;i<lsz;++i) {
+	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
+	}
+	// backward solve
+	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+	for(int i=lsz-2;i>=0;--i) {
+	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+	}
+      }
+      X = &x1[0] ;
+
+      // Backward sweep
+      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
+	const double *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const double *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const double *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const double *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const double *F = &$FSGSscalarMatrix(X)->F[0] ;
+
+	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
+
+	const int eqb = matrix.lineData[l].eqnstart ;
+
+	// First compute rhs ;
+	for(int i=0;i<lsz;++i)
+	  rhs[i] = B[i] ;
+
+	const int   os = matrix.lineData[l].OuterStart ;
+	const int   oe = matrix.lineData[l].OuterEnd ;
+	for(int i=os;i<oe;++i) {
+	  rhs[matrix.outerCLR[i].first-eqb] -= X[matrix.outerCLR[i].second]*F[i] ;
+	}
+
+	double *restrict x = &X[eqb] ;
+	// now solve line
+	// forward solve 
+	x[0] = rhs[0] ;
+	for(int i=1;i<lsz;++i) {
+	  x[i] = rhs[i] - L[i-1]*D[i-1]*rhs[i-1] ;
+	}
+	// backward solve
+	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+	for(int i=lsz-2;i>=0;--i) {
+	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+	}
+      }
+    }    
+    
+    // copy data out
+    for(int i=0;i<matrix.nmyeqn;++i) {
+      $FSGSScalarSolve(X)[matrix.eql2g[i]] = x1[i] ; 
+    }
+
+  } ;
+    
+
+  typedef float real_fj ;
+  // Blocked version
+  $type X_B storeVec<real_fj> ;
+  $type X_D storeMat<real_fj> ;
+  $type X_L storeMat<real_fj> ;
+  $type X_U storeMat<real_fj> ;
+  $type FSGSBlockedSSolve(X) storeVec<real> ;
+  $type FSGSBlockedSSolve_next(X) storeVec<real> ;
+  $type FSGSBlockedSSolve_forward(X) storeVec<real> ;
+  $type FSGSBlockedSSolve_backward(X) storeVec<real> ;
+  $type FSGSgseidel_finished(X) param<bool> ;
+
+  using flowPsi::tmp_array ;
+
+
+
+  class matrixHelpers: public Loci::CPTR_type {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vs) const = 0 ;
+
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vs) const = 0 ;
+		       
+  } ;
+
+  class matrixHelpersGeneric: public matrixHelpers {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vs) const ;
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vs) const ;
+  } ;
+
+  void matrixHelpersGeneric::
+  factorDiagonal(real_fj *restrict D, pivot_type *restrict pivot,
+		 int neq, int vs) const {
+    int vs2 = vs*vs ;
+    for(int i=0;i<neq;++i) {
+      Mat<real_fj> Di(D,vs) ;
+      Di.decompose_lu_pivot(pivot) ;
+      D += vs2 ;
+      pivot += vs ;
+    }
+  }
+
+  void matrixHelpersGeneric::
+  sweep(real *restrict X, const real_fj *restrict B, 
+	const real_fj *restrict D, const pivot_type *restrict pivot,
+	const pair<int,int> *restrict CLR, const real_fj *restrict F,
+	const int *restrict foffsets, int neq, bool forward, int vs) const {
+    
+    int vs2 = vs*vs ;
+    int dir = forward?1:-1 ;
+    int vstep = dir*vs ;
+    int mstep = dir*vs2 ;
+    int e = forward?0:neq-1 ;
+    int voffset = e*vs ;
+    int moffset = e*vs2 ;
+    vector<real> t(vs) ;
+    for(int eq=0;eq<neq;++eq) {
+      for(int i=0;i<vs;++i)
+	t[i] = -B[voffset+i] ;
+      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	const_Mat<real_fj> Fi(Ft,vs) ;
+	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Ft += vs2 ;
+      }
+      for(int i=0;i<vs;++i)
+	t[i] = -t[i] ;
+      const_Mat<real_fj> De(&D[moffset],vs) ;
+      De.solve_lu_pivot(&t[0],&X[voffset],&pivot[voffset]) ;
+      //De.solve_lu(&X[voffset],&v[0]) ;
+      e += dir ;
+      voffset += vstep ;
+      moffset += mstep ;
+    }
+  }
+
+  class matrixHelpersNoPivot: public matrixHelpers {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vs) const ;
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vs) const ;
+  } ;
+
+  void matrixHelpersNoPivot::
+  factorDiagonal(real_fj *restrict D, pivot_type *restrict pivot,
+		 int neq, int vs) const {
+    int vs2 = vs*vs ;
+    for(int i=0;i<neq;++i) {
+      Mat<real_fj> Di(D,vs) ;
+      Di.decompose_lu() ;
+      D += vs2 ;
+      pivot += vs ;
+    }
+  }
+
+  void matrixHelpersNoPivot::
+  sweep(real *restrict X, const real_fj *restrict B, 
+	const real_fj *restrict D, const pivot_type *restrict pivot,
+	const pair<int,int> *restrict CLR, const real_fj *restrict F,
+	const int *restrict foffsets, int neq, bool forward, int vs) const {
+    
+    int vs2 = vs*vs ;
+    int dir = forward?1:-1 ;
+    int vstep = dir*vs ;
+    int mstep = dir*vs2 ;
+    int e = forward?0:neq-1 ;
+    int voffset = e*vs ;
+    int moffset = e*vs2 ;
+    vector<real> t(vs) ;
+    for(int eq=0;eq<neq;++eq) {
+      for(int i=0;i<vs;++i)
+	t[i] = -B[voffset+i] ;
+      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	const_Mat<real_fj> Fi(Ft,vs) ;
+	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Ft += vs2 ;
+      }
+      for(int i=0;i<vs;++i)
+	t[i] = -t[i] ;
+      const_Mat<real_fj> De(&D[moffset],vs) ;
+      De.solve_lu(&t[0],&X[voffset]) ;
+      //De.solve_lu(&X[voffset],&v[0]) ;
+      e += dir ;
+      voffset += vstep ;
+      moffset += mstep ;
+    }
+  }
+
+  class matrixHelpers5x5: public matrixHelpers {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vs) const ;
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vs) const ;
+  } ;
+
+  void matrixHelpers5x5::
+  factorDiagonal(real_fj *restrict D, pivot_type *restrict pivot,
+		 int neq, int vs) const {
+    int vs2 = vs*vs ;
+    for(int i=0;i<neq;++i) {
+      Mat<real_fj> Di(D,vs) ;
+      Di.decompose_lu() ;
+      D += vs2 ;
+      pivot += vs ;
+    }
+  }
+
+  void matrixHelpers5x5::
+  sweep(real *restrict X, const real_fj *restrict B, 
+	const real_fj *restrict D, const pivot_type *restrict pivot,
+	const pair<int,int> *restrict CLR, const real_fj *restrict F,
+	const int *restrict foffsets, int neq, bool forward, int vsi) const {
+    const int vs = 5 ;
+    const int vs2 = 25 ;
+
+    int dir = forward?1:-1 ;
+    const int vstep = dir*vs ;
+    const int mstep = dir*vs2 ;
+    int e = forward?0:neq-1 ;
+    int voffset = e*vs ;
+    int moffset = e*vs2 ;
+    //#define INLINED
+#ifndef INLINED
+    vector<real> t(vs) ;
+    for(int eq=0;eq<neq;++eq) {
+      for(int i=0;i<vs;++i)
+	t[i] = -B[voffset+i] ;
+      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	const_Mat<real_fj> Fi(Ft,vs) ;
+	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Ft += vs2 ;
+      }
+      for(int i=0;i<vs;++i)
+	t[i] = -t[i] ;
+      const_Mat<real_fj> De(&D[moffset],vs) ;
+      De.solve_lu(&t[0],&X[voffset]) ;
+      //De.solve_lu(&X[voffset],&v[0]) ;
+      e += dir ;
+      voffset += vstep ;
+      moffset += mstep ;
+    }
+#else
+    for(int eq=0;eq<neq;++eq) {
+      real t0 = B[voffset] ;
+      real t1 = B[voffset+1] ;
+      real t2 = B[voffset+2] ;
+      real t3 = B[voffset+3] ;
+      real t4 = B[voffset+4] ;
+      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	const real restrict *Xt = &X[CLR[i].second*vs] ;
+	t0 -= Ft[0]*Xt[0]+Ft[5]*Xt[1]+Ft[10]*Xt[2]+Ft[15]*Xt[3]+Ft[20]*Xt[4] ;
+	t1 -= Ft[1]*Xt[0]+Ft[6]*Xt[1]+Ft[11]*Xt[2]+Ft[16]*Xt[3]+Ft[21]*Xt[4] ;
+	t2 -= Ft[2]*Xt[0]+Ft[7]*Xt[1]+Ft[12]*Xt[2]+Ft[17]*Xt[3]+Ft[22]*Xt[4] ;
+	t3 -= Ft[3]*Xt[0]+Ft[8]*Xt[1]+Ft[13]*Xt[2]+Ft[18]*Xt[3]+Ft[23]*Xt[4] ;
+	t4 -= Ft[4]*Xt[0]+Ft[9]*Xt[1]+Ft[14]*Xt[2]+Ft[19]*Xt[3]+Ft[24]*Xt[4] ;
+	Ft += 25 ;
+      }
+      real *x = &X[voffset] ;
+      const real_fj *A = &D[moffset] ;
+      
+      real x0 = t0 ;
+      real x1 = t1-A[1]*x0 ;
+      real x2 = t2-A[2]*x0-A[7]*x1 ;
+      real x3 = t3-A[3]*x0-A[8]*x1-A[13]*x2 ;
+      real x4 = t4-A[4]*x0-A[9]*x1-A[14]*x2-A[19]*x3 ;
+
+      x4 = x4/A[24] ;
+      x3 = (x3-A[23]*x4)/A[18] ;
+      x2 = (x2-A[22]*x4-A[17]*x3)/A[12] ;
+      x1 = (x1-A[21]*x4-A[16]*x3-A[11]*x2)/A[6] ;
+      x0 = (x0-A[20]*x4-A[15]*x3-A[10]*x2-A[5]*x1)/A[0] ;
+      
+      x[0] = x0 ;
+      x[1] = x1 ;
+      x[2] = x2 ;
+      x[3] = x3 ;
+      x[4] = x4 ;
+
+      e += dir ;
+      voffset += vstep ;
+      moffset += mstep ;
+    }
+#endif
+  }
+
+
+  struct blockedMatrixData {
+    Loci::CPTR<matrixHelpers> matrixHelp ;
+    int vs,vs2  ;
+    vector<real_fj> B ;
+    vector<real_fj> D ;
+    vector<pivot_type> pivot ;
+    //    vector<real_fj> Dreal ;
+    vector<real_fj> F ;
+  } ;
+
+  $type FSGSblockedMatrix(X) blackbox<blockedMatrixData> ;
+
+  $rule blackbox(FSGSblockedMatrix(X)<-FSGSmatrixTopology,
+		 X_B,X_D,upper->X_U,lower->X_L), prelude {
+    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    int vs = $X_B.vecSize() ;
+    int vs2 = vs*vs ;
+    $FSGSblockedMatrix(X)->vs = vs ;
+    $FSGSblockedMatrix(X)->vs2 = vs2 ;
+    if(vs == 5) 
+      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpers5x5 ;
+    else if(vs < 8) 
+      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpersNoPivot ;
+    else
+      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpersGeneric ;
+
+    vector<real_fj> B(matrix.eql2g.size()*vs); 
+    vector<real_fj> D(matrix.eql2g.size()*vs2); 
+    //    vector<real_fj> Dreal(matrix.eql2g.size()*vs2); 
+    vector<pivot_type> pivot(matrix.eql2g.size()*vs) ; 
+    vector<real_fj> F(matrix.outerCLR.size()*vs2); 
+    
+    // Copy matrix into data structure
+
+    for(int i=0;i<matrix.nmyeqn;++i) {
+      int eqn = matrix.eql2g[i] ;
+      const real_fj *restrict Dp = &($X_D[eqn][0][0]) ;
+      const real_fj *restrict Bp = &($X_B[eqn][0]) ;
+      for(int j=0;j<vs2;++j) 
+	D[i*vs2+j] = Dp[j] ;
+      //      for(int j=0;j<vs2;++j) 
+      //	Dreal[i*vs2+j] = Dp[j] ;
+      for(int j=0;j<vs;++j) 
+	B[i*vs+j] = Bp[j] ;
+    }
+    entitySet ldom  = matrix.globalL2l.domain() ;
+    FORALL(ldom,ii) {
+      const real_fj *restrict Lp = &($X_L[ii][0][0]) ;
+      int Findex = matrix.globalL2l[ii]*vs2 ;
+      for(int j=0;j<vs2;++j) 
+	F[Findex+j] = Lp[j] ;
+    } ENDFORALL ;
+    entitySet udom  = matrix.globalU2l.domain() ;
+    FORALL(udom,ii) {
+      const real_fj *restrict Up = &($X_U[ii][0][0]) ;
+      int Findex = matrix.globalU2l[ii]*vs2 ;
+      for(int j=0;j<vs2;++j) 
+	F[Findex+j] = Up[j] ;
+    } ENDFORALL ;
+
+
+    int nlines = matrix.lineData.size() ;
+    $FSGSblockedMatrix(X)->matrixHelp
+      ->factorDiagonal(&D[0],&pivot[0],nlines,vs) ;
+
+    $FSGSblockedMatrix(X)->B.swap(B) ; 
+    $FSGSblockedMatrix(X)->D.swap(D) ; 
+    $FSGSblockedMatrix(X)->pivot.swap(pivot) ;
+    $FSGSblockedMatrix(X)->F.swap(F) ; 
+    //    $FSGSblockedMatrix(X)->Dreal.swap(Dreal) ; 
+  } ;
+
+  $rule pointwise(FSGSBlockedSSolve(X)<- gauss_seidel_iter,
+		  FSGSblockedMatrix(X),FSGSmatrixTopology),
+    option(disable_threading),
+    prelude {
+    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    int vs = $FSGSblockedMatrix(X)->vs ;
+    $FSGSBlockedSSolve(X).setVecSize(vs) ;
+    vector<double> x1(matrix.eql2g.size()*vs,0.0) ;
+    double *X = &x1[0] ;
+
+    const real_fj *B = &($FSGSblockedMatrix(X)->B[0]) ;
+    const real_fj *F = &($FSGSblockedMatrix(X)->F[0]) ;
+    const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
+    const real_fj *D = &($FSGSblockedMatrix(X)->D[0]) ;
+    const pivot_type *pivot = &($FSGSblockedMatrix(X)->pivot[0]) ;
+    int neq = matrix.lineData.size() ;
+
+    vector<double> send_data(matrix.send_entitiesl.size()*vs) ;
+    vector<double> recv_data(matrix.recv_entitiesl.size()*vs) ;
+    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
+    vector<MPI_Status> status(matrix.recv_processors.size()) ;
+    int num_iter = *$gauss_seidel_iter ;
+    for(int iter = 0;iter<num_iter;++iter) {
+      // copy send data 
+      int psz = matrix.periodicCopy.size() ;
+      for(int i=0;i<psz;++i) {
+	for(int j=0;j<vs;++j) {
+	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+	}
+      }
+      for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
+	int loc = matrix.send_entitiesl[i]*vs ;
+	int ii = i*vs ;
+	for(int j=0;j<vs;++j)
+	  send_data[ii+j] = X[loc+j] ;
+      }
+      for(size_t i=0;i<matrix.recv_processors.size();++i) {
+	int rs = matrix.recv_offsets[i]*vs ;
+	int re = matrix.recv_offsets[i+1]*vs ;
+	int rsz = re-rs ;
+	int p = matrix.recv_processors[i] ;
+	MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+		  MPI_COMM_WORLD,&requests[i]) ;
+      }
+
+      for(size_t i=0;i<matrix.send_processors.size();++i) {
+	int ss = matrix.send_offsets[i]*vs ;
+	int se = matrix.send_offsets[i+1]*vs ;
+	int ssz = se-ss ;
+	int p = matrix.send_processors[i] ;
+	MPI_Send(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD) ;
+      }
+      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+      // copy recieved data 
+      for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
+	int loc = matrix.recv_entitiesl[i]*vs ;
+	int ii = i*vs ;
+	for(int j=0;j<vs;++j)
+	  X[loc+j] = recv_data[ii+j] ;
+      }
+      for(int i=0;i<psz;++i) {
+	for(int j=0;j<vs;++j) {
+	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+	}
+      }
+
+      // Forward sweep
+      $FSGSblockedMatrix(X)->matrixHelp->
+	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,true,vs) ;
+      // Backward sweep
+      $FSGSblockedMatrix(X)->matrixHelp->
+	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,false,vs) ;
+    }
+
+    for(int i=0;i<matrix.nmyeqn;++i)
+      for(int j=0;j<vs;++j)
+	$FSGSBlockedSSolve(X)[matrix.eql2g[i]][j] = X[i*vs+j] ;
+  } ;
+
+}

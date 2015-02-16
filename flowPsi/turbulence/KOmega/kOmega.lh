@@ -1,0 +1,66 @@
+
+$type muu               store<flowPsi::real> ;
+$type muu_f             store<flowPsi::real> ;
+$type tmuu              store<flowPsi::real> ;
+
+$type lam_tau_w         store<flowPsi::real> ;
+
+// K-omega turbulence models
+// turbulent kinetic energy
+$type k                 store<flowPsi::real> ;
+$type k_f               store<flowPsi::real> ;
+$type k_ic              store<flowPsi::real> ;
+// omega (enstrophy)
+$type w                 store<flowPsi::real> ;
+$type w_f               store<flowPsi::real> ;
+$type w_ic              store<flowPsi::real> ;
+// SST blending functions
+$type bF1               store<flowPsi::real> ;
+$type bF2               store<flowPsi::real> ;
+$type fBetaS            store<flowPsi::real> ;
+$type fBeta             store<flowPsi::real> ;
+// Sigmas
+$type sigma_k           store<flowPsi::real> ;
+$type sigmak_f          store<flowPsi::real> ;
+$type sigmae_f          store<flowPsi::real> ;
+// SST turbulence model parameters
+$type sst               store<flowPsi::sst_param> ;
+$type sst1 param<sst1_param> ;
+$type sst1_wilcox08 param<sst1_param> ;
+$type sst1m param<sst1_param> ;
+$type sst1 param<sst1_param> ;
+$type sst2 param<sst2_param> ;
+// tke diffusion flux
+$type diff_t            store<flowPsi::real> ;
+// omega diffusion flux
+$type diff_w            store<flowPsi::real> ;
+//strain
+$type strainRate        store<flowPsi::real> ;
+$type stress_scalar     store<flowPsi::real> ;
+// turbulent production
+$type P_k               store<flowPsi::real> ;
+
+// Source terms for k-omega model
+$type sst_srck          store<flowPsi::real> ;
+$type sst_srcw          store<flowPsi::real> ;
+
+// right hand side of newton, includes time derivative terms
+$type sst_rhs           store<flowPsi::vec<2> > ;
+
+// scalar equation form of matrix
+$type sstk_fjp        store<flowPsi::real> ; 
+$type sstk_fjm        store<flowPsi::real> ;
+$type sstk_srcJ       store<flowPsi::real> ;
+$type sstw_fjp        store<flowPsi::real> ; 
+$type sstw_fjm        store<flowPsi::real> ;
+$type sstw_srcJ       store<flowPsi::real> ;
+
+// system matrix for SST model SCALAR equations
+$type sstk_B             store<flowPsi::real> ;
+$type sstk_D             store<flowPsi::real> ;
+$type sstk_L             store<flowPsi::real> ;
+$type sstk_U             store<flowPsi::real> ;
+$type sstw_B             store<flowPsi::real> ;
+$type sstw_D             store<flowPsi::real> ;
+$type sstw_L             store<flowPsi::real> ;
+$type sstw_U             store<flowPsi::real> ;

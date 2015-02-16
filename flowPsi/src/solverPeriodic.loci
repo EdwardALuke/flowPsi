@@ -1,0 +1,47 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+$include  "flowPsi.lh"
+
+namespace flowPsi {
+  
+  $rule pointwise(cr->cellcenter<-pmap->cl->cellcenter,pmap->ref->periodicTransform),
+    constraint(periodicFaces) {
+    const rigid_transform &frame = $pmap->$ref->$periodicTransform ;
+    $cr->$cellcenter = frame.transform($pmap->$cl->$cellcenter) ;
+  }
+
+  $rule pointwise(cr->vol<-pmap->cl->vol) {
+    $cr->$vol = $pmap->$cl->$vol ;
+  }
+  
+  $rule pointwise(cr->dist_noslip<-pmap->cl->dist_noslip) {
+    $cr->$dist_noslip = $pmap->$cl->$dist_noslip ;
+  }
+  
+  $rule pointwise(cr->u<-pmap->cl->u,pmap->ref->periodicTransform) {
+    const rigid_transform &frame = $pmap->$ref->$periodicTransform ;
+    $cr->$u= frame.rotate_vec($pmap->$cl->$u) ;
+  }
+  
+  $rule pointwise(cr->temperature<-pmap->cl->temperature) {
+    $cr->$temperature = $pmap->$cl->$temperature ;
+  }
+  
+  $rule pointwise(cr->gagePressure<-pmap->cl->gagePressure) {
+    $cr->$gagePressure = $pmap->$cl->$gagePressure ;
+  }
+
+  $rule pointwise(cr->tmu<-pmap->cl->tmu) {
+    $cr->$tmu = $pmap->$cl->$tmu ;
+  }
+  
+  $rule pointwise(cr->iblank<-pmap->cl->iblank) {
+    $cr->$iblank = $pmap->$cl->$iblank ;
+  }
+}

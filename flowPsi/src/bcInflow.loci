@@ -1,0 +1,413 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  using std::string ;
+  class inflow_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,farfield,supersonicInflow" ; }
+    std::string variablesChecked() { return "p,T,rho,M,u,v"; }
+    bool checkOptions(const options_list &bc_options) {
+      error_message = "" ;
+      int count = 0;
+
+      if(bc_options.optionExists("p"))
+        count++ ;
+      if(bc_options.optionExists("rho"))
+        count++ ;
+      if(bc_options.optionExists("T"))
+        count++ ;
+
+      if(count != 2) {
+        error_message = "must specify exactly two of the thermodynamic variables: (p,rho,T)  " ;
+      }
+      int count2 = 0 ;
+      if(bc_options.optionExists("u"))
+        count2++ ;
+      if(bc_options.optionExists("v"))
+        count2++ ;
+      if(bc_options.optionExists("M"))
+        count2++ ;
+
+      if(count2 != 1)
+        error_message += "must specify either 'u' or 'M'  " ;
+
+      if(count != 2 || count2 != 1)
+        return false ;
+
+      bool check = true ;
+      if(bc_options.optionExists("p")) 
+        if(!check_scalar_units(bc_options,"p","Pa")) {
+          error_message += "Units are incompatible for 'p' " ;
+          check = false ;
+        }
+      if(bc_options.optionExists("T")) 
+        if(!check_scalar_units(bc_options,"T","K")) {
+          error_message += "Units are incompatible for 'T' " ;
+          check = false ;
+        }
+      if(bc_options.optionExists("rho")) 
+        if(!check_scalar_units(bc_options,"rho","kg/m/m/m")) {
+          error_message += "Units are incompatible for 'rho' " ;
+          check = false ;
+        }
+      if(bc_options.optionExists("M")) 
+        if(!check_vector_units(bc_options,"M","")) {
+          error_message += "vector not properly defined for 'M' " ;
+          check = false ;
+        }
+      if(bc_options.optionExists("u")) 
+        if(!check_vector_units(bc_options,"u","m/s")) {
+          error_message += "vector not properly defined for 'u' " ;
+          check = false ;
+        }
+      if(bc_options.optionExists("v")) 
+        if(!check_vector_units(bc_options,"v","m/s")) {
+          error_message += "vector not properly defined for 'v' " ;
+          check = false ;
+        }
+      return check ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+
+  register_BC<inflow_check> register_inflow_check ;
+
+  class flowAngle_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+    std::string variablesChecked() { return "swirlAngle,swirlCenter,swirlAxis,normal,rotCenter,rotAxis,rotSpeed,flowDir" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      bool swirlAngle = bc_options.optionExists("swirlAngle") ;
+      bool swirlCenter = bc_options.optionExists("swirlCenter") ;
+      bool swirlAxis = bc_options.optionExists("swirlAxis") ;
+      bool rotSpeed = bc_options.optionExists("rotSpeed") ;
+      bool rotCenter = bc_options.optionExists("rotCenter") ;
+      bool rotAxis = bc_options.optionExists("rotAxis") ;
+      bool normal = bc_options.optionExists("normal") ;
+      bool check = true ;
+
+      if((swirlAngle || swirlCenter || swirlAxis) && (!swirlAngle || !swirlCenter || !swirlAxis)) {
+        check = false ;
+        error_message += "Must set swirlAngle, swirlCenter, and swirlAxis together. " ;
+      }
+      if((swirlCenter|swirlAngle|swirlAxis)&normal) {
+        check = false ;
+        error_message += "'normal' is incompatible with swirl options. " ;
+      }
+
+      if((rotSpeed || rotCenter || rotAxis) && (!rotSpeed || !rotCenter || !rotAxis)) {
+        check = false ;
+        error_message += "Must set rotSpeed, rotCenter, and rotAxis together. " ;
+      }
+      if((rotCenter|rotSpeed|rotAxis)&normal) {
+        check = false ;
+        error_message += "'normal' is incompatible with rotation options. " ;
+      }
+
+      if(rotSpeed) {
+        if(!check_scalar_units(bc_options,"rotSpeed","radians/second")) {
+          error_message += "wrong units for rotSpeed " ;
+          check = false ;
+        }
+      }
+      if(rotCenter) {
+        if(!check_vector_units(bc_options,"rotCenter","m")) {
+          error_message += "error in rotCenter specification " ;
+          check = false ;
+        }
+      }
+      if(rotAxis) {
+        if(!check_vector_units(bc_options,"rotAxis","m")) {
+          error_message += "error in rotAxis specification " ;
+          check = false ;
+        }
+      }
+
+    // Add check to make sure both swirl angle and swirl center are input
+      if(swirlAngle) {
+        if(!check_scalar_units(bc_options,"swirlAngle","deg")) {
+          error_message += "wrong units for swirlAngle " ;
+          check = false ;
+        }
+      }
+      if(swirlCenter) {
+        if(!check_vector_units(bc_options,"swirlCenter","m")) {
+          error_message += "error in swirlCenter specification " ;
+          check = false ;
+        }
+      }
+      if(swirlAxis) {
+        if(!check_vector_units(bc_options,"swirlAxis","m")) {
+          error_message += "error in swirlAxis specification " ;
+          check = false ;
+        }
+      }
+
+      return check ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<flowAngle_check> register_BC_flowAngle_check ;
+  $rule pointwise(BC_inflow_type),constraint(ref->BC_options) {
+    $BC_inflow_type = 0 ;
+  } 
+
+  $rule pointwise(normal::BC_inflow_type),constraint(ref->(BC_options,normal_BCoption)) {
+    $BC_inflow_type = 1 ;
+  } 
+
+  $rule pointwise(uRef<-ref->uRef_BC,area,BC_inflow_type) {
+    $uRef = $ref->$uRef_BC ;
+    if(($BC_inflow_type & 1) == 1) {
+      $uRef = -norm($ref->$uRef_BC)*$area.n ;
+    }
+  } 
+
+  $rule pointwise(flow_direction<-area),constraint(ci->vol) {
+    $flow_direction = -1.*$area.n ;
+  } 
+  
+  $rule pointwise(swirl::flow_direction<-area,facecenter,ref->(swirlAngle_BC,swirlCenter_BC,swirlAxis_BC)) {
+    const vect3d swirl_coord = $facecenter - $ref->$swirlCenter_BC ;
+    // coordinate projected onto normal plane
+    const vect3d axis = $ref->$swirlAxis_BC/norm($ref->$swirlAxis_BC) ;
+    const vect3d pc = swirl_coord - axis*dot(swirl_coord,axis) ;
+    // orthogonal corrdinate (tangential component)
+    const vect3d oc = cross(axis,pc) ;
+    const vect3d ocn = oc/(norm(oc)+1e-30) ;
+    
+    // Swirl angle in radians
+    const real sa = $ref->$swirlAngle_BC*M_PI/180.0 ;
+    
+    // flow direction normal vector (note area normal vector points out from the boundary)
+    $flow_direction = (axis*cos(sa)+ocn*sin(sa)) ;
+  } 
+
+  $rule pointwise(rotate::flow_direction<-ref->angVel_BC),constraint(ref->(angVel_BC,rotCenter_BC)) {
+    $flow_direction = $ref->$angVel_BC/norm($ref->$angVel_BC) ;
+  } 
+  
+  $rule pointwise(flowDir::flow_direction<-ref->flowDir_BC),constraint(ref->flowDir_BC) {
+    $flow_direction = $ref->$flowDir_BC ;
+  } 
+
+  $rule pointwise(rigid_u),constraint(ci->vol) {
+    $rigid_u = vect3d(0,0,0) ;
+  } 
+
+  $rule pointwise(rotate::rigid_u<-ref->(angVel_BC,rotAxis_BC,rotCenter_BC),facecenter),
+    constraint(ref->(angVel_BC,rotAxis_BC,rotCenter_BC)) {
+    //angular velocity in rad/sec; default is [0,0,0]
+    const vect3d omega = $ref->$angVel_BC ;
+    const vect3d rwall = ($facecenter-$ref->$rotCenter_BC) ;
+    const vect3d dr = rwall - dot(rwall,$ref->$rotAxis_BC)*$ref->$rotAxis_BC ;
+    const vect3d urot = cross(omega,dr) ;
+    $rigid_u = urot ;
+  } 
+
+  $rule pointwise(swirl::uRef<-flow_direction,ref->uRef_BC,area),
+    constraint(ref->(swirlAngle_BC,swirlCenter_BC,uRef_BC)) {
+    const real normv = norm($ref->$uRef_BC) ;
+    $uRef = normv * $flow_direction ;
+  } 
+
+  $rule pointwise(rotate::uRef<-facecenter,ref->(uRef_BC,angVel_BC,rotAxis_BC,rotCenter_BC)),
+    constraint(ref->(angVel_BC,rotAxis_BC,rotCenter_BC,uRef_BC)) {
+    //angular velocity in rad/sec; default is [0,0,0]
+    const vect3d omega = $ref->$angVel_BC ;
+    const vect3d rface = ($facecenter-$ref->$rotCenter_BC) ;
+    const vect3d r = rface - dot(rface,$ref->$rotAxis_BC)*$ref->$rotAxis_BC ;
+    const vect3d urot = cross(omega,r) ;
+    $uRef = $ref->$uRef_BC + urot ;
+  } 
+
+  $rule pointwise(temperatureRef<-ref->temperatureRef_BC) {
+    $temperatureRef=$ref->$temperatureRef_BC ;
+  }
+
+  $rule pointwise(gagePressureRef<-ref->gagePressureRef_BC) {
+    $gagePressureRef = $ref->$gagePressureRef_BC ;
+  }
+
+  $rule pointwise(gagePressure_f<-gagePressureRef),constraint(supersonicInflow_BC) {
+    $gagePressure_f = $gagePressureRef ;
+  }
+  $rule pointwise(temperature_f<-temperatureRef),constraint(supersonicInflow_BC) {
+    $temperature_f = $temperatureRef ;
+  }
+  $rule pointwise(u_f<-uRef),constraint(supersonicInflow_BC) {
+    $u_f=$uRef ;
+  }
+
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma),constraint(supersonicInflow_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    hllc_flux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(supersonicInflow_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+
+  $rule pointwise(gagePressure_f,temperature_f,u_f<-
+		  ci->(gagePressure,temperature,u),
+		  gagePressureRef,temperatureRef,uRef,
+		  area,us_n,
+		  Pambient,gamma,Rtilde),
+    constraint(farfield_BC) {
+    const real uit = dot($ci->$u,$area.n) ;
+    const real ai = sqrt($gamma*$Rtilde*$ci->$temperature) ;
+    const real a0 = sqrt($gamma*$Rtilde*$temperatureRef)  ;
+    if(uit > 0) { // outflow
+      if(uit > ai) { // supersonic outflow
+	$gagePressure_f = $ci->$gagePressure ;
+	$temperature_f = $ci->$temperature ;
+	$u_f = $ci->$u ;
+      } else {
+	cv_outflow($gagePressure_f,$temperature_f,$u_f,
+		   $ci->$gagePressure,$ci->$temperature,$ci->$u,
+		   $gagePressureRef,$temperatureRef,$uRef,
+		   $area.n,$us_n,$Pambient,$gamma,$Rtilde) ;
+      }
+    } else {
+      if(uit < a0) { // Supersonic inflow
+	$gagePressure_f = $gagePressureRef ;
+	$temperature_f = $temperatureRef ;
+	$u_f = $uRef ;
+      } else {
+	cv_inflow($gagePressure_f,$temperature_f,$u_f,
+		  $ci->$gagePressure,$ci->$temperature,$ci->$u,
+		  $gagePressureRef,$temperatureRef,$uRef,
+		  $area.n,$us_n,$Pambient,$gamma,$Rtilde) ;
+      }
+    }
+  }
+
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma),constraint(farfield_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    hllc_flux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(farfield_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+  
+  $rule pointwise(gagePressure_f,temperature_f,u_f<-
+		  ci->(gagePressure,temperature,u),
+		  gagePressureRef,temperatureRef,uRef,
+		  area,us_n,
+		  Pambient,gamma,Rtilde),
+    constraint(inflow_BC) {
+    const real uit = dot($ci->$u,$area.n) ;
+    const real a0 = sqrt($gamma*$Rtilde*$temperatureRef)  ;
+    if(uit > 0) { // outflow just set dirichlet
+      $gagePressure_f = $ci->$gagePressure ;
+      $temperature_f = $ci->$temperature ;
+      $u_f = $ci->$u ;
+    } else {
+      if(uit < a0) { // Supersonic inflow
+	$gagePressure_f = $gagePressureRef ;
+	$temperature_f = $temperatureRef ;
+	$u_f = $uRef ;
+      } else {
+	cv_inflow($gagePressure_f,$temperature_f,$u_f,
+		  $ci->$gagePressure,$ci->$temperature,$ci->$u,
+		  $gagePressureRef,$temperatureRef,$uRef,
+		  $area.n,$us_n,$Pambient,$gamma,$Rtilde) ;
+      }
+    }
+  }
+
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma),constraint(inflow_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    hllc_flux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(inflow_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+  
+
+}

@@ -1,0 +1,55 @@
+#include <Loci.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  $rule default(molecularMass), comments("perfect gas mean molecular mass, default setting for air") {
+    $molecularMass = 28.96 ;
+  }
+  $rule default(gamma), comments("perfect gas isentropic index") {
+    $gamma = 1.4 ;
+  }
+  $rule singleton(Rtilde<-molecularMass) {
+    // Univeral Gas Constant
+    const double Rh = 8314.4621 ;
+    $Rtilde = Rh/$molecularMass ;
+  }
+
+  $rule default(p0),
+    comments("The background pressure used in gage pressure computations.  Pa = Pg+p0.") 
+  {
+    $p0.val = 0 ;
+  } 
+  
+  $rule singleton(Pambient<-p0) {
+    $Pambient = $p0 ;
+  } 
+
+  
+  $rule pointwise(rho<-temperature,gagePressure,Rtilde,Pambient) {
+    $rho = ($gagePressure+$Pambient)/($Rtilde*$temperature) ;
+  }
+  $rule pointwise(rho_f<-temperature_f,gagePressure_f,Rtilde,Pambient) {
+    $rho_f = ($gagePressure_f+$Pambient)/($Rtilde*$temperature_f) ;
+  }
+  
+  $rule pointwise(pressure<-gagePressure,Pambient) {
+    $pressure = $gagePressure+$Pambient ;
+  }
+  $rule pointwise(pressure_f<-gagePressure_f,Pambient) {
+    $pressure_f = $gagePressure_f+$Pambient ;
+  }
+
+
+  $rule pointwise(soundSpeed<-temperature,gamma,Rtilde) {
+    $soundSpeed = sqrt($gamma*$Rtilde*$temperature) ;
+  }
+
+  $rule pointwise(soundSpeed_f<-temperature_f,gamma,Rtilde) {
+    $soundSpeed_f = sqrt($gamma*$Rtilde*$temperature_f) ;
+  }
+
+  $rule singleton(Cp<-Rtilde,gamma) {
+    $Cp = $Rtilde*$gamma/($gamma-1.0) ;
+  }
+}

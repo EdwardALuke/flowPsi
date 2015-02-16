@@ -1,0 +1,153 @@
+#include <Loci.h>
+#include "readGrid.h"
+#include "inviscidFlux.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  class vwall_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "viscousWall" ; }
+    std::string variablesChecked() { return "adiabatic,qwall,Twall,Uwall" ; }
+    bool checkOptions(const options_list& bc_options) {  
+      error_message = "" ;
+      int count = 0 ;
+      if(bc_options.optionExists("adiabatic")) count++ ;
+      if(bc_options.optionExists("qwall")) count++ ;
+      if(bc_options.optionExists("Twall")) count++ ;
+      if(count != 1) {
+	error_message = "Must specify one of adiabatic, qwall, or Twall!" ;
+	return false ;
+      }
+      if(bc_options.optionExists("Twall")) {
+        if(!check_scalar_units(bc_options,"Twall","K")) {
+          error_message = "Wrong units for 'Twall'" ;
+          return false ;
+        }
+      }
+      if(bc_options.optionExists("qwall")) {
+        if(!check_scalar_units(bc_options,"qwall","watt/m/m")) {
+          error_message = "Wrong units for 'qwall'" ;
+          return false ;
+        }
+      }
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << std::endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<vwall_check> register_BC_vwall_check ;
+
+
+  // Identify walls that have a prescribed heat flux
+  $type wallHeatFlux store<bool> ;
+  $rule pointwise(wallHeatFlux),constraint(ref->qwall_BCoption){
+  }
+
+  $rule pointwise(wallHeatFlux),constraint(ref->adiabatic_BCoption){
+  }
+
+  $rule pointwise(Twall<-ref->Twall_BC) {
+    $Twall = $ref->$Twall_BC ;
+  }
+
+  $rule pointwise(Twall<-ci->(kconduct,cellcenter,temperature),area,facecenter,qwall),
+    constraint(viscousWall_BC,wallHeatFlux) {
+    const real dx = dot(($facecenter-$ci->$cellcenter),$area.n) ;
+    $Twall = -$qwall*dx/$ci->$kconduct + $ci->$temperature ;
+  }
+
+  $rule pointwise(qwall<-ref->qwall_BC) {
+    $qwall = $ref->$qwall_BC ;
+  }
+
+  $rule pointwise(qwall),constraint(ref->adiabatic_BCoption) {
+    $qwall = 0.0 ;
+  }
+
+  $rule pointwise(hf::vflux<-area,tau,u_f,qwall),
+    constraint(ViscousSimulation,viscousWall_BC,wallHeatFlux) {
+    const vect3d an=$area.n ;
+    const real sada=$area.sada ;
+    $vflux[0] =($tau.xx*an.x +$tau.xy*an.y+$tau.xz*an.z)*sada ;
+    $vflux[1] =($tau.xy*an.x +$tau.yy*an.y+$tau.yz*an.z)*sada ;
+    $vflux[2] =($tau.xz*an.x +$tau.yz*an.y+$tau.zz*an.z)*sada ;
+    // add energy flux for wall with specified heat flux
+    // includes adiabatic option when qwall = 0
+    $vflux[3] =($u_f.x*$vflux[0]+$u_f.y*$vflux[1]+ $u_f.z*$vflux[2]-
+                $qwall*sada) ;
+  }
+
+  // Stationary wall velocity, moving mesh, subtract grid velocity
+  $rule pointwise(stationary::wallVelocity<-us),
+    constraint(movingMesh,ref->stationary_BCoption) {
+    $wallVelocity = -1.*$us ;
+  }
+
+  // coriolis term, rotate in opposite direction
+  $type frameRotAxis   param<vect3d> ;
+  $type frameRotCenter param<vect3d> ;
+  $type frameRotSpeed param<real> ;
+
+  $rule pointwise(stationary::wallVelocity<-frameRotAxis,frameRotCenter,frameRotSpeed,facecenter), constraint(coriolis,ref->stationary_BCoption) {
+    const real angmag = $frameRotSpeed ;
+    const vect3d rotAxis = (-1./norm($frameRotAxis))*$frameRotAxis ;
+    vect3d omega = rotAxis*angmag ;
+    const vect3d rwall = ($facecenter-$frameRotCenter) ;
+    const vect3d dr = rwall - dot(rwall,rotAxis)*rotAxis ;
+    const vect3d uwall_rot = cross(omega,dr) ;
+    $wallVelocity = uwall_rot ;
+  }
+
+  $rule pointwise(temperature_f,gagePressure_f,u_f<-us,area,
+		  ci->(gagePressure,u),Twall,wallVelocity),
+    constraint(viscousWall_BC) {
+    // Wall tangential velocity
+    const vect3d uwall = $wallVelocity ;
+    $u_f = uwall-dot(uwall,$area.n)*$area.n + $us ;
+    
+    real pgb = $ci->$gagePressure ;
+    $gagePressure_f = pgb ;
+    $temperature_f = $Twall ;
+  } 
+
+  $rule pointwise(iflux<-area,gagePressure_f,us_n,Pambient),
+    constraint(viscousWall_BC) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    const real p = $gagePressure_f ;
+    const vect3d a = $area.n*$area.sada ;
+    $iflux[0] = 0 ;
+    $iflux[mi+0] = p*a.x ;
+    $iflux[mi+1] = p*a.y ;
+    $iflux[mi+2] = p*a.z ;
+    const real pw = $gagePressure_f + $Pambient ;
+    $iflux[ei] = pw*$area.sada*$us_n ;
+  } 
+
+  $rule apply(ci->srcJ<-gagePressure_f,Pambient,u_f,area)[Loci::Summation],
+      constraint(viscousWall_BC,iflux) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    $ci->$srcJ[mi+0][ei] -= $area.n.x*$area.sada ;
+    $ci->$srcJ[mi+1][ei] -= $area.n.y*$area.sada ;
+    $ci->$srcJ[mi+2][ei] -= $area.n.z*$area.sada ;
+    $ci->$srcJ[ei][ei] -= $area.sada*dot($u_f,$area.n) ;
+  } 
+
+
+  // Define viscous wall bcs
+  $type AllViscousBCs store<bool> ;
+  $rule pointwise(AllViscousBCs),constraint(viscousWall_BC) {} 
+  $rule pointwise(AllViscousBCs),constraint(wallLaw_BC) {}
+
+  $type AllWallBCs store<bool> ;
+  $rule pointwise(AllWallBCs), constraint(AllViscousBCs) {}
+  $rule pointwise(AllWallBCs), constraint(impermeable_BC) {}
+  $rule pointwise(AllWallBCs), constraint(reflecting_BC) {}
+
+}

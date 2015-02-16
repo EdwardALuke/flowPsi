@@ -1,0 +1,722 @@
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "SA_param.h"
+
+$include "flowPsi.lh"
+$include "SA.lh"
+
+namespace flowPsi {
+  class turbulencenu_t_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+    std::string variablesChecked() { return "nu_t" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+  register_BC<turbulencenu_t_check> register_BC_turbulencenu_t_check ;
+
+  $type SA_ModelType param<std::string> ;
+
+  $rule default(SA_ModelType),comments("Select variation of Spalart Allmaras model.  'baseline' is the original model, 'conservative' is a variant of the model that is in a more conservative form.  'catris' selects a compressible form suggested by Catris and Aupoix.") {
+    $SA_ModelType = "baseline" ;
+  }
+
+  $type SpTypeBaseline Constraint ;
+  $type SpTypeConservative Constraint ;
+  $type SpTypeCatris Constraint ;
+  
+  $rule constraint(SpTypeBaseline,SpTypeConservative,SpTypeCatris<-SA_ModelType) {
+    $SpTypeBaseline = EMPTY ;
+    $SpTypeConservative = $*SA_ModelType.domain() ;
+    $SpTypeCatris = EMPTY ;
+    if($SA_ModelType == "baseline") {
+      $SpTypeBaseline = $*SA_ModelType.domain() ;
+      $SpTypeConservative = EMPTY ;
+    } else if($SA_ModelType == "catris") {
+      $SpTypeCatris = $*SA_ModelType.domain() ;
+      $SpTypeConservative = EMPTY ;
+    }
+  }
+
+  $type nuTilde store<real>  ;
+  $type nuTilde_f store<real> ;
+  $type nuTilde_bc store<real> ;
+  $type spalart param<Spa_All_param> ;
+  $rule default(spalart),
+    comments("Parameters used in the definition of the Spalart Allmaras turbulence model."){}
+
+  $type flowRegime param<string> ;
+  $type SP_info param<string> ;
+  $rule singleton(SP_info<-flowRegime),
+    constraint(TurbulentSimulation,flowRegime) {}
+
+
+  // This distance is modified when the DES model is used.
+  $type sa_dist_noslip store<real> ;
+  $rule pointwise(sa_dist_noslip<-dist_noslip) {
+    $sa_dist_noslip = $dist_noslip ;
+  }
+
+  $type xcoeff store<real> ;
+  $rule pointwise(xcoeff<-mu,nuTilde,rho) {
+    $xcoeff=$rho*$nuTilde/$mu ;
+  }
+
+  $type fv1 store<real> ;
+  $type fv2 store<real> ;
+  $rule pointwise(fv1<-xcoeff,spalart) {
+    real cv1=$spalart.cv1 ;
+    $fv1=pow($xcoeff,3)/(pow($xcoeff,3)+pow(cv1,3)) ;
+  }
+  $rule pointwise(fv2<-xcoeff,fv1) {
+    $fv2=1.0-($xcoeff/(1.0+$xcoeff*$fv1)) ;
+  }
+
+  $type tmu store<real> ;
+
+  $rule pointwise(sa::tmu<-nuTilde,rho,fv1,SP_info) {
+    $tmu=$nuTilde*$fv1*$rho ;
+  }
+
+  $type S_tilda store<real> ;
+  $rule unit(S_tilda<-SP_info) {
+    $S_tilda = 0.0 ;
+  }
+  $rule apply(S_tilda<-SP_info,vortMag)[Loci::Summation] {
+    $S_tilda += $vortMag ;
+  }
+  $rule apply(S_tilda<-nuTilde,spalart,fv2,sa_dist_noslip)[Loci::Summation] {
+    real k_coeff=$spalart.k_coeff ;
+    real denom=k_coeff*k_coeff*$sa_dist_noslip*$sa_dist_noslip ;
+    $S_tilda += $nuTilde*$fv2/denom ;
+  }
+
+  $type S_tilda_lim store<real> ;
+  $rule pointwise(S_tilda_lim<-S_tilda,vortMag) {
+    $S_tilda_lim = max($S_tilda,0.3*$vortMag) ;
+  }
+
+  $type rcoeff store<real> ;
+  $rule pointwise(rcoeff<-nuTilde,S_tilda_lim,sa_dist_noslip,spalart) {
+    real k_coeff=$spalart.k_coeff ;
+    real S_t=$S_tilda_lim ;
+    real denom=k_coeff*k_coeff*$sa_dist_noslip*$sa_dist_noslip ;
+    double rclip = 10 ;
+    if(S_t < $nuTilde/(rclip*denom))
+      $rcoeff = rclip ;
+    else
+      $rcoeff=$nuTilde/(S_t*denom) ;
+  }
+
+  $type gcoeff store<real> ;
+
+  $rule pointwise(gcoeff<-rcoeff,spalart) {
+    const real cw2=$spalart.cw2 ;
+    const real r = $rcoeff ;
+    const real r2 = r*r ;
+    const real r6 = r2*r2*r2 ;
+    $gcoeff = r+cw2*(r6-r) ;
+  }
+
+  $type fw store<real> ;
+
+  $type cw36 param<real> ;
+  $rule singleton(cw36<-spalart) {
+    $cw36 = pow($spalart.cw3,6) ;
+  }
+  $rule pointwise(fw<-gcoeff,cw36) {
+    const real g = $gcoeff ;
+    const real g2 = g*g ;
+    const real g6 = g2*g2*g2 ;
+    const real parameter=(1.0+$cw36)/(g6+$cw36) ;
+    $fw=g*pow(parameter, 1.0/6.0) ;
+  }
+
+  $type cw1 param<real> ;
+  $rule singleton(cw1<-spalart) {
+    real cb1=$spalart.cb1 ;
+    real cb2=$spalart.cb2 ;
+    real sigma=$spalart.sigma ;
+    real k_coeff=$spalart.k_coeff ;
+    $cw1 = (cb1)/(k_coeff*k_coeff)+(1.0+(cb2))/(sigma) ;
+  }
+
+
+// Boundary conditions
+  $rule pointwise(nu_t_bc<-BC_options) {
+      real nuTilde = 5e-9 ;
+      const Loci::options_list &finput = $BC_options ;
+      if(finput.optionExists("nu_t")) {
+        finput.getOption("nu_t",nuTilde) ;
+      }
+      $nu_t_bc = nuTilde ;
+  }
+
+  $rule pointwise(nuTilde_bc<-ref->nu_t_bc),
+    constraint(ci->nuTilde) {
+    $nuTilde_bc = $ref->$nu_t_bc ;
+  }
+
+  $rule pointwise(noslip::prescribe::nuTilde_f),constraint(viscousWall_BC) {
+    $nuTilde_f = 0.0 ;
+  }
+
+  $rule pointwise(nuTilde_f<-(cr,cl)->(vol,nuTilde)) {
+    real vrvl = 1.0/($cr->$vol+$cl->$vol) ;
+    $nuTilde_f = ($cr->$vol*$cl->$nuTilde+$cl->$vol*$cr->$nuTilde)*vrvl ;
+  }
+
+  // Get nu tilde from turbulent nu
+  real find_nu_tilde(const real nu_turb,const real cv1, const real nu_lam) {
+    // Solve nu_turb*(nu_tilde^3+cv1^3/nu_lam^3) - nu_tilde^4 = 0
+    // using newton method
+
+    real nu_tilde = nu_turb ;
+    const real coef = nu_turb*pow(cv1*nu_lam,3) ;
+    const real eps = 1e-8 ;
+    const int MAX_ITER = 100 ;
+    int i ;
+    for(i=0;i<MAX_ITER;++i) {
+      real nu_tilde2 = nu_tilde*nu_tilde ;
+      real nu_tilde3 = nu_tilde*nu_tilde2 ;
+      real f = nu_turb*nu_tilde3 + coef - nu_tilde3*nu_tilde  ;
+      real fp = 3.*nu_turb*nu_tilde2 - 4.*nu_tilde3 ;
+      real h = -f/fp ;
+      nu_tilde += h ;
+      if(abs(h) > nu_turb*eps)
+        break ;
+    }
+    if(i == MAX_ITER) {
+      Loci::debugout << "nu_tilde = " << nu_tilde <<" " ;
+      Loci::debugout << "prescribed SA bc failed to converge!" << endl ;
+      nu_tilde = nu_turb ;
+    }
+    return nu_tilde ;
+  }
+  
+//   $rule pointwise(prescribe::nuTilde_f<-area,mu_f,u_f,us_n,
+//                   ci->nuTilde,prescribe_turb_ref,rho_f,spalart),
+//     constraint(TurbulentSimulation,area,ci->u,prescribe_turb_ref) {
+//     const vect3d n = $area.n ;
+
+//     const real mut = $prescribe_turb_ref[1] ;
+//     const real nu_turb = mut/$rho_f ;
+//     const real nu_lam = $mu_f/$rho_f ;
+//     // Use newton to find nu_tilde that gets us nu_turb
+//     $nuTilde_f = find_nu_tilde(nu_turb,$spalart.cv1,nu_lam) ;
+//     //    cout << "nu_turb = " << nu_turb <<", nu_t=" << $nuTilde_f << endl ;
+
+//     // If outflow then take inside
+//     if(dot($u_f,n)+$us_n >= -0.0){
+//       $nuTilde_f = $ci->$nuTilde ;
+//     }
+//  }
+
+  $type nuTilde_src store<real> ;
+
+  $type nuTilde_fjm store<real> ;
+  $type nuTilde_fjp store<real> ;
+  $type nuTilde_srcJ store<real> ;
+  $type nuTilde_srcJ_L store<real> ;
+  $type nuTilde_srcJ_U store<real> ;
+
+
+  $rule unit(nuTilde_srcJ_L<-SP_info), constraint((cl,cr)->vol) {
+    $nuTilde_srcJ_L=0.0 ;
+  }
+
+  $rule unit(nuTilde_srcJ_U<-SP_info), constraint((cl,cr)->vol) {
+    $nuTilde_srcJ_U=0.0 ;
+  }
+  
+  // Production
+  $rule apply(nuTilde_src<-rho,nuTilde,spalart,S_tilda_lim,vol,SP_info)[Loci::Summation] {
+    real cb1=$spalart.cb1 ;
+    $nuTilde_src += $rho*$nuTilde*$S_tilda_lim*cb1*$vol ;
+  }
+
+  //destruction term in turbulent source terms
+  $type nuTilde_destruct store<real> ;
+  $rule pointwise(nuTilde_destruct<-fw,nuTilde,sa_dist_noslip,vol,rho,cw1,SP_info) {
+    const real t = $nuTilde/$sa_dist_noslip ;
+    $nuTilde_destruct = $rho*$fw*$cw1*t*t*$vol ;
+  }
+
+  $rule apply(nuTilde_src<-nuTilde_destruct,SP_info,nuTilde)[Loci::Summation] {
+    $nuTilde_src -= $nuTilde_destruct ;
+  }
+
+  // Destruction Jacobian
+  $type rpcoeff store<real> ;
+  $rule pointwise(rpcoeff<-nuTilde,S_tilda_lim,xcoeff,mu,rho,fv2,sa_dist_noslip,spalart) {
+    double rclip = 9e6 ;
+    real S_t=$S_tilda_lim ;
+    real k_coeff=$spalart.k_coeff ;
+    real denom=k_coeff*k_coeff*$sa_dist_noslip*$sa_dist_noslip ;
+    if(S_t < $nuTilde/(rclip*denom)) {
+      $rpcoeff = 0 ;
+    } else {
+      const real chi = $xcoeff ;
+      const real chiP = 1./$mu ;
+      const real chi3 = chi*chi*chi ;
+      const real chi4 = chi3*chi ;
+      const real chi6 = chi3*chi3 ;
+      const real cv1 = $spalart.cv1 ;
+      const real cv13 = cv1*cv1*cv1 ;
+      const real fv2p = chi*(4*(chi3*chiP) / (chi3 + cv13) -
+                             3*(chi6*chiP) / pow(chi3 + cv13, 2)) /
+        pow(chi4 / (chi3 + cv13) + 1, 2) - chiP / (chi4 / (chi3 + cv13) + 1) ;
+      const real Stp = ($fv2/$rho + $nuTilde*fv2p)/(denom) ;
+      $rpcoeff=1./($rho*denom*S_t)-$nuTilde*Stp/(denom*S_t*S_t) ;
+    }
+  }
+  $type gpcoeff store<real> ;
+
+  $rule pointwise(gpcoeff<-rcoeff,rpcoeff,spalart) {
+    real cw2=$spalart.cw2 ;
+    const real r = $rcoeff ;
+    const real rp = $rpcoeff ;
+    $gpcoeff = rp+cw2*(6.*pow(r,5)*rp - rp) ;
+  }
+  $type fwp store<real> ;
+  $rule pointwise(fwp<-gcoeff,gpcoeff,cw36) {
+    const real g2 = $gcoeff*$gcoeff ;
+    const real g6 = g2*g2*g2 ;
+    const real term = pow(($cw36+1.)/($cw36+g6),1./6.) ;
+    const real term2 = term*term ;
+    const real term5 = term2*term2*term ;
+    const real rterm5 = 1./term5 ;
+    const real rsum = 1./(g6+$cw36) ;
+    $fwp= $gpcoeff*term - $gpcoeff*(($cw36 + 1)*g6) *rsum*rsum*rterm5 ;
+  }
+  $rule apply(nuTilde_srcJ<-rho,nuTilde,sa_dist_noslip,cw1,
+              fw,fwp,spalart,vol,SP_info)[Loci::Summation] {
+    const real y=$sa_dist_noslip ;
+    const real fwP = $fwp ;
+    $nuTilde_srcJ -= $vol*$cw1*$rho*$nuTilde*($rho*$nuTilde*fwP+2.*$fw)/(y*y) ;
+  }
+
+
+  // Turbulent diffusion
+  $type diff1_f store<real> ;
+  $type div_nuTilde_f store<real> ;
+  $rule pointwise(div_nuTilde_f<-grads_f(nuTilde),area) {
+    $div_nuTilde_f = dot($grads_f(nuTilde),$area.n)*($area.sada) ;
+  }
+
+  $type div_nuTilde store<real> ;
+  $rule unit(div_nuTilde),constraint(spalart,geom_cells) { $div_nuTilde = 0 ; }
+
+  $rule apply((cl->div_nuTilde) <- div_nuTilde_f) [Loci::Summation] {
+    join($cl->$div_nuTilde,$div_nuTilde_f) ;
+  }
+
+  $rule apply((cr->div_nuTilde)<-div_nuTilde_f)[Loci::Summation] {
+    join($cr->$div_nuTilde,-$div_nuTilde_f) ;
+  }
+
+
+  // Baseline model.. not stable
+
+  // diff1 term = (rho/sigma) *  del . [ ( nu + (1+cb2) nuTilde) del(nuTilde)]
+
+  $rule pointwise(diff1_f<-grads_f(nuTilde),nuTilde_f,mu_f,area,spalart,SP_info,rho_f),constraint(SP_info,nuTilde_f,SpTypeBaseline)
+ {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    $diff1_f=dot($grads_f(nuTilde),$area.n)*$area.sada ;
+    $diff1_f=($diff1_f*($mu_f/$rho_f+(1.+cb2)*$nuTilde_f))/(sigma) ;
+  }
+
+  $rule apply(cl->nuTilde_src<-diff1_f,cl->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeBaseline,cl->geom_cells) {
+    $cl->$nuTilde_src += $cl->$rho*$diff1_f ;
+  }
+  $rule apply(cr->nuTilde_src<-diff1_f,cr->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeBaseline,cr->geom_cells) {
+    $cr->$nuTilde_src -= $cr->$rho*$diff1_f ;
+  }
+
+  //diffusion jacobians
+  $rule apply(nuTilde_fjp<-(cl,cr)->(cellcenter,rho),mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeBaseline,(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    real rho = .5*($cl->$rho+$cr->$rho) ;
+    const real C = ($mu_f+(1.+cb2)*rho*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjp -= -C/(d*sigma) ;
+  }
+  $rule apply(nuTilde_fjm<-(cl,cr)->(cellcenter,rho),mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeBaseline,(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    real rho = .5*($cl->$rho+$cr->$rho) ;
+    const real C = ($mu_f+(1.+cb2)*rho*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjm += -C/(d*sigma) ;
+  }
+
+  $rule apply(ci->nuTilde_srcJ<-area,ci->cellcenter,facecenter,mu_f,rho_f,nuTilde_f,spalart)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeBaseline,ci->vol,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
+    $ci->$nuTilde_srcJ += -C/(d*sigma) ;
+  }
+
+  // diff2 term = - rho*nuTilde*[del . del(nuTilde)]*(cb2/sigma) ;
+
+  $rule apply(nuTilde_src<-rho,nuTilde,div_nuTilde,spalart)[Loci::Summation],constraint(SP_info,nuTilde,geom_cells,SpTypeBaseline) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    join($nuTilde_src,-$rho*$nuTilde*$div_nuTilde*cb2/sigma) ;
+  }
+  
+  const real factorx = 2 ;
+  const real factory = .5 ;
+
+  // derivative from right side of flux added to left cell
+  $rule apply(nuTilde_srcJ_U <- cl->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeBaseline,cl->(rho,nuTilde,geom_cells),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_U, -factorx*(C/d)*$cl->$rho*$cl->$nuTilde) ;
+  }
+
+  // derivative from right side flux added to right cell
+  $rule apply(cr->nuTilde_srcJ<- cr->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeBaseline,cr->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cr->$nuTilde_srcJ, factorx*factory*(C/d)*$cr->$rho*$cr->$nuTilde) ;
+  }
+  
+  // derivative from left side flux added to right cell
+  $rule apply(nuTilde_srcJ_L <- cr->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeBaseline,cr->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_L, -factorx*(C/d)*$cr->$rho*$cr->$nuTilde) ;
+  }
+  // derivative from left side flux added to left cell
+  $rule apply(cl->nuTilde_srcJ<- cl->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeBaseline,cl->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cl->$nuTilde_srcJ, factorx*factory*(C/d)*$cl->$rho*$cl->$nuTilde) ;
+  }
+
+  // derivative from boundary flux (excluded because it has no cl,cr->cellcenter)
+
+  $rule apply(ci->nuTilde_srcJ<- ci->(rho,nuTilde),ci->cellcenter,facecenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeBaseline,ci->(rho,nuTilde),ci->cellcenter,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($facecenter-$ci->$cellcenter,$area.n) ;
+    join($ci->$nuTilde_srcJ, factorx*factory*(C/d)*$ci->$rho*$ci->$nuTilde) ;
+  }
+
+
+  // conservative form.. neglecting grad rho terms
+  // diff1 term = (1/sigma) *  del . [ rho ( nu + (1+cb2) nuTilde) del(nuTilde)]
+
+  $rule pointwise(diff1_f<-grads_f(nuTilde),nuTilde_f,mu_f,area,spalart,SP_info,rho_f),constraint(SP_info,nuTilde_f,SpTypeConservative) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    $diff1_f=dot($grads_f(nuTilde),$area.n)*$area.sada ;
+    $diff1_f=($diff1_f*($mu_f+$rho_f*(1.+cb2)*$nuTilde_f))/(sigma) ;
+  }
+
+  $rule apply(cl->nuTilde_src<-diff1_f,cl->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeConservative,cl->geom_cells) {
+    $cl->$nuTilde_src += $diff1_f ;
+  }
+  $rule apply(cr->nuTilde_src<-diff1_f,cr->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeConservative,cr->geom_cells) {
+    $cr->$nuTilde_src -= $diff1_f ;
+  }
+
+  //diffusion jacobians
+  $rule apply(nuTilde_fjp<-(cl,cr)->cellcenter,rho_f,mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,(cl,cr)->cellcenter,nuTilde_f,SpTypeConservative) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjp -= -C/(d*sigma) ;
+  }
+  $rule apply(nuTilde_fjm<-(cl,cr)->cellcenter,rho_f,mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,(cl,cr)->cellcenter,nuTilde_f,SpTypeConservative) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjm += -C/(d*sigma) ;
+  }
+
+  $rule apply(ci->nuTilde_srcJ<-area,ci->cellcenter,facecenter,mu_f,rho_f,nuTilde_f,spalart)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeConservative,ci->vol,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
+    $ci->$nuTilde_srcJ += -C/(d*sigma) ;
+  }
+
+
+  // diff2 term = - rho*nuTilde*[del . del(nuTilde)]*(cb2/sigma) ;
+
+  
+  
+  $rule apply((cl->nuTilde_src) <- div_nuTilde_f,cl->(rho,nuTilde),spalart) [Loci::Summation],
+    constraint(SpTypeConservative,cl->(rho,nuTilde,nuTilde_src)) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    join($cl->$nuTilde_src,-cb2*$div_nuTilde_f*$cl->$rho*$cl->$nuTilde/sigma) ;
+  }
+
+  $rule apply((cr->nuTilde_src)<-div_nuTilde_f,cr->(rho,nuTilde),spalart)[Loci::Summation],
+    constraint(SpTypeConservative,cr->(rho,nuTilde,nuTilde_src)) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    join($cr->$nuTilde_src,cb2*$div_nuTilde_f*$cr->$rho*$cr->$nuTilde/sigma) ;
+  }
+
+//  const real factorx = 2 ;
+//  const real factory = .5 ;
+
+  // derivative from right side of flux added to left cell
+  $rule apply(nuTilde_srcJ_U <- cl->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeConservative,cl->(rho,nuTilde,geom_cells),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_U, -factorx*(C/d)*$cl->$rho*$cl->$nuTilde) ;
+  }
+
+  // derivative from right side flux added to right cell
+  $rule apply(cr->nuTilde_srcJ<- cr->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeConservative,cr->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cr->$nuTilde_srcJ, factorx*factory*(C/d)*$cr->$rho*$cr->$nuTilde) ;
+  }
+  
+  // derivative from left side flux added to right cell
+  $rule apply(nuTilde_srcJ_L <- cr->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeConservative,cr->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_L, -factorx*(C/d)*$cr->$rho*$cr->$nuTilde) ;
+  }
+  // derivative from left side flux added to left cell
+  $rule apply(cl->nuTilde_srcJ<- cl->(rho,nuTilde),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeConservative,cl->(rho,nuTilde),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cl->$nuTilde_srcJ, factorx*factory*(C/d)*$cl->$rho*$cl->$nuTilde) ;
+  }
+
+  // derivative from boundary flux (excluded because it has no cl,cr->cellcenter)
+
+  $rule apply(ci->nuTilde_srcJ<- ci->(rho,nuTilde),ci->cellcenter,facecenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeConservative,ci->(rho,nuTilde),ci->cellcenter,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($facecenter-$ci->$cellcenter,$area.n) ;
+    join($ci->$nuTilde_srcJ, factorx*factory*(C/d)*$ci->$rho*$ci->$nuTilde) ;
+  }
+
+  
+  // Catris and Aupoix form
+
+  // diff1 term = (1/sigma) *  del . [ ( nu/sqrt(rho) + (1+cb2) sqrt(rho) nuTilde) del(sqrt(rho) nuTilde)]
+  // diff2 term = - sqrt(rho)*nuTilde*[del . del(sqrt(rho)*nuTilde)]*(cb2/sigma) ;
+
+
+  $type nuTilde_cat store<real> ;
+  $type nuTilde_cat_f store<real> ;
+
+  $rule pointwise(nuTilde_cat<-rho,nuTilde) {
+    $nuTilde_cat = sqrt($rho)*$nuTilde ;
+  }
+
+  $rule pointwise(nuTilde_cat_f<-rho_f,nuTilde_f) {
+    $nuTilde_cat_f = sqrt($rho_f)*$nuTilde_f ;
+  }
+
+  $rule pointwise(diff1_f<-grads_f(nuTilde),grads_f(nuTilde_cat),nuTilde_cat_f,mu_f,area,spalart,SP_info,rho_f),constraint(SP_info,nuTilde_f,SpTypeCatris) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    
+    real difft = dot($grads_f(nuTilde_cat),$area.n) ;
+    real diffl = dot($grads_f(nuTilde),$area.n) ;
+    $diff1_f=$area.sada*(diffl*$mu_f + difft*(1.+cb2)*$nuTilde_cat_f)/sigma ;
+  }
+
+  $rule apply(cl->nuTilde_src<-diff1_f,cl->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeCatris,cl->geom_cells) {
+    $cl->$nuTilde_src += $diff1_f ;
+  }
+  $rule apply(cr->nuTilde_src<-diff1_f,cr->rho)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeCatris,cr->geom_cells) {
+    $cr->$nuTilde_src -= $diff1_f ;
+  }
+
+  //diffusion jacobians
+  $rule apply(nuTilde_fjp<-(cl,cr)->cellcenter,rho_f,mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,(cl,cr)->cellcenter,nuTilde_f,SpTypeCatris) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjp -= -C/(d*sigma) ;
+  }
+  $rule apply(nuTilde_fjm<-(cl,cr)->cellcenter,rho_f,mu_f,nuTilde_f,spalart,area)[Loci::Summation],constraint(SP_info,(cl,cr)->cellcenter,nuTilde_f,SpTypeCatris) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    $nuTilde_fjm += -C/(d*sigma) ;
+  }
+
+  $rule apply(ci->nuTilde_srcJ<-area,ci->cellcenter,facecenter,mu_f,rho_f,nuTilde_f,spalart)[Loci::Summation],constraint(SP_info,nuTilde_f,SpTypeCatris,ci->vol,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2 = $spalart.cb2 ;
+    const real C = ($mu_f+(1.+cb2)*$rho_f*$nuTilde_f)*$area.sada ;
+    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
+    $ci->$nuTilde_srcJ += -C/(d*sigma) ;
+  }
+
+
+  // diff2 term = - sqrt(rho)*nuTilde*[del . del(sqrt(rho)*nuTilde)]*(cb2/sigma) ;
+
+  
+  $type div_nuTilde_cat_f store<real> ;
+  $rule pointwise(div_nuTilde_cat_f<-grads_f(nuTilde_cat),area) {
+    $div_nuTilde_cat_f = dot($grads_f(nuTilde_cat),$area.n)*($area.sada) ;
+  }
+  $rule apply((cl->nuTilde_src) <- div_nuTilde_cat_f,cl->nuTilde_cat,spalart) [Loci::Summation],
+    constraint(SpTypeCatris,cl->(nuTilde_cat,nuTilde_src)) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    join($cl->$nuTilde_src,-cb2*$div_nuTilde_cat_f*$cl->$nuTilde_cat/sigma) ;
+  }
+
+  $rule apply((cr->nuTilde_src)<-div_nuTilde_cat_f,cr->nuTilde_cat,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,cr->(nuTilde_cat,nuTilde_src)) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    join($cr->$nuTilde_src,cb2*$div_nuTilde_cat_f*$cr->$nuTilde_cat/sigma) ;
+  }
+
+//  const real factorx = 2 ;
+//  const real factory = .5 ;
+
+  // derivative from right side of flux added to left cell
+  $rule apply(nuTilde_srcJ_U <- rho_f,cl->(nuTilde_cat),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,cl->(nuTilde_cat,geom_cells),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_U, -factorx*(C/d)*sqrt($rho_f)*$cl->$nuTilde_cat) ;
+  }
+
+  // derivative from right side flux added to right cell
+  $rule apply(cr->nuTilde_srcJ<- rho_f,cr->(nuTilde_cat),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,cr->(nuTilde_cat),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cr->$nuTilde_srcJ, factorx*factory*(C/d)*sqrt($rho_f)*$cr->$nuTilde_cat) ;
+  }
+  
+  // derivative from left side flux added to right cell
+  $rule apply(nuTilde_srcJ_L <- rho_f,cr->(nuTilde_cat),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,cr->(nuTilde_cat),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+    join($nuTilde_srcJ_L, -factorx*(C/d)*sqrt($rho_f)*$cr->$nuTilde_cat) ;
+  }
+  // derivative from left side flux added to left cell
+  $rule apply(cl->nuTilde_srcJ<- rho_f,cl->(nuTilde_cat),(cl,cr)->cellcenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,cl->(nuTilde_cat),(cl,cr)->cellcenter) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+    join($cl->$nuTilde_srcJ, factorx*factory*(C/d)*sqrt($rho_f)*$cl->$nuTilde_cat) ;
+  }
+
+  // derivative from boundary flux (excluded because it has no cl,cr->cellcenter)
+
+  $rule apply(ci->nuTilde_srcJ<- rho_f,ci->(nuTilde_cat),ci->cellcenter,facecenter,area,spalart)[Loci::Summation],
+    constraint(SpTypeCatris,ci->(nuTilde_cat),ci->cellcenter,no_symmetry_BC) {
+    real sigma=$spalart.sigma ;
+    real cb2=$spalart.cb2 ;
+    const real C = cb2*$area.sada ;
+    const real d = sigma*dot($facecenter-$ci->$cellcenter,$area.n) ;
+    join($ci->$nuTilde_srcJ, factorx*factory*(C/d)*sqrt($rho_f)*$ci->$nuTilde_cat) ;
+  }
+
+
+  $rule apply(nuTilde_fjp<-nuTilde_srcJ_L)[Loci::Summation] {
+    $nuTilde_fjp += $nuTilde_srcJ_L ;
+  }
+  
+  $rule apply(nuTilde_fjm<-nuTilde_srcJ_U)[Loci::Summation] {
+    $nuTilde_fjm -= $nuTilde_srcJ_U ;
+  }
+
+  // Remove the contributions to the diagonal from the L and U 
+  // non-conservative terms
+  $rule apply(nuTilde_srcJ<-upper->nuTilde_srcJ_L,lower->nuTilde_srcJ_U)[Loci::Summation],
+    constraint(geom_cells,gauss_seidel_iter) {
+    for(const int *ui = $upper.begin();ui!=$upper.end();++ui)
+      $nuTilde_srcJ += ui->$nuTilde_srcJ_L ; //the normal vector of the face where fjp is
+    for(const int *li = $lower.begin();li!=$lower.end();++li)
+      $nuTilde_srcJ += li->$nuTilde_srcJ_U ;
+  }
+
+  $type scalarTransportP(X,Y) param<bool> ;
+  $rule pointwise(OUTPUT<-scalarTransportP(nuTilde,TurbulentSimulation)) {
+  }
+
+  OUTPUT_SCALAR("cell2node(nuTilde)",nu_t) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(tmu)",tmu) ;
+}
+

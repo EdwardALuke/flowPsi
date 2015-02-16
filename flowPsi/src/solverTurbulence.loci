@@ -1,0 +1,189 @@
+#include <Loci.h>
+#include <Tools/tools.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+//   class turbulence_check : public BC_Check {
+//     string error_message ;
+//   public:
+//     std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+//     std::string variablesChecked() { return "k,e,w,tmu" ; }
+//     bool checkOptions(const options_list& bc_options) {
+//       error_message = "" ;
+//       return true ;
+//     }
+//     std::ostream &ErrorMessage(std::ostream &s) {
+//       s << error_message << endl ;
+//       return s;
+//     }
+//   } ;
+
+//   register_BC<turbulence_check> register_BC_turbulence_check ;
+
+//   $type turbulence_model param<std::string> ;
+//   $rule default(turbulence_model),
+//     comments("Select the turbulence model: options currently supported are 'KW' - Wilcox k-omega model, 'BSL' - Menter's baseline model, 'SST' - Menter's Shear Stress Transport Model, 'RKE' - realizable k-epsilon model, 'RKECUBIC' - nonlinear (cubic) realizable k-epsilon model, and 'Spalart_Allmaras' for the Spalart Allmaras model.") 
+//   {
+//     $turbulence_model = "none" ; 
+//   } 
+
+//   $type LaminarSimulation Constraint ;
+//   $type TurbulentSimulation Constraint ;
+//   $type transport_model param<std::string> ;
+
+//   $rule constraint(LaminarSimulation,TurbulentSimulation<-
+//                    turbulence_model,transport_model) {
+//     $LaminarSimulation = EMPTY ;
+//     $TurbulentSimulation = EMPTY ;
+//       if($turbulence_model == "none") {
+//         $LaminarSimulation = ~EMPTY ;
+//       } else {
+//         $TurbulentSimulation = ~EMPTY ;
+//         if($transport_model == "none") {
+//           if(Loci::MPI_rank == 0) {
+//             cerr << "You must set transport_model in the vars file when using"
+//                  << endl << "turbulence_model = " << $turbulence_model 
+//                  << endl ;
+//           }
+//           Loci::Abort() ;
+//         }
+//       }
+//   } 
+
+  $type distance_function param<std::string> ;
+  $rule default(distance_function),
+    comments("Select the distance function to the wall. May be either the normal projected distance to the nearest face (projected), or the eulerian distance from face center to cell center (euler)") 
+  {
+    $distance_function = "projected" ; 
+  } 
+
+  $type EulerDistanceFunction Constraint ;
+  $rule constraint(EulerDistanceFunction<-distance_function) {
+      $EulerDistanceFunction = EMPTY ;
+      if($distance_function == "euler") {
+        $EulerDistanceFunction = ~EMPTY ;
+      }
+  } 
+
+  $rule pointwise(vort<-gradv3d(u)) {
+    $vort.x=$gradv3d(u).z.y-$gradv3d(u).y.z ;
+    $vort.y=$gradv3d(u).x.z-$gradv3d(u).z.x ;
+    $vort.z=$gradv3d(u).y.x-$gradv3d(u).x.y ;
+  }
+
+  $rule pointwise(axi::vort<-gradv3d(u),u,cellcenter),
+    constraint(u,axisymmetricCoordinateModel) {
+    real y = $cellcenter.y ;
+    $vort.x=$gradv3d(u).z.y+$u.z/y ;
+    $vort.y=-$gradv3d(u).z.x ;
+    $vort.z=$gradv3d(u).y.x-$gradv3d(u).x.y ;
+  }
+
+  $rule pointwise(vort_f<-gradv3d_f(u)) {
+    $vort_f.x=$gradv3d_f(u).z.y-$gradv3d_f(u).y.z ;
+    $vort_f.y=$gradv3d_f(u).x.z-$gradv3d_f(u).z.x ;
+    $vort_f.z=$gradv3d_f(u).y.x-$gradv3d_f(u).x.y ;
+  }
+
+  $rule pointwise(axi::vort_f<-gradv3d_f(u),u_f,facecenter,area),
+    constraint(u_f,axisymmetricCoordinateModel) {
+      
+    $vort_f.x=$gradv3d_f(u).z.y ;
+    $vort_f.y=-$gradv3d_f(u).z.x ;
+    $vort_f.z=$gradv3d_f(u).y.x-$gradv3d_f(u).x.y ;
+    if($area.sada != 0) {
+      real y = $facecenter.y ;
+      $vort_f.x += $u_f.z/y ;
+    }
+  }
+
+  $rule pointwise(vortMag<-vort) {
+    $vortMag = norm($vort) ;
+  }
+
+  $rule pointwise(strainRate<-gradv3d(u)) {
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $gradv3d(u).z.z ;
+      const real dvdx = $gradv3d(u).y.x ;
+      const real dwdx = $gradv3d(u).z.x ;
+      const real dwdy = $gradv3d(u).z.y ;
+      const real dudy = $gradv3d(u).x.y ;
+      const real dudz = $gradv3d(u).x.z ;
+      const real dvdz = $gradv3d(u).y.z ;
+
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRate = sqrt(S2) ;
+  }
+
+  $rule pointwise(axi::strainRate<-u,gradv3d(u),cellcenter),
+      constraint(u,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y ;
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $u.y/y ;
+      const real dvdx = $gradv3d(u).y.x ;
+      const real dwdx = $gradv3d(u).z.x ;
+      const real dwdy = $gradv3d(u).z.y-$u.z/y ;
+      const real dudy = $gradv3d(u).x.y ;
+      const real dudz = 0.0 ;
+      const real dvdz = 0.0 ;
+
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRate = sqrt(S2) ;
+  }
+
+  $rule pointwise(divu<-gradv3d(u)) {
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $gradv3d(u).z.z ;
+      const real dudx = $gradv3d(u).x.x ;
+      $divu = (dudx+dvdy+dwdz) ;
+  }
+
+  $rule pointwise(axi::divu<-u,gradv3d(u),cellcenter),
+      constraint(u,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y;
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $u.y/y ;
+      $divu = (dudx+dvdy+dwdz) ;
+  }
+
+  $rule pointwise(dist_noslip<-min_cell2noslip->area,cellcenter,min_cell2noslip->facecenter) {
+        vect3d dist=$min_cell2noslip->$facecenter-$cellcenter ;
+        //        $dist_noslip = norm(dist) ;
+        $dist_noslip=abs(dot(dist,$min_cell2noslip->$area.n)) ;
+  }
+
+  $rule pointwise(euler::dist_noslip<-min_cell2noslip->area,cellcenter,min_cell2noslip->facecenter),
+	  constraint(min_cell2noslip->facecenter,EulerDistanceFunction) {
+    vect3d dist=$min_cell2noslip->$facecenter-$cellcenter ;
+    $dist_noslip = norm(dist) ;
+  }
+
+
+  $rule pointwise(dist_noslip_f<-ci->min_cell2noslip->area,facecenter,ci->min_cell2noslip->facecenter) {
+    vect3d fcenter = $facecenter ;
+    vect3d dist=$ci->$min_cell2noslip->$facecenter-fcenter ;
+    $dist_noslip_f=abs(dot(dist,$ci->$min_cell2noslip->$area.n)) ;
+  }
+
+  $rule pointwise(euler::dist_noslip_f<-facecenter,ci->min_cell2noslip->facecenter),
+	  constraint(ci->min_cell2noslip->facecenter,EulerDistanceFunction) {  
+    vect3d dist=$ci->$min_cell2noslip->$facecenter-$facecenter ;
+    $dist_noslip_f = norm(dist) ;
+  }
+
+  
+  // Q criterion for vortex and turbulent structure detection
+  $type Q store<real> ;
+  $rule pointwise(Q<-vortMag,strainRate) {
+    $Q = 0.5*($vortMag*$vortMag - $strainRate*$strainRate) ;
+  }
+
+}

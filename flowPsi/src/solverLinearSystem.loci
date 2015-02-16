@@ -1,0 +1,167 @@
+#include <Loci.h>
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  $rule unit(fjm),constraint((cl,cr)->(u,temperature,gagePressure)),prelude {
+    $fjm.setVecSize(5) ;
+  } compute {
+    $fjm = mk_Scalar(0.) ;
+  }
+    
+  $rule unit(fjp),constraint((cl,cr)->(u,temperature,gagePressure)),prelude {
+    $fjp.setVecSize(5) ;
+  } compute {
+    $fjp = mk_Scalar(0.) ;
+  }
+
+  $rule unit(srcJ),constraint(geom_cells,u,temperature,gagePressure),prelude {
+    $srcJ.setVecSize(5) ;
+  } compute {
+    $srcJ = mk_Scalar(0.) ;
+  }
+    
+  $rule pointwise(fluid_B<-rhs,iblank), prelude {
+    $fluid_B.setVecSize(5) ;
+  } compute {
+    if($iblank > 1)
+      for(int i=0;i<5;++i)
+        $fluid_B[i] = 0 ;
+    else
+      for(int i=0;i<5;++i)
+        $fluid_B[i] = $rhs[i] ;
+  }
+
+
+  $rule pointwise(fluid_L<-fjp,(cl,cr)->iblank),constraint(fjp),
+    inplace(fluid_L|fjp) {
+    if($cl->$iblank > 1 || $cr->$iblank > 1) {
+      for(int i=0;i<5;++i)
+        for(int j=0;j<5;++j)
+          $fluid_L[i][j] = 0 ;
+    } else {
+      for(int i=0;i<5;++i)
+        for(int j=0;j<5;++j)
+          $fluid_L[i][j] = -$fjp[i][j] ;
+    }
+  }
+
+  $rule pointwise(fluid_U<-fjm,(cl,cr)->iblank),constraint(fjm),
+    inplace(fluid_U|fjm) {
+    if($cl->$iblank > 1 || $cr->$iblank > 1 ) {
+      for(int i=0;i<5;++i)
+        for(int j=0;j<5;++j)
+          $fluid_U[i][j] = 0 ;
+    } 
+  }
+
+  $rule pointwise(periodic::fluid_U<-fjm,ref->periodicTransform,pmap->cl->vol,cl->vol),
+    constraint(fjm,periodicFaces),
+    inplace(periodic::fluid_U|fjm) {
+    if($cl != $pmap->$cl) {
+      // Modify jacobian to account for velocity vector rotation
+      // at periodic boundary conditions.
+      const rigid_transform &frame = $ref->$periodicTransform ;
+      const int mi=1 ;
+      const int vs=5;
+
+      for(int i=0;i<vs;++i) {
+        vect3d fm = vect3d($fjm[i][mi+0],
+                           $fjm[i][mi+1],
+                           $fjm[i][mi+2]) ;
+        vect3d fnew = dot(frame.R,fm) ;
+        $fjm[i][mi+0]= fnew.x ;
+        $fjm[i][mi+1]= fnew.y ;
+        $fjm[i][mi+2]= fnew.z ;
+      }
+    } else {
+      const int vs=5 ;
+      for(int i=0;i<vs;++i)
+        for(int j=0;j<vs;++j)
+          $fjm[i][j] = 0 ;
+    }
+  }
+
+  $rule apply(srcJ<-upper->fjp,lower->fjm)[Loci::Summation],
+      constraint(geom_cells) {
+    //            -------
+    //            |cr   |cr
+    //            |-->  |-->
+    //            |fjm  |fjp
+    //            -------
+    //method of adding flux Jacobians at interior faces into srcJ
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      $srcJ -= $upper[i]->$fjp ; //the normal vector
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      $srcJ += $lower[i]->$fjm ;
+  }
+
+  // rule adds flux Jacobians into the srcJ
+  $rule apply(cl->srcJ<-fjm,ref->periodicTransform,pmap->cl)[Loci::Summation],
+    constraint(periodicFaces) {
+    //method of adding flux Jacobians at interior faces into srcJ
+    // Modify jacobian to account for velocity vector rotation
+    // at periodic boundary conditions.
+    const rigid_transform &frame = $ref->$periodicTransform ;
+    const int mi=1 ;
+    const int vs=5 ;
+
+    if($cl == $pmap->$cl) {
+      for(int i=0;i<vs;++i) {
+	$cl->$srcJ[i][0] -= $fjm[i][0] ;
+
+        vect3d fm = vect3d($fjm[i][mi+0],
+                           $fjm[i][mi+1],
+                           $fjm[i][mi+2]) ;
+        vect3d fnew = dot(frame.R,fm) ;
+        $cl->$srcJ[i][mi+0] -= fnew.x ;
+        $cl->$srcJ[i][mi+1] -= fnew.y ;
+        $cl->$srcJ[i][mi+2] -= fnew.z ;
+
+	$cl->$srcJ[i][4] -= $fjm[i][4] ;
+      }
+    }
+  }
+
+  $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
+		  Rtilde,gamma,iblank), constraint(geom_cells),
+    inplace(fluid_D|srcJ) {
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$fluid_D[i][j] = -$srcJ[i][j] ;
+    real coef = $vol/$dtau ;
+    const real rT = 1./$temperature ;
+    const real rho = ($gagePressure+$Pambient)/($Rtilde*$temperature) ;
+    const real q = 0.5*dot($u,$u) ;
+    $fluid_D[0][0] -= coef*rT*rho ;
+    $fluid_D[1][0] -= coef*rT*rho*$u.x ;
+    $fluid_D[2][0] -= coef*rT*rho*$u.y ;
+    $fluid_D[3][0] -= coef*rT*rho*$u.z ;
+    $fluid_D[4][0] -= coef*rT*rho*q ;
+    
+    real rP = 1./($gagePressure+$Pambient) ;
+    $fluid_D[0][4] += coef*rP*rho ;
+    $fluid_D[1][4] += coef*rP*rho*$u.x ;
+    $fluid_D[2][4] += coef*rP*rho*$u.y ;
+    $fluid_D[3][4] += coef*rP*rho*$u.z ;
+    $fluid_D[4][4] += coef*(1./($gamma-1.) + rP*rho*q) ;
+    
+    $fluid_D[1][1] += coef*rho ;
+    $fluid_D[2][2] += coef*rho ;
+    $fluid_D[3][3] += coef*rho ;
+    
+    $fluid_D[4][1] += coef*rho*$u.x ;
+    $fluid_D[4][2] += coef*rho*$u.y ;
+    $fluid_D[4][3] += coef*rho*$u.z ;
+    
+    if($iblank > 1) {
+      for(int i=0;i<5;++i)
+	for(int j=0;j<5;++j)
+	  $fluid_D[i][j] = 0.0 ;
+      for(int i=0;i<5;++i)
+	$fluid_D[i][i] = 1.0 ;
+    }
+  }
+}
