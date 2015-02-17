@@ -654,4 +654,23 @@ namespace flowPsi {
 	      $rightv3d(u),
 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
   }
+  
+  
+  $rule unit(src),constraint(geom_cells) {
+    for(int i=0;i<5;++i)
+      $src[i] = 0 ;
+  }
+
+  // Inviscid flux contributions for interior faces
+  $rule apply((cl,cr)->src<-iflux)[Loci::Summation], 
+      constraint((cl,cr)->geom_cells) {
+    $cl->$src -= $iflux ;
+    $cr->$src += $iflux ;
+  }
+
+  // Inviscid flux contributions for boundary faces
+  $rule apply(cl->src<-iflux)[Loci::Summation],constraint(boundary_faces) {
+    $cl->$src -= $iflux ;
+  }
+  
 }

@@ -50,7 +50,7 @@ namespace flowPsi {
     $iflux[4] = $area.sada*$gagePressure_f*dot($u_f,$area.n) ;
   }
   
-  $rule apply(ci->srcJ<-ci->(gagePressure,temperature,u),Rtilde,Pambient,area)[Loci::Summation],constraint(symmetry_BC) {
+  $rule apply(ci->srcJ<-us_n,ci->(gagePressure,temperature,u),Rtilde,Pambient,area)[Loci::Summation],constraint(symmetry_BC) {
     const real  p  = $ci->$gagePressure+$Pambient ;
     const real  T  = $ci->$temperature ;
     const real rho = p/($Rtilde*T) ;
