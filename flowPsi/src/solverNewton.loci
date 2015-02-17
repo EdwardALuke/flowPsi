@@ -25,7 +25,7 @@ namespace flowPsi {
 		  Pambient),
 		  inplace(temperature{n,it+1}|temperature{n,it}),
 		  inplace(gagePressure{n,it+1}|gagePressure{n,it}),
-		  inplace(u{n,it+1}|u{n,it}) {
+    inplace(u{n,it+1}|u{n,it}),constraint(geom_cells,timeStepSteadyState) {
     const real dT = $dfluid{n,it}[0] ;
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
     const real dp = $dfluid{n,it}[4] ;
@@ -43,9 +43,62 @@ namespace flowPsi {
     inplace(temperature{n+1}|temperature{n,it}),
     inplace(gagePressure{n+1}|gagePressure{n,it}),
     inplace(u{n+1}|u{n,it}),
-    constraint(geom_cells),
+    constraint(geom_cells,timeStepSteadyState),
     conditional(newtonFinished{n,it}), prelude { } ;
+  
+  $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
+		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
+                  localPBias{n,it},
+		  Pambient),
+    inplace(temperature{n,it+1}|temperature{n,it}),
+    inplace(gagePressure{n,it+1}|gagePressure{n,it}),
+    inplace(u{n,it+1}|u{n,it}),
+    constraint(geom_cells,timeStepAccurate) {
+    const real dT = $dfluid{n,it}[0] ;
+    const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
+    const real dp = $dfluid{n,it}[4] ;
+    real alpha = 1.0 ;
+    const real T_factor = 2.0 ;
+    const real relax = 0.8 ;
+    alpha = min(alpha,0.9*$temperature{n,it}/(fabs(T_factor*dT)+1e-30)) ;
+    const real peps = $localPBias{n,it} ;
+    const real P_factor = (2.-peps) ;
+    alpha = min(alpha,relax*($gagePressure{n,it}+$Pambient)/(fabs(P_factor*dp)+1e-30)) ;
+    $temperature{n,it+1} = $temperature{n,it} + alpha*dT;
+    $gagePressure{n,it+1} = $gagePressure{n,it} + alpha*dp ;
+    $u{n,it+1} = $u{n,it} + alpha*du ;
+  }
 
+
+  $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
+		  temperature{n,it},gagePressure{n,it},u{n,it},
+                  temperature{n},gagePressure{n},u{n},
+                  localPBias{n,it},Pambient,Rtilde),
+    inplace(temperature{n+1}|temperature{n,it}),
+    inplace(gagePressure{n+1}|gagePressure{n,it}),
+    inplace(u{n+1}|u{n,it}),
+    constraint(geom_cells,timeStepAccurate),
+    conditional(newtonFinished{n,it}) {
+    const real Tstar = $temperature{n,it} ;
+    const real pgstar = $gagePressure{n,it} ;
+    const real Tnp1 = (2.*Tstar - $temperature{n}) ;
+    const real peps = $localPBias{n,it} ;
+    const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
+    
+    const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
+    const real rhonp = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
+
+    const real srhonp = sqrt(rhonp) ;
+    const real srhon = sqrt(rhon) ;
+    const real w1 = (srhonp+srhon)/srhonp ;
+    const real w2 = srhon/srhonp ;
+    
+    vect3d unp1 = w1*$u{n,it}-w2*$u{n} ;
+    $gagePressure{n+1} = pgnp1 ;
+    $temperature{n+1} = Tnp1 ;
+    $u{n+1} = unp1 ;
+  } 
+  
   $type newtonFinished param<bool> ;
   $rule singleton(newtonFinished{n,it}<-$it{n,it}) {
     $newtonFinished{n,it} = ($$it{n,it} > 0) ;

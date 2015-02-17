@@ -17,7 +17,31 @@ namespace flowPsi {
   $rule pointwise(solution<-gagePressure{n},temperature{n},u{n}),
     constraint(geom_cells{n}),conditional(timestepFinished{n}),
     inplace(solution|gagePressure{n}),prelude {} ;
+  
 
+  $type timeStepMode param<string> ;
+  $rule default(timeStepMode) {
+    $timeStepMode = "steady" ;
+  }
+  
+  $type timeStepSteadyState Constraint ;
+  $type timeStepAccurate Constraint ;
+  $rule constraint(timeStepSteadyState,timeStepAccurate<-timeStepMode) {
+    $timeStepSteadyState = ~EMPTY ;
+    $timeStepAccurate = EMPTY ;
+    if($timeStepMode == "unsteady") {
+      $timeStepSteadyState = EMPTY ;
+      $timeStepAccurate = ~EMPTY ;
+    } else if($timeStepMode != "steady") {
+      if(Loci::MPI_rank == 0) {
+        std::cerr << "invalid timeStepMode=" << $timeStepMode << std::endl ;
+        std::cerr << "valid modes are 'steady' or 'unsteady'" << std::endl ;
+      }
+      Loci::Abort() ;
+    }
+  }
+           
+      
   $rule pointwise(gagePressure{n=0}<-gagePressure_ic) {
     $gagePressure{n=0} = $gagePressure_ic ;
   }
@@ -147,7 +171,7 @@ namespace flowPsi {
 
   // Compute rhs of Newton step 
   $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtau{n,it},vol{n,it},Pambient,Rtilde,gamma),
-    inplace(rhs{n,it}|src{n,it}) {
+    inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepSteadyState) {
     const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
     const real rhonp = ($gagePressure{n,it}+$Pambient)/($Rtilde*$temperature{n,it}) ;
     const real e0n = $Rtilde*$temperature{n}/($gamma-1.) + .5*dot($u{n},$u{n}) ;
@@ -157,6 +181,40 @@ namespace flowPsi {
     $rhs{n,it}[1] = $src{n,it}[1] - (rhonp*$u{n,it}.x - rhon*$u{n}.x)*rdtvol ;
     $rhs{n,it}[2] = $src{n,it}[2] - (rhonp*$u{n,it}.y - rhon*$u{n}.y)*rdtvol ;
     $rhs{n,it}[3] = $src{n,it}[3] - (rhonp*$u{n,it}.z - rhon*$u{n}.z)*rdtvol ;
+    $rhs{n,it}[4] = $src{n,it}[4] - (rhonp*e0np - rhon*e0n)*rdtvol ;
+  }
+  
+  $rule pointwise(localPBias<-vol) {
+    $localPBias = 0.0 ;
+  }
+  
+  // Time accurate second order scheme using centered variation of
+  // Crank-Nicholson
+  $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtmax{n,it},dtau{n,it},vol{n,it},localPBias{n,it},Pambient,Rtilde,gamma),
+    inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepAccurate) {
+    const real Tstar = $temperature{n,it} ;
+    const real pgstar = $gagePressure{n,it} ;
+    const real Tnp1 = (2.*Tstar - $temperature{n}) ;
+    const real peps = $localPBias{n,it} ;
+    const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
+    
+    const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
+    const real rhonp = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
+
+    const real srhonp = sqrt(rhonp) ;
+    const real srhon = sqrt(rhon) ;
+    const real w1 = (srhonp+srhon)/srhonp ;
+    const real w2 = srhon/srhonp ;
+    
+    vect3d unp1 = w1*$u{n,it}-w2*$u{n} ;
+
+    const real e0n = $Rtilde*$temperature{n}/($gamma-1.) + .5*dot($u{n},$u{n}) ;
+    const real e0np = $Rtilde*Tnp1/($gamma-1.) + .5*dot(unp1,unp1) ;
+    const real rdtvol = $vol{n,it}/$dtmax{n,it} ;
+    $rhs{n,it}[0] = $src{n,it}[0] - (rhonp-rhon)*rdtvol ;
+    $rhs{n,it}[1] = $src{n,it}[1] - (rhonp*unp1.x - rhon*$u{n}.x)*rdtvol ;
+    $rhs{n,it}[2] = $src{n,it}[2] - (rhonp*unp1.y - rhon*$u{n}.y)*rdtvol ;
+    $rhs{n,it}[3] = $src{n,it}[3] - (rhonp*unp1.z - rhon*$u{n}.z)*rdtvol ;
     $rhs{n,it}[4] = $src{n,it}[4] - (rhonp*e0np - rhon*e0n)*rdtvol ;
   }
 }

@@ -492,57 +492,23 @@ namespace flowPsi {
 
   $type rhon store<real> ;
 
-  // Density at n timestep
-  $rule pointwise(rhon{n,it}<-temperature{n},gagePressure{n},Rtilde{n,it},Pambient{n,it}) {
-    $rhon{n,it} = ($gagePressure{n}+$Pambient{n,it})/
-		    ($Rtilde{n,it}*$temperature{n}) ;
-  }
-  
   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtau{n,it},X_src{n,it},
                   X{n},X{n,it},rhon{n,it}),
-    constraint(X_src{n,it},geom_cells{n,it},C),
+    constraint(X_src{n,it},geom_cells{n,it},C,timeStepSteadyState),
     parametric(scalarTransportP(X,C)) {
     real factor = $vol{n,it}/$dtau{n,it} ;
     $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$rhon{n,it} - $X_src{n,it} ; 
   }
 
-//   $rule pointwise(X_rhs{n,it}<-theta,psi,vol{n,it},dtau{n,it},X_src{n,it},
-//                   X{n},X{n,it},X{n-1},q{n},q{n-1},numSpecies{n}),
-//     constraint(X_src{n,it},geom_cells{n,it},time_accurate{n,it},backward_scheme{n,it},C),
-//     parametric(scalarTransportP(X,C)) {
-//     const int ns = $numSpecies{n} ;
-
-
-//     real factor = $vol{n,it}/$dtau{n,it} ;
-//     real psip1 = $psi+1. ;
+   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
+                   X{n},X{n,it},X_np1{n,it},rhon{n,it}),
+    constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,C),
+    parametric(scalarTransportP(X,C)) {
+     const real factor = $vol{n,it}/$dtmax{n,it} ;
     
-//     real rn = $q{n}[0] ;
-//     real rnm1 = $q{n-1}[0] ;
-//     for(int i=1;i<ns;++i) {
-//       rn += $q{n}[i] ;
-//       rnm1 += $q{n-1}[i] ;
-//     }
-//     $X_rhs{n,it} = factor*(psip1*($X{n,it}-$X{n})*rn +
-// 			    $psi*(($X{n}*rn-$X{n-1}*rnm1)-
-// 				  $X{n,it}*(rn-rnm1)))
-// 		      - $X_src{n,it} ;
-//   }
-
-//   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtau{n,it},X_src{n,it},
-//                   X{n},X{n,it},X_np1{n,it},q{n},numSpecies{n}),
-//     constraint(X_src{n,it},geom_cells{n,it},time_accurate{n,it},kinetic_energy_consistent{n,it},C),
-//     parametric(scalarTransportP(X,C)) {
-//     const int ns = $numSpecies{n} ;
-
-
-//     real factor = $vol{n,it}/$dtau{n,it} ;
-    
-//     real rn = $q{n}[0] ;
-//     for(int i=1;i<ns;++i) {
-//       rn += $q{n}[i] ;
-//     }
-//     $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
-//   }
+     const real rn = $rhon{n,it} ;
+     $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
+   }
 
 
   $type X_B store<real> ;

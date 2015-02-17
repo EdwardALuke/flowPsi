@@ -126,8 +126,8 @@ namespace flowPsi {
   }
 
   $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
-		  Rtilde,gamma,iblank), constraint(geom_cells),
-    inplace(fluid_D|srcJ) {
+		  Rtilde,gamma,iblank),
+    constraint(geom_cells,timeStepSteadyState), inplace(fluid_D|srcJ) {
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
 	$fluid_D[i][j] = -$srcJ[i][j] ;
@@ -155,6 +155,118 @@ namespace flowPsi {
     $fluid_D[4][1] += coef*rho*$u.x ;
     $fluid_D[4][2] += coef*rho*$u.y ;
     $fluid_D[4][3] += coef*rho*$u.z ;
+    
+    if($iblank > 1) {
+      for(int i=0;i<5;++i)
+	for(int j=0;j<5;++j)
+	  $fluid_D[i][j] = 0.0 ;
+      for(int i=0;i<5;++i)
+	$fluid_D[i][i] = 1.0 ;
+    }
+  }
+
+  $type rhon store<double> ;
+  $type rhonp1 store<double> ;
+  $type un store<vect3d> ;
+  
+  // Density at n timestep
+  $rule pointwise(rhon{n,it}<-temperature{n},gagePressure{n},Rtilde{n,it},Pambient{n,it}) {
+    $rhon{n,it} = ($gagePressure{n}+$Pambient{n,it})/
+		    ($Rtilde{n,it}*$temperature{n}) ;
+  }
+  
+  $rule pointwise(un{n,it}<-u{n},Pambient{n,it}) {
+    $un{n,it} = $u{n} ;
+  }
+  
+  
+  $rule pointwise(rhonp1{n,it}<-
+                  temperature{n},gagePressure{n},u{n},Pambient,
+                  temperature{n,it},gagePressure{n,it},localPBias{n,it},
+                  Rtilde) {
+    const real Tstar = $temperature{n,it} ;
+    const real pgstar = $gagePressure{n,it} ;
+    const real Tnp1 = (2.*Tstar - $temperature{n}) ;
+    const real peps = $localPBias{n,it} ;
+    const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
+    
+    $rhonp1{n,it} = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
+  }
+  
+  $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
+		  rhon,rhonp1,un,Rtilde,gamma,localPBias,iblank),
+    constraint(geom_cells,timeStepAccurate), inplace(fluid_D|srcJ) {
+    
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$fluid_D[i][j] = -$srcJ[i][j] ;
+    
+
+    using Loci::Array ;
+    Array<Array<real,5>,5> dQdq ;
+    const real rT = 1./$temperature ;
+    const real rho = ($gagePressure+$Pambient)/($Rtilde*$temperature) ;
+    const real q = 0.5*dot($u,$u) ;
+    dQdq[0][0] = -rT*rho ;
+    dQdq[1][0] = -rT*rho*$u.x ;
+    dQdq[2][0] = -rT*rho*$u.y ;
+    dQdq[3][0] = -rT*rho*$u.z ;
+    dQdq[4][0] = -rT*rho*q ;
+    
+    real rP = 1./($gagePressure+$Pambient) ;
+    dQdq[0][4] = rP*rho ;
+    dQdq[1][4] = rP*rho*$u.x ;
+    dQdq[2][4] = rP*rho*$u.y ;
+    dQdq[3][4] = rP*rho*$u.z ;
+    dQdq[4][4] = (1./($gamma-1.) + rP*rho*q) ;
+    
+    for(int i=0;i<5;++i) {
+      dQdq[i][1] = 0 ;
+      dQdq[i][2] = 0 ;
+      dQdq[i][3] = 0 ;
+    }
+    dQdq[1][1] = rho ;
+    dQdq[2][2] = rho ;
+    dQdq[3][3] = rho ;
+    
+    dQdq[4][1] = rho*$u.x ;
+    dQdq[4][2] = rho*$u.y ;
+    dQdq[4][3] = rho*$u.z ;
+    
+    Array<Array<real,5>,5> dqdqstar ;
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+        dqdqstar[i][j] = 0 ;
+    for(int i=0;i<5;++i)
+      dqdqstar[i][i] = 1.0 ;
+    const real Pcoef = 2.0/(1+$localPBias)-1.0 ;
+    const real srhonp1 = sqrt($rhonp1) ;
+    const real srhon = sqrt($rhon) ;
+    const real ucoef = 0.5*srhon/($rhonp1*srhonp1) ;
+    const real ucoef2 = srhon/srhonp1 ;
+    const real drdt = -rho/$temperature ;
+    const real drdp = rho/($gagePressure+$Pambient) ;
+    dqdqstar[0][0] += 1.0 ;
+    dqdqstar[4][4] += Pcoef ;
+    
+    dqdqstar[1][0] += ucoef*drdt*($un.x-$u.x) ;
+    dqdqstar[2][0] += ucoef*drdt*($un.y-$u.y) ;
+    dqdqstar[3][0] += ucoef*drdt*($un.z-$u.z) ;
+    dqdqstar[1][4] += ucoef*drdp*($un.x-$u.x) ;
+    dqdqstar[2][4] += ucoef*drdp*($un.y-$u.y) ;
+    dqdqstar[3][4] += ucoef*drdp*($un.z-$u.z) ;
+    dqdqstar[1][1] += ucoef2 ;
+    dqdqstar[2][2] += ucoef2 ;
+    dqdqstar[3][3] += ucoef2 ;
+    
+    real coef = $vol/$dtau ;
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+        dQdq[i][j] *= coef ;
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+        for(int k=0;k<5;++k)
+          $fluid_D[i][j] += dQdq[i][k]*dqdqstar[k][j] ;
     
     if($iblank > 1) {
       for(int i=0;i<5;++i)
