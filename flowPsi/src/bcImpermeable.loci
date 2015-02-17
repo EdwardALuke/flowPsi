@@ -58,7 +58,7 @@ namespace flowPsi {
     const real drdp= rho/p ;
     const int mi = 1;
     const real U = norm($ci->$u) ;
-    const real uit = dot($area.n,$ci->$u) ;
+    const real uit = dot($area.n,$ci->$u) - $us_n ;
     const real sada = $area.sada ;
     const real n[3] = {$area.n.x,$area.n.y,$area.n.z} ;
     const real ui[3] = {$ci->$u.x,$ci->$u.y,$ci->$u.z} ;
