@@ -1,5 +1,5 @@
 #include <Loci.h>
-//$include "flowPsi.lh"
+$include "flowPsi.lh"
 #include "flowTypes.h"
 #include "flowPsiIO.h"
 #include "Tools/stream.h"
@@ -165,32 +165,20 @@ namespace flowPsi {
   // In addition, we use a parametric rule so that we can apply this
   // integration to any set of entities.  (This is what the X represents
   // below)
-  class integrate_flux_unit : public unit_rule {
-    param<conservativeFlux> cflux_accum ;
-  public:
-    integrate_flux_unit() {
-      name_store("integrate_flux(X)",cflux_accum) ;
-      constraint("X") ;
-      output("integrate_flux(X)") ;
-    }
-    void compute(const sequence &seq) {
-
-      // The identity of the sum operation is zero.  Here we zero out
-      // all of our accumulated entries
-      cflux_accum->mass_flux = 0 ;
-      cflux_accum->momentum_flux = vect3d(0.,0.,0.) ;
-      cflux_accum->momentum_vis = vect3d(0.,0.,0.) ;
-      cflux_accum->energy_flux = 0 ;
-      cflux_accum->area = 0 ;
-    }
-  } ;
-
+  $type integrate_flux(X) param<conservativeFlux> ;
+  $rule unit(integrate_flux(X)),constraint(X) {
+    $integrate_flux(X).mass_flux = 0 ;
+    $integrate_flux(X).momentum_flux = vect3d(0.,0.,0.) ;
+    $integrate_flux(X).momentum_vis = vect3d(0.,0.,0.) ;
+    $integrate_flux(X).energy_flux = 0 ;
+    $integrate_flux(X).area = 0 ;
+  }
   // Here we are summing up the integrated fluxes for each face in the
   // provided constraint.  (again through the use of parametric rules).
   // But first we have to define the summation operator for our new
   // data structure.  This is provided here.
-  struct sum_conserv_flux {
-    void operator()(conservativeFlux &r, const conservativeFlux &s) {
+  template <class T> struct sum_conserv_flux {
+    void operator()(T &r, const T &s) {
       r.mass_flux += s.mass_flux ;
       r.momentum_flux += s.momentum_flux ;
       r.momentum_vis += s.momentum_vis ;
@@ -199,8 +187,8 @@ namespace flowPsi {
     }
   } ;
 
-  struct sum_moment_flux {
-    void operator()(momentFlux &r, const momentFlux &s) {
+  template <class T> struct sum_moment_flux {
+    void operator()(T &r, const T &s) {
       if(r.init == -5)
         return ;
       r.moment_reference += s.moment_reference ;
@@ -219,110 +207,45 @@ namespace flowPsi {
         r.init = -3 ;
     }
   } ;
-  
-  class integrate_flux_apply : public apply_rule<param<conservativeFlux>,
-                               sum_conserv_flux> {
-    param<conservativeFlux> cflux_accum ;
-    const_store<Area> area ;
-    const_store<Loci::Array<flowPsi::real,5> > iflux ;
-  public:
-    integrate_flux_apply() {
-      name_store("integrate_flux(X)",cflux_accum) ;
-      name_store("area",area) ;
-      name_store("iflux",iflux) ;
-      constraint("X") ;
-      input("integrate_flux(X)") ;
-      input("area,iflux") ;
-      output("integrate_flux(X)") ;
-    }
-    void calculate(Entity e) {
-      const int mi=1 ;
-      const int ei=4 ;
 
-      // Construct the fluxes for this face
-      conservativeFlux f ;
-      f.mass_flux = iflux[e][0] ;
-      f.energy_flux = iflux[e][ei] ;
-      f.momentum_flux = vect3d(iflux[e][mi+0],iflux[e][mi+1],iflux[e][mi+2]) ;
-      f.momentum_vis = vect3d(0.,0.,0.) ;
-      f.area = area[e].sada ;
-      // join adds these face fluxes into the final result using the
-      // operator defined above.
-      join(cflux_accum[e],f) ;
-    }
-    void compute(const sequence &seq) {
-      // Loop over all faces found and call calculate above
-      do_loop(seq,this) ;
-    }
-  } ;
-
+  $rule apply(integrate_flux(X)<-area,iflux)[sum_conserv_flux],
+    constraint(X) {
+    // Construct the fluxes for this face
+    const int ei = 4 ;
+    const int mi = 1 ;
+    conservativeFlux f ;
+    f.mass_flux = $iflux[0] ;
+    f.energy_flux = $iflux[ei] ;
+    f.momentum_flux = vect3d($iflux[mi+0],$iflux[mi+1],$iflux[mi+2]) ;
+    f.momentum_vis = vect3d(0.,0.,0.) ;
+    f.area = $area.sada ;
+    // join adds these face fluxes into the final result using the
+    // operator defined above.
+    join($integrate_flux(X),f) ;
+  }
   // Add in the viscous fluxes
-
-  class integrate_vis_flux_apply : public apply_rule<param<conservativeFlux>,
-                               sum_conserv_flux> {
-    param<conservativeFlux> cflux_accum ;
-    const_store<Area> area ;
-    const_store<Loci::Array<real,4> > vflux ;
-  public:
-    integrate_vis_flux_apply() {
-      name_store("integrate_flux(X)",cflux_accum) ;
-      name_store("area",area) ;
-      name_store("vflux",vflux) ;
-      constraint("X") ;
-      constraint("vflux") ;
-      input("integrate_flux(X)") ;
-      input("area,vflux") ;
-      output("integrate_flux(X)") ;
-    }
-    void calculate(Entity e) {
-      const int mi=0 ;
-      const int ei=3 ;
-      // Construct the fluxes for this face
-      conservativeFlux f ;
-      f.mass_flux = 0. ;
-      f.energy_flux = -vflux[e][ei] ;
-      f.momentum_flux = vect3d(0.,0.,0.) ;
-      f.momentum_vis = real(-1.0)*vect3d(vflux[e][mi+0],
-					 vflux[e][mi+1],
-					 vflux[e][mi+2]) ;
-      f.area = 0. ;
-      // join adds these face fluxes into the final result using the
-      // operator defined above.
-      join(cflux_accum[e],f) ;
-    }
-    void compute(const sequence &seq) {
-      // Loop over all faces found and call calculate above
-      do_loop(seq,this) ;
-    }
-  } ;
-
-  // Register these rules with the system
-  register_rule<integrate_flux_unit> register_integrate_flux_unit ;
-  register_rule<integrate_flux_apply> register_vis_flux_apply ;
-  register_rule<integrate_vis_flux_apply> regiser_integrate_vis_flux_apply ;
-
-  class do_output_integrate_calc : public singleton_rule {
-    const_param<int> itcyc,newton_iter ;
-    const_param<bool> do_output ;
-    param<bool> do_output_integrate ;
-  public:
-    do_output_integrate_calc() {
-      name_store("$it{n,it}",itcyc) ;
-      name_store("do_output{n,it}",do_output) ;
-      name_store("do_output_integrate{n,it}",do_output_integrate) ;
-      name_store("newton_iter",newton_iter) ;
-      input("newton_iter") ;
-      
-      input("$it{n,it},do_output{n,it}") ;
-      output("do_output_integrate{n,it}") ;
-    }
-    virtual void compute(const sequence &seq) {
-      *do_output_integrate = *do_output && (*itcyc == *newton_iter-1) ;
-    }
-  } ;
+  $rule apply(integrate_flux(X)<-area,vflux)[sum_conserv_flux],
+    constraint(X,vflux) {
+    // Construct the fluxes for this face
+    const int mi=0 ;
+    const int ei=3 ;
+    conservativeFlux f ;
+    f.mass_flux = 0 ;
+    f.energy_flux = $vflux[ei] ;
+    f.momentum_vis = -1.*vect3d($vflux[mi+0],$vflux[mi+1],$vflux[mi+2]) ;
+    f.momentum_flux = vect3d(0.,0.,0.) ;
+    f.area = 0 ;
+    // join adds these face fluxes into the final result using the
+    // operator defined above.
+    join($integrate_flux(X),f) ;
+  }
   
-  register_rule<do_output_integrate_calc> register_do_output_integrate_calc ;
-  
+  $type do_output_integrate param<bool> ;
+  $rule singleton(do_output_integrate{n,it}<-lastNewton{n,it},
+                  ncycle{n,it},print_freq) {
+    $do_output_integrate{n,it} = $lastNewton{n,it} && (($ncycle{n,it}%$print_freq) == 0) ;
+  }
+
   // Provide a class that integrates over all boundary faces
   class output_integrated_values : public pointwise_rule {
     const_param<conservativeFlux> in1 ;
@@ -359,126 +282,57 @@ namespace flowPsi {
   };
   register_rule<output_integrated_values> register_output_integrated_values ;
 
+  $type integrate_moment(X) param<momentFlux> ;
+  
+  $rule unit(integrate_moment(X)),constraint(X,ref->momentCenter_BC) {
+    // The identity of the sum operation is zero.  Here we zero out
+    // all of our accumulated entries
+    $integrate_moment(X).moment_flux = vect3d(0.,0.,0.) ;
+    $integrate_moment(X).moment_reference = vect3d(0.,0.,0.) ;
+    $integrate_moment(X).moment_center = vect3d(0.,0.,0.) ;
+    $integrate_moment(X).init = -1 ; // moment_center not initialized
+  }
+  
+  $rule apply(integrate_moment(X)<-Pambient,area,facecenter,
+              ref->momentCenter_BC,iflux)[sum_moment_flux],
+     constraint(X,ref->momentCenter_BC) {
+    const int mi=1 ;
+    // Construct the fluxes for this face
+    momentFlux f ;
+    const vect3d mrp = $ref->$momentCenter_BC ;
+    const vect3d delta = $facecenter - mrp ;
+    const vect3d momentum_flux = vect3d($iflux[mi+0],$iflux[mi+1],$iflux[mi+2]) ;
+    const vect3d dmom = cross(delta,momentum_flux) ;
+    const vect3d dmoma = cross(delta,$area.sada*$Pambient*$area.n) ;
+    f.moment_flux = real(-1.0)*dmom ;
+    f.moment_reference = real(-1.0)*dmoma ;
+    f.moment_center = mrp ;
+    f.init = 1 ; // moment_center initialized
+    // join adds these face fluxes into the final result using the
+    // operator defined above.
+    join($integrate_moment(X),f) ;
+  }
+    
+  $rule apply(integrate_moment(X)<-Pambient,area,facecenter,
+              ref->momentCenter_BC,vflux)[sum_moment_flux],
+       constraint(X,ref->momentCenter_BC,vflux) {
+    const int mi=0 ;
 
-  class integrate_moment_unit : public unit_rule {
-    param<momentFlux> cflux_accum ;
-  public:
-    integrate_moment_unit() {
-      name_store("integrate_moment(X)",cflux_accum) ;
-      constraint("X,ref->momentCenter_BC") ;
-      output("integrate_moment(X)") ;
-    }
-    void compute(const sequence &seq) {
-
-      // The identity of the sum operation is zero.  Here we zero out
-      // all of our accumulated entries
-      cflux_accum->moment_flux = vect3d(0.,0.,0.) ;
-      cflux_accum->moment_reference = vect3d(0.,0.,0.) ;
-      cflux_accum->moment_center = vect3d(0.,0.,0.) ;
-      cflux_accum->init = -1 ; // moment_center not initialized
-    }
-  } ;
-
-  class integrate_moment_apply : public apply_rule<param<momentFlux>,
-                               sum_moment_flux> {
-    param<momentFlux> cflux_accum ;
-    const_Map ref ;
-    const_param<real> Pambient ;
-    const_store<Area> area ;
-    const_store<vect3d> facecenter,momentCenter_BC ;
-    const_store<Loci::Array<real,5> > iflux ;
-  public:
-    integrate_moment_apply() {
-      name_store("integrate_moment(X)",cflux_accum) ;
-      name_store("Pambient",Pambient) ;
-      name_store("area",area) ;
-      name_store("iflux",iflux) ;
-      name_store("ref",ref) ;
-      name_store("facecenter",facecenter) ;
-      name_store("momentCenter_BC",momentCenter_BC) ;
-      input("Pambient,area") ;
-      input("ref->momentCenter_BC") ;
-      input("facecenter") ;
-      constraint("X,ref->momentCenter_BC") ;
-      input("integrate_moment(X)") ;
-      input("iflux") ;
-      output("integrate_moment(X)") ;
-    }
-    void calculate(Entity e) {
-      const int mi=1 ;
-      // Construct the fluxes for this face
-      momentFlux f ;
-      const vect3d mrp = momentCenter_BC[ref[e]] ;
-      const vect3d delta = facecenter[e] - mrp ;
-      const vect3d momentum_flux = vect3d(iflux[e][mi+0],iflux[e][mi+1],iflux[e][mi+2]) ;
-      const vect3d dmom = cross(delta,momentum_flux) ;
-      const vect3d dmoma = cross(delta,area[e].sada*Pambient[e]*area[e].n) ;
-      f.moment_flux = real(-1.0)*dmom ;
-      f.moment_reference = real(-1.0)*dmoma ;
-      f.moment_center = mrp ;
-      f.init = 1 ; // moment_center initialized
-      // join adds these face fluxes into the final result using the
-      // operator defined above.
-      join(cflux_accum[e],f) ;
-    }
-    void compute(const sequence &seq) {
-      // Loop over all faces found and call calculate above
-      do_loop(seq,this) ;
-    }
-  } ;
-
-  // Add in the viscous fluxes
-
-  class integrate_vis_moment_apply : public apply_rule<param<momentFlux>,
-                               sum_moment_flux> {
-    param<momentFlux> cflux_accum ;
-    const_store<vect3d> facecenter,momentCenter_BC ;
-    const_Map ref ;
-    const_store<Loci::Array<real,4> > vflux ;
-  public:
-    integrate_vis_moment_apply() {
-      name_store("integrate_moment(X)",cflux_accum) ;
-      name_store("facecenter",facecenter) ;
-      name_store("momentCenter_BC",momentCenter_BC) ;
-      name_store("ref",ref) ;
-      name_store("vflux",vflux) ;
-      constraint("X,ref->momentCenter_BC") ;
-      constraint("vflux") ;
-      input("integrate_moment(X)") ;
-      input("vflux") ;
-      input("ref->momentCenter_BC") ;
-      input("facecenter") ;
-      output("integrate_moment(X)") ;
-    }
-    void calculate(Entity e) {
-      const int mi=0 ;
-      // Construct the fluxes for this face
-      momentFlux f ;
-      const vect3d momentum_flux = real(-1.0)*vect3d(vflux[e][mi+0],
-                                                     vflux[e][mi+1],
-                                                     vflux[e][mi+2]) ;
-      const vect3d mrp = momentCenter_BC[ref[e]] ;
-      const vect3d delta = facecenter[e] - mrp ;
-      const vect3d dmom = cross(delta,momentum_flux) ;
-      f.moment_flux = real(-1.0)*dmom ;
-      f.moment_reference = vect3d(0.,0.,0.) ;
-      f.moment_center = mrp ;
-      f.init = 1 ; // moment_center initialized
-
-      // join adds these face fluxes into the final result using the
-      // operator defined above.
-      join(cflux_accum[e],f) ;
-    }
-    void compute(const sequence &seq) {
-      // Loop over all faces found and call calculate above
-      do_loop(seq,this) ;
-    }
-  } ;
-
-  // Register these rules with the system
-  register_rule<integrate_moment_unit> register_integrate_moment_unit ;
-  register_rule<integrate_moment_apply> register_integrate_moment_apply ;
-  register_rule<integrate_vis_moment_apply> regiser_integrate_vis_moment_apply ;
+    // Construct the fluxes for this face
+    momentFlux f ;
+    const vect3d mrp = $ref->$momentCenter_BC ;
+    const vect3d delta = $facecenter - mrp ;
+    const vect3d momentum_flux = -1.0*vect3d($vflux[mi+0],$vflux[mi+1],$vflux[mi+2]) ;
+    const vect3d dmom = cross(delta,momentum_flux) ;
+    f.moment_flux = real(-1.0)*dmom ;
+    f.moment_reference = vect3d(0.,0.,0.) ;
+    f.moment_center = mrp ;
+    f.init = 1 ; // moment_center initialized
+    // join adds these face fluxes into the final result using the
+    // operator defined above.
+    join($integrate_moment(X),f) ;
+  }
+    
 
   // Here we create a class that can be used to output the integrated flux
   // over any subset of faces.
