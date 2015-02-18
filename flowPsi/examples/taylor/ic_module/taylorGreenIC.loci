@@ -1,0 +1,78 @@
+#include <iostream>
+#include <fstream>
+using std::cout ;
+using std::endl ;
+using std::ofstream ;
+using std::ios ;
+
+#include <Loci>
+#include "flowTypes.h"
+#include "periodic.h"
+#include "initialConditions.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  $rule pointwise(temperature_ic,gagePressure_ic,u_ic<-
+                  Rtilde,cellcenter,Pambient),constraint(geom_cells) {
+    const double x = $cellcenter.x ;
+    const double y = $cellcenter.y ;
+    double coef = 3.5 ;
+    double u = -1.*coef*cos(x)*sin(y) ;
+    double v =  coef*sin(x)*cos(y) ;
+    double Pref = $Pambient ;
+    if(Pref < 10)
+      Pref = 1e5 ;
+    double rho = 1.0 ;
+    double p0 = Pref-$Pambient ;
+    double pg = p0-rho*0.25*coef*coef*(cos(2.*x)+cos(2.*y)) ;
+
+    double P = pg+$Pambient ;
+    double T = P/($Rtilde*rho) ;
+    $gagePressure_ic = pg ;
+    $temperature_ic = T ;
+    $u_ic = vect3d(u,v,0.0) ; ;
+  }
+
+  $type integratedK param<real> ;
+
+  $rule unit(integratedK),constraint(UNIVERSE) {
+    $integratedK = 0 ;
+  }
+  
+  $rule apply(integratedK<-vol,u)[Loci::Summation] {
+    join($integratedK,0.5*$vol*dot($u,$u)) ;
+  }
+
+  $type integratedK0 param<real> ;
+  $rule unit(integratedK0),constraint(UNIVERSE) {
+    $integratedK0 = 0 ;
+  }
+  
+  $rule apply(integratedK0<-vol,cellcenter)[Loci::Summation] {
+    const double x = $cellcenter.x ;
+    const double y = $cellcenter.y ;
+    double coef = 3.5 ;
+    double u = -1.*coef*cos(x)*sin(y) ;
+    double v =  coef*sin(x)*cos(y) ;
+    double k = .5*(u*u+v*v) ;
+    join($integratedK0,$vol*k) ;
+  }
+
+  $type OUTPUT param<bool> ;
+  $rule pointwise(OUTPUT<-integratedK,integratedK0,stime,ncycle),conditional(do_output_integrate),prelude {
+    if(Loci::MPI_rank == 0) {
+      double k = *$integratedK/(*$integratedK0) ;
+      cout << "total fluid kinetic energy = " << k << endl ;
+      if(*$ncycle == 0) {
+        ofstream file("ftke.dat",ios::trunc|ios::out) ;
+        file << *$stime << ' ' << k << endl ;
+      } else {
+        ofstream file("ftke.dat",ios::app|ios::out) ;
+        file << *$stime << ' ' << k << endl ;
+      }        
+    }
+  } ;
+    
+      
+}
