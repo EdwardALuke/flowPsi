@@ -1,6 +1,6 @@
 TEST_FILES=cylinder.test fixedMass.test inflow.test \
-	isentropic.test nozzle.test superSonic.test wedge.test 
-#	shock_tube.test 
+	isentropic.test nozzle.test superSonic.test wedge.test \
+	shock_tube.test 
 
 
 include $(FLOWPSI_BASE)/test.conf
