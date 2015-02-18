@@ -137,8 +137,9 @@ $type qwall_prescribed store<flowPsi::real> ;
 $type wallVelocity store<flowPsi::vect3d> ;
 $type stime             param<flowPsi::real> ; // simulation time
 $type ncycle            param<int> ; // simulation iteration number
-$type newtonMaxIter param<int> ;
+$type newtonMaxIter     param<int> ;
 $type newtonFinished    param<bool> ;
+$type lastNewton        param<bool> ;
 $type urelax            param<flowPsi::real> ;
 $type dtmax             param<flowPsi::TimeValue> ;
 $type cflmax            param<flowPsi::real> ;
