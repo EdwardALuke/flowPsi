@@ -1,6 +1,59 @@
 #include <Loci.h>
 $include "flowPsi.lh"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
 
 namespace flowPsi {
+  $rule unit(plot_status{n}),constraint(UNIVERSE{n}) {
+    $plot_status{n} = 0 ;
+  } 
+
+  static double elapsed_check_time = -1 ;
+  $type time_interval_check param<double>;
+  $rule default(time_interval_check),comments("time interval to check for stop or plot file in seconds") {
+    $time_interval_check = 240 ;
+  }
+  $rule apply(plot_status{n}<-ncycle{n},time_interval_check{n})[Loci::Maximum],prelude {
+    if(Loci::MPI_rank == 0) {
+      double ctime = MPI_Wtime() ;
+      if(elapsed_check_time < 0)
+        elapsed_check_time = ctime ;
+      // Check every two minutes
+      if(ctime-elapsed_check_time > *$time_interval_check{n}) {
+        elapsed_check_time = ctime ;
+        struct stat buf ;
+        if(stat("plot",&buf)!=-1) {
+          if(buf.st_size == 0 && S_ISREG(buf.st_mode)) {
+            if(::unlink("plot")!= -1)
+              join(*$plot_status{n},1) ;
+          }
+        }
+        if(stat("stop",&buf)!=-1) {
+          if(buf.st_size == 0 && S_ISREG(buf.st_mode)) {
+            if(::unlink("stop")!= -1)
+              join(*$plot_status{n},2) ;
+          }
+        }
+      }
+    }
+  } ;
+
+
+  
+  $rule optional(maximumRunTime),comments("Maximum wallclock time for run.  If this time is exceeded, flowpsi will dump restart files and terminate") {
+    $maximumRunTime = 0.0 ;
+  } 
+
+  extern double StartTime ;
+  
+  $rule apply(plot_status{n}<-ncycle{n},maximumRunTime)[Loci::Maximum],prelude {
+    double currTime = MPI_Wtime() ;
+    double elapsedTime = currTime - flowPsi::StartTime ;
+    double maxTime = *$maximumRunTime ;
+    if(elapsedTime > maxTime)
+      join(*$plot_status{n},2) ;
+  } ;
+  
   
 }
