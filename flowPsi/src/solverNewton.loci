@@ -98,12 +98,24 @@ namespace flowPsi {
     $temperature{n+1} = Tnp1 ;
     $u{n+1} = unp1 ;
   } 
+
+  $type newtonMaxIter param<int> ;
+  $rule default(newtonMaxIter) {
+    $newtonMaxIter = 6 ;
+  }
+
+  $type newtonFinalIter param<int> ;
+  
+  $rule singleton(newtonFinalIter<-newtonMaxIter,timeSteppingMode) {
+    $newtonFinalIter = 1 ;
+    if($timeSteppingMode > 0)
+      $newtonFinalIter=$newtonMaxIter ;
+  }
   
   $type newtonFinished param<bool> ;
-  $rule singleton(newtonFinished{n,it}<-$it{n,it}) {
-    $newtonFinished{n,it} = ($$it{n,it} > 0) ;
+  $rule singleton(newtonFinished{n,it}<-$it{n,it},newtonFinalIter) {
+    $newtonFinished{n,it} = ($$it{n,it} >= $newtonFinalIter) ;
   }
-      
 
   $type fluidLinearSolver param<std::string> ;
   $rule default(fluidLinearSolver),

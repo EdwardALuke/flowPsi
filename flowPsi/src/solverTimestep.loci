@@ -23,7 +23,14 @@ namespace flowPsi {
   $rule default(timeStepMode) {
     $timeStepMode = "steady" ;
   }
-  
+
+  $rule singleton(timeSteppingMode<-timeStepMode) {  
+    $timeSteppingMode = 0 ;
+    if($timeStepMode == "unsteady") {
+      $timeSteppingMode = 1 ;
+    }
+  }
+
   $type timeStepSteadyState Constraint ;
   $type timeStepAccurate Constraint ;
   $rule constraint(timeStepSteadyState,timeStepAccurate<-timeStepMode) {

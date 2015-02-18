@@ -51,7 +51,7 @@ namespace flowPsi {
   }
 
   $rule apply(residual<-src,cellcenter,vol,grid_vol_iblank,iblank)[resid_join],
-    constraint(geom_cells) {
+    constraint(geom_cells,timeStepSteadyState) {
     const int mi = 1 ;
     const int ei = 4 ;
     if($iblank < 2) {
@@ -82,6 +82,45 @@ namespace flowPsi {
       
       r.etrms=weight*square(real(rvol*$src[ei])) ;
       r.etmax = rvol*$src[ei] ;
+      r.ccmaxe_center = $cellcenter ;
+
+      r.bcErrorCode = BCErrorCode ;
+      BCErrorCode = 0 ;
+      join($residual,r) ;
+    }
+  }
+  $rule apply(residual<-rhs,cellcenter,vol,grid_vol_iblank,iblank)[resid_join],
+    constraint(geom_cells,timeStepAccurate) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    if($iblank < 2) {
+      residual r ;
+      r.rtmax = 0 ;
+      r.ccmaxr_center = vect3d(0,0,0) ;
+    
+      real rvol = 1./$vol ;
+      real weight = $vol/$grid_vol_iblank ;
+      if(real(abs(r.rtmax)) < abs(rvol*$rhs[0])) {
+	r.rtmax = rvol*$rhs[0] ;
+	r.ccmaxr_center = $cellcenter ;
+      }
+      r.rtrms = 0 ;
+      r.rtrms+=square(real(rvol*$rhs[0])) ;
+      r.rtrms *= weight ;
+      
+
+      r.mtrms = 0 ;
+      r.mtmax = 0 ;
+
+      for(int i=0;i<3;++i) {
+        if(fabs(r.mtmax) < fabs(rvol*$rhs[mi+i]))
+          r.mtmax = rvol*$rhs[mi+i] ;
+        r.mtrms += square(real(rvol*$rhs[mi+i])) ;
+      }
+      r.mtrms *= weight/3.0 ;
+      
+      r.etrms=weight*square(real(rvol*$rhs[ei])) ;
+      r.etmax = rvol*$rhs[ei] ;
       r.ccmaxe_center = $cellcenter ;
 
       r.bcErrorCode = BCErrorCode ;
