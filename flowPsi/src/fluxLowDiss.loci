@@ -48,24 +48,24 @@ namespace flowPsi {
     join($cr->$veldiv,-$ufn) ;
   }
 
-  $type KEC_dissipationLimit param<real> ;
+  $type LDS_dissipationLimit param<real> ;
 
-  $rule default(KEC_dissipationLimit) {
-    $KEC_dissipationLimit = 1.0 ;
+  $rule default(LDS_dissipationLimit) {
+    $LDS_dissipationLimit = 1.0 ;
   }
 
-  $type KEC_ducrosFactor param<real> ;
-  $rule default(KEC_ducrosFactor) {
-    $KEC_ducrosFactor = 0.0 ;
+  $type LDS_ducrosFactor param<real> ;
+  $rule default(LDS_ducrosFactor) {
+    $LDS_ducrosFactor = 0.0 ;
   }
 
-  $type KEC_useUpwind param<real> ;
-  $rule default(KEC_useUpwind) {
-    $KEC_useUpwind = 0.0 ;
+  $type LDS_useUpwind param<real> ;
+  $rule default(LDS_useUpwind) {
+    $LDS_useUpwind = 0.0 ;
   }
-  $type KEC_compFactor param<real> ;
-  $rule default(KEC_compFactor) {
-    $KEC_compFactor = 10.0 ;
+  $type LDS_compFactor param<real> ;
+  $rule default(LDS_compFactor) {
+    $LDS_compFactor = 10.0 ;
   }
 
   $type compDiss store<real> ;
@@ -73,33 +73,33 @@ namespace flowPsi {
     $compDiss = 0 ;
   }
 
-  $rule apply((cl,cr)->compDiss<-(cl,cr)->(veldiv,soundSpeed),KEC_compFactor,area)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
+  $rule apply((cl,cr)->compDiss<-(cl,cr)->(veldiv,soundSpeed),LDS_compFactor,area)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
 
-    real factor = $KEC_compFactor*(fabs($cl->$veldiv) + fabs($cr->$veldiv))/
+    real factor = $LDS_compFactor*(fabs($cl->$veldiv) + fabs($cr->$veldiv))/
         (($cl->$soundSpeed + $cr->$soundSpeed)*$area.sada) ;
     factor = factor*factor ;
     join($cl->$compDiss,factor) ;
     join($cr->$compDiss,factor) ;
   }
 
-  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,KEC_dissipationLimit,KEC_useUpwind,compDiss,KEC_ducrosFactor,(upper,lower,boundary_map)->facecenter),constraint(geom_cells,u) {
+  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,LDS_dissipationLimit,LDS_useUpwind,compDiss,LDS_ducrosFactor,(upper,lower,boundary_map)->facecenter),constraint(geom_cells,u) {
     real theta_2 = $veldiv*$veldiv/($vol*$vol) ;
     real omega_2 = $vortMag*$vortMag ;
-    $alpha_diss = max($KEC_ducrosFactor*theta_2/(theta_2+omega_2+1e-10),$compDiss) ;
+    $alpha_diss = max($LDS_ducrosFactor*theta_2/(theta_2+omega_2+1e-10),$compDiss) ;
     int nfaces = $upper.size()+$lower.size()+$boundary_map.size() ;
     $alpha_diss = (nfaces > 5)?($alpha_diss):1.0 ;
-    $alpha_diss = min($alpha_diss,$KEC_dissipationLimit) ;
-    $alpha_diss = max($alpha_diss,$KEC_useUpwind) ;
+    $alpha_diss = min($alpha_diss,$LDS_dissipationLimit) ;
+    $alpha_diss = max($alpha_diss,$LDS_useUpwind) ;
   }
 
   $rule pointwise(cr->alpha_diss<-pmap->cl->alpha_diss) {
     $cr->$alpha_diss = $pmap->$cl->$alpha_diss ;
   }
 
-  $type KEC_nonSymmetricCoeff param<double> ;
+  $type LDS_nonSymmetricCoeff param<double> ;
 
-  $rule default(KEC_nonSymmetricCoeff) {
-    $KEC_nonSymmetricCoeff = 5.0 ;
+  $rule default(LDS_nonSymmetricCoeff) {
+    $LDS_nonSymmetricCoeff = 5.0 ;
   }
 
   
@@ -118,7 +118,7 @@ namespace flowPsi {
 		  facecenter,gradv3d_f(u),grads_f(gagePressure),
 		  grads_f(temperature),
 		  leftv3d(u),rightv3d(u),
-		  Pambient,area,Rtilde,gamma,us_n,KEC_nonSymmetricCoeff),
+		  Pambient,area,Rtilde,gamma,us_n,LDS_nonSymmetricCoeff),
     constraint(useKECFluxScheme,(cl,cr)->vol) {
 
 #ifdef NOCORRECTION
@@ -173,7 +173,7 @@ namespace flowPsi {
 
 
     // Now the roe diffusion part
-    const real geom_diff_coef = 0.5*$KEC_nonSymmetricCoeff ;
+    const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
     const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
     
     const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
@@ -197,9 +197,9 @@ namespace flowPsi {
     }
   }
 
-  $type SkewSymmetricCoeff param<double> ;
-  $rule default(SkewSymmetricCoeff) {
-    $SkewSymmetricCoeff = 1.0 ;
+  $type SSF_Coeff param<double> ;
+  $rule default(SSF_Coeff) {
+    $SSF_Coeff = 1.0 ;
   }
 
   $rule pointwise(SSF::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
@@ -213,14 +213,14 @@ namespace flowPsi {
 		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
 			    limiterv3d(u)),
 		  leftv3d(u),rightv3d(u),
-		  Pambient,area,Rtilde,gamma,us_n,KEC_nonSymmetricCoeff,
-		  SkewSymmetricCoeff),
+		  Pambient,area,Rtilde,gamma,us_n,LDS_nonSymmetricCoeff,
+		  SSF_Coeff),
     constraint(useSkewSymmetricFluxScheme,(cl,cr)->vol) {
     
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
     const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
     
-    double CC = 0.125*$SkewSymmetricCoeff ;
+    double CC = 0.125*$SSF_Coeff ;
     vect3d ucor = dot($gradv3d_f(u),dv) ;
     ucor.x *= ($cl->$limiterv3d(u).x)*($cr->$limiterv3d(u).x) ;
     ucor.y *= ($cl->$limiterv3d(u).y)*($cr->$limiterv3d(u).y) ;
@@ -268,12 +268,13 @@ namespace flowPsi {
     real ke_f = 0.5*dot(uf,uf) ;
     $iflux[4] = mdot*(ke_f+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
 
-    // Now the roe diffusion part
-    const real geom_diff_coef = 0.5*$KEC_nonSymmetricCoeff ;
+    // Now blend in the upwind part
+    const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
     const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
-    const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
-			    $rightsP(gagePressure,minPg))/
-      (rf*$gamma*$Rtilde*tf) ;
+    // compute normalized delta pressure at face
+    const real dp = (2.*fabs($leftsP(gagePressure,minPg)-
+                             $rightsP(gagePressure,minPg))/
+                     (rf*$gamma*$Rtilde*tf)) ;
     
     const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
     const real local_alpha = max(ap,min(1.0,geom_diff_coef*dot(dv,dv)/dot(df,df))) ;

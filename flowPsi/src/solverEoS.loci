@@ -39,7 +39,10 @@ namespace flowPsi {
   $rule pointwise(pressure_f<-gagePressure_f,Pambient) {
     $pressure_f = $gagePressure_f+$Pambient ;
   }
-
+  
+  $rule pointwise(e_internal<-temperature,gamma,Rtilde) {
+    $e_internal = $Rtilde*$temperature/($gamma-1.) ;
+  }
 
   $rule pointwise(soundSpeed<-temperature,gamma,Rtilde) {
     $soundSpeed = sqrt($gamma*$Rtilde*$temperature) ;

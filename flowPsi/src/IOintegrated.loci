@@ -696,90 +696,42 @@ namespace Loci {
 }
 
 namespace flowPsi {
-
-    
-    
     
 
-  class volumeIntegrateUnit : public unit_rule {
-    param<volumeIntegratedValues> volumeIntegration ;
-  public:
-    volumeIntegrateUnit() {
-      name_store("volumeIntegration",volumeIntegration) ;
-      output("volumeIntegration") ;
-      constraint("geom_cells") ;
-    }
-    void compute(const sequence &seq) {
-      (*volumeIntegration).vol = 0 ;
-      (*volumeIntegration).energy = 0 ;
-      (*volumeIntegration).enthalpy = 0 ;
-      (*volumeIntegration).mass = 0 ;
-    }
-  } ;
-
-  class volumeIntegrateApply : public apply_rule<param<volumeIntegratedValues>,
-                                     Loci::Summation<volumeIntegratedValues> > {
-    const_store<real> e_internal, rho, vol ;
-    const_store<vect3d> u ;
-    const_store<real> pressure ;
-    
-    param<volumeIntegratedValues> volumeIntegration ;
-  public:
-    volumeIntegrateApply() {
-      name_store("e_internal",e_internal) ;
-      name_store("rho",rho) ;
-      name_store("vol",vol) ;
-      name_store("u",u) ;
-      name_store("pressure",pressure) ;
-      name_store("volumeIntegration",volumeIntegration) ;
-      input("e_internal,rho,vol,u,pressure") ;
-      input("volumeIntegration") ;
-      output("volumeIntegration") ;
-    }
-    void calculate(Entity cc) {
-      // compute total energy density
-      const real re0 = rho[cc]*(e_internal[cc]+.5*dot(u[cc],u[cc])) ;
-      const real rh0 = re0 + pressure[cc] ;
-      // Total energy per cell volume is vol*re0
-      volumeIntegration[cc].vol += vol[cc] ;
-      volumeIntegration[cc].energy += re0*vol[cc] ;
-      volumeIntegration[cc].enthalpy += rh0*vol[cc] ;
-      volumeIntegration[cc].mass += rho[cc]*vol[cc] ;
-    }
-    void compute(const sequence &seq) {
-      do_loop(seq,this) ;
-    }
-  } ;
-
-  register_rule<volumeIntegrateUnit> register_volumeIntegrateUnit ;
-  register_rule<volumeIntegrateApply> register_volumeIntegrateApply ;
-
-  // Here we create a class that can be used to output the integrated flux
-  // over any subset of faces.
-  class outputVolumeIntegrated : public pointwise_rule {
-    const_param<volumeIntegratedValues> volumeIntegration ;
-    param<bool> OUTPUT ;
-  public:
-    outputVolumeIntegrated() {
-      name_store("volumeIntegration",volumeIntegration) ;
-      name_store("OUTPUT",OUTPUT) ;
-      input("volumeIntegration") ;
-      output("OUTPUT") ;
-      conditional("do_output_integrate") ;
-    }
-    void compute(const sequence &seq) {
+  $type volumeIntegration param<volumeIntegratedValues> ;
+  $rule unit(volumeIntegration),constraint(geom_cells) {
+    $volumeIntegration.vol = 0 ;
+    $volumeIntegration.energy = 0 ;
+    $volumeIntegration.enthalpy = 0 ;
+    $volumeIntegration.mass = 0 ;
+  }
+  
+  $rule apply(volumeIntegration<-e_internal,rho,vol,u,pressure)[Loci::Summation],
+    constraint(geom_cells) {
+    // compute total energy density
+    const real re0 = $rho*($e_internal+.5*dot($u,$u)) ;
+    const real rh0 = re0 + $pressure ;
+    // Total energy per cell volume is vol*re0
+    volumeIntegratedValues cell ;
+    cell.vol = $vol ;
+    cell.energy = re0*$vol ;
+    cell.enthalpy = rh0*$vol ;
+    cell.mass = $rho*$vol ;
+    join($volumeIntegration,cell) ;
+  }    
+  
+  $rule pointwise(OUTPUT<-volumeIntegration),conditional(do_output_integrate),
+    prelude {
       if(Loci::MPI_rank == 0) {
-        real total_mass = volumeIntegration->mass ;
+        real total_mass = (*$volumeIntegration).mass ;
         
-        cout << "total volume = " << volumeIntegration->vol 
-             << ", total energy = " << volumeIntegration->energy 
-             << ", total enthalpy = " << volumeIntegration->enthalpy
+        cout << "total volume = " << (*$volumeIntegration).vol 
+             << ", total energy = " << (*$volumeIntegration).energy 
+             << ", total enthalpy = " << (*$volumeIntegration).enthalpy
              << ", total mass = " << total_mass
 	     << endl ;
       }
-    }
-  };
-  register_rule<outputVolumeIntegrated> register_outputVolumeIntegrated ;
+  } ;
   
 }
 
