@@ -168,16 +168,25 @@ $type dist_noslip        store<flowPsi::real> ;
 $type dist_noslip_f      store<flowPsi::real> ;
 
 $type initialConditions param<Loci::options_list> ;
+$type initialConditionRegions param<Loci::options_list> ;
+$type icRegionInfo blackbox<std::vector<flowPsi::ICstate_info> >;
+$type icRegionId store<int> ;
 
 $type plot_freq   param<int> ;
 $type plot_modulo param<int> ;
 $type do_plot     param<bool> ;
 $type plot_postfix param<std::string> ;
 
+$type plot_status       param<int> ;
 $type restart_freq      param<int> ;
 $type restart_modulo    param<int> ;
 $type restart_directory param<string> ;
 $type restart_postfix   param<string> ;
+$type do_restart        param<bool> ;
+$type icfile            param<std::string> ;
+
+$type maximumRunTime    param<flowPsi::TimeValue> ;
+
 
 $type grid_vol_iblank param<flowPsi::real> ;
 $type integratedOutputFileManager blackbox<flowPsi::integratedFileDBManager> ;
