@@ -6,7 +6,7 @@
 #include "readGrid.h"
 #include "bcTools.h"
 #include "SA_param.h"
-
+#include "root.h"
 $include "flowPsi.lh"
 $include "SA.lh"
 

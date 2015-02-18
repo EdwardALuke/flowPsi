@@ -1,0 +1,95 @@
+#include <Loci.h>
+#include <string>
+#include <vector>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+
+namespace flowPsi {
+  $rule default(restart_modulo) {
+    $restart_modulo = 0 ;
+  }
+
+  $rule default(restart_freq) {
+    $restart_freq=0 ;
+  }
+
+  $rule singleton(do_restart<-plot_status,$n,ncycle,restart_freq) {
+    $do_restart = $plot_status > 1 ;
+    if(!$do_restart && $restart_freq > 0) 
+      $do_restart = ($ncycle % $restart_freq == 0 && $ncycle != 0) ;
+  }
+
+  $rule singleton(restart_postfix<-do_restart,ncycle,restart_modulo,plot_status) {
+    $restart_postfix = "stop" ;
+    if($do_restart && $plot_status <= 1) {
+      ostringstream oss ;
+      int cycle = $ncycle ;
+      if($restart_modulo != 0)
+        cycle = cycle % $restart_modulo ;
+      oss << cycle ;
+      $restart_postfix = oss.str() ;
+    }
+  }
+  
+  $rule singleton(restart_directory<-ncycle,do_restart,restart_postfix) {
+    $restart_directory = "restart/" + $restart_postfix + "/" ;
+    if($do_restart) {
+      if(Loci::MPI_rank == 0) {
+        struct stat statbuf ;
+	int fid = open("restart",O_RDONLY) ;
+	if(fid < 0) { // No file exists so make it
+          mkdir("restart",0755) ;
+        } else {
+	  fstat(fid,&statbuf) ;
+	  if(!S_ISDIR(statbuf.st_mode)) {
+            cerr << "file 'restart' should be a directory!, rename 'restart' and start again."
+                 << endl ;
+            $restart_directory = "" ;
+          }
+	  close(fid) ;
+	}
+	fid = open($restart_directory.c_str(),O_RDONLY) ;
+	if(fid < 0) { // file doesn't exist
+          mkdir($restart_directory.c_str(),0755) ;
+	} else {
+	  fstat(fid,&statbuf) ;
+          if(!S_ISDIR(statbuf.st_mode)) {
+            cerr << "file '"<< $restart_directory << "' should be a directory!"
+                 << endl ;
+            $restart_directory = "" ;
+          }
+	  close(fid) ;
+	}
+      }
+    }
+  }
+
+  $rule pointwise(OUTPUT{n}<-temperature{n},gagePressure{n},Pambient{n},u{n},stime{n},restart_directory{n},modelName{n},restart_modulo{n},ncycle{n},restart_postfix{n},$n{n}),conditional(do_restart{n}),prelude {
+    if(*$ncycle{n} != 0 && *$$n{n} != 0) {
+      hid_t file_id = 0 ;
+      string filename = *$restart_directory{n} + "flowVars_" + *$modelName{n} ;
+
+      if(Loci::MPI_rank == 0) {
+	cout << "output restart file at iteration " << *$ncycle{n}
+	     << " to file " << filename << endl ;
+      }
+    
+      file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+				     H5P_DEFAULT, H5P_DEFAULT) ;
+      
+      
+      Loci::writeContainer(file_id,"ncycle",$ncycle{n}.Rep()) ;
+      Loci::writeContainer(file_id,"stime",$stime{n}.Rep()) ;
+      Loci::writeContainer(file_id,"Pambient",$Pambient{n}.Rep()) ;
+      Loci::writeContainer(file_id,"temperature",$temperature{n}.Rep()) ;
+      Loci::writeContainer(file_id,"gagePressure",$gagePressure{n}.Rep()) ;
+      Loci::writeContainer(file_id,"u",$u{n}.Rep()) ;
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+}

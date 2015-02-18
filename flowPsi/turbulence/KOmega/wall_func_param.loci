@@ -1,0 +1,60 @@
+#include "wall_func_param.h"
+#include <Tools/parse.h>
+
+#include <vector>
+using std::vector ;
+
+using std::map ;
+using std::string ;
+using std::swap ;
+$include "flowPsi.lh"
+$include "kOmega.lh"
+
+using std::istream ;
+using std::ostream ;
+using std::endl ;
+
+namespace flowPsi {
+  class wlol : public options_list {
+  public:
+    wlol(): options_list("kappa:B:E:Cmu"){}
+  } ;
+
+  wall_func_param::wall_func_param() {
+    kappa = 0.41 ;
+    B = 5.5 ;
+    E = 9.8 ;
+    Cmu=0.09 ;
+  }
+
+  istream &wall_func_param::Input(istream &s) {
+    wlol finput ;
+    s >> finput ;
+    kappa = 0.41 ;
+    B = 5.5 ;
+    E = 9.0 ;
+    Cmu=0.09 ;
+    if(finput.optionExists("kappa")){
+      finput.getOption("kappa",kappa) ;
+    }
+    if(finput.optionExists("B")) {
+      finput.getOption("B",B) ;
+    }
+    if(finput.optionExists("E")) {
+      finput.getOption("E",E) ;
+    }
+    if(finput.optionExists("Cmu")) {
+      finput.getOption("Cmu",E) ;
+    }
+    return s ;
+  }
+
+  ostream &wall_func_param::Print(ostream &s) const {
+    s <<"< kappa=" <<kappa<<", B= "<< B <<", E= " <<E
+      << ", Cmu="<< Cmu <<" >"<<endl ;
+    return s ;
+  }
+
+  $rule default(wall_law),comments("Parameters used to compute wall functions") {}
+
+}

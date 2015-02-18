@@ -99,6 +99,15 @@ namespace flowPsi {
     $mu = a1*pow(T,a2)/(T+a3) ;
   }
 
+  $type T store<real> ;
+  $rule pointwise(mu(T)<-T,sutherlandParameters) {
+    const real t = $T ;
+    const real a1 = $sutherlandParameters.a1 ;
+    const real a2 = $sutherlandParameters.a2 ;
+    const real a3 = $sutherlandParameters.a3 ;
+    $mu(T) = a1*pow(t,a2)/(t+a3) ;
+  }
+
   $rule pointwise(mu_f<-temperature_f,ci->vol,sutherlandParameters) {
     const real T = $temperature_f ;
     const real a1 = $sutherlandParameters.a1 ;
@@ -119,6 +128,14 @@ namespace flowPsi {
     const real k2 = $sutherlandParameters.k2 ;
     const real k3 = $sutherlandParameters.k3 ;
     $kconduct = k1*pow(T,k2)/(T+k3) ;
+  }
+
+  $rule pointwise(kconduct(T)<-T,sutherlandParameters) {
+    const real t = $T ;
+    const real k1 = $sutherlandParameters.k1 ;
+    const real k2 = $sutherlandParameters.k2 ;
+    const real k3 = $sutherlandParameters.k3 ;
+    $kconduct(T) = k1*pow(t,k2)/(t+k3) ;
   }
 
   $rule pointwise(kconduct_f<-temperature_f,ci->vol,sutherlandParameters) {

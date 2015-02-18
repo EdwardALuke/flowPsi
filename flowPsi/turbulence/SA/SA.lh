@@ -38,3 +38,8 @@ $type SA_D              store<flowPsi::real> ;
 $type SA_U              store<flowPsi::real> ;
 $type SA_qi             store<flowPsi::real> ;
 
+$type wall_law param<flowPsi::wall_func_param> ;
+$type temp_wlaw store<flowPsi::real> ;
+$type wall_law_nut store<flowPsi::real> ;
+$type tau_wall store<flowPsi::vect3d> ;
+$type q_wall store<flowPsi::real> ;

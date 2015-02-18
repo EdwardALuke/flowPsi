@@ -17,7 +17,7 @@ OBJS =  \
 	bcInputs.o bcImpermeable.o bcInflow.o bcOutflow.o bcTools.o\
 	bcIsentropic.o bcFixedMass.o bcViscousWall.o \
 	solverTimestep.o solverNewton.o solverEoS.o solverIC.o \
-	solverLinearSystem.o solverResidual.o\
+	solverLinearSystem.o solverResidual.o solverRestart.o\
 	solverTurbulence.o solverScalarTransport.o solverPeriodic.o \
 	IOplot.o IOintegrated.o IOgrid.o \
 	linearSolverSGS.o linearSolverFSGS.o linearSolverLSGS.o \

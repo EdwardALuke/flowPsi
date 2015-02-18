@@ -43,6 +43,7 @@ $type us store<flowPsi::vect3d> ;
 
 $type mu        store<real> ; // fluid viscosity cell
 $type mu_f      store<real> ; // fluid viscosity face
+$type mu(T)     store<real> ;
 $type tmu       store<real> ; // turbulent viscosity cell
 $type tmu_f     store<real> ; // turbulent viscosity face
 $type muTotal   store<real> ;
@@ -50,6 +51,7 @@ $type muTotal_f store<real> ;
 
 $type kconduct store<real> ; // fluid conductivity cell
 $type kconduct_f store<real> ; // fluid conductivity face
+$type kconduct(T) store<real> ;
 $type turbulentPrandtlNumber param<real> ; // Turbulent Prandtl number
 // Contributions from fluxes to cell
 $type src store<Loci::Array<flowPsi::real,5> > ;

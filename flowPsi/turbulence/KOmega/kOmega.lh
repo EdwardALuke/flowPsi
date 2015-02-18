@@ -64,3 +64,13 @@ $type sstw_B             store<flowPsi::real> ;
 $type sstw_D             store<flowPsi::real> ;
 $type sstw_L             store<flowPsi::real> ;
 $type sstw_U             store<flowPsi::real> ;
+
+// Wall Law Variables
+$type wall_law param<flowPsi::wall_func_param> ;
+$type temp_wlaw  store<flowPsi::real> ;
+$type wall_law_w store<flowPsi::real> ;
+$type wall_law_k store<flowPsi::real> ;
+$type tau_wall   store<flowPsi::vect3d> ;
+$type q_wall     store<flowPsi::real> ;
+$type wall_cells store<char> ;
+$type nonAdiabaticWall store<char> ;
