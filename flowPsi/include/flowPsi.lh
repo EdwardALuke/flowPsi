@@ -31,7 +31,9 @@ $type temperature       store<flowPsi::real> ;
 $type rho               store<flowPsi::real> ;
 // cell pressure
 $type pressure          store<flowPsi::real> ;
+$type e_internal        store<flowPsi::real> ;
 // cell speed of sound
+
 $type soundSpeed        store<flowPsi::real> ;
 $type gagePressure     store<flowPsi::real> ;
 
