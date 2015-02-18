@@ -1,10 +1,16 @@
 #include <Loci.h>
+#include <string>
+#include <vector>
 #include <Tools/stream.h>
 #include "flowTypes.h"
+#include "initialConditions.h"
 $include "flowPsi.lh"
+#include <sys/stat.h>
 
 namespace flowPsi {
-  
+  using std::string ;
+  using std::vector ;
+
   $rule optional(initialConditions), comments("Specify constant initial conditions settings") {
   }
 
@@ -15,132 +21,511 @@ namespace flowPsi {
   }
   using Loci::StringError ;
 
-  $type initialConditionsTemperature param<real> ;
-  $type initialConditionsGagePressure param<real> ;
-  $type initialConditionsU param<vect3d> ;
+  $type initialConditionRegions param<Loci::options_list> ;
+  $rule optional(initialConditionRegions) {}
+
+  class leftPlane : public geomTest {
+    vect3d pt ;
+    vect3d n ;
+  public:
+    leftPlane(vect3d p1, vect3d n1) : pt(p1),n(n1) {
+      n *= 1./norm(n) ;
+    }
+    leftPlane(const options_list &ol) {
+      if(!ol.optionExists("point") || !ol.optionExists("normal")) {
+        cerr << "leftPlane needs 'point' and 'normal'" << endl ;
+        Loci::Abort() ;
+      }
+      get_vect3dOption(ol,"point","m",pt) ;
+      get_vect3dOption(ol,"normal","",n) ;
+      n *= 1./max(norm(n),1e-33) ;
+    }
+    bool inGeomPt(vect3d pt) const ;
+  } ;
+
+  bool leftPlane::inGeomPt(vect3d p) const {
+    if(dot(p-pt,n) < 0.0)
+      return true ;
+    return false ;
+  }
+    
+
+  class inBox : public geomTest {
+    double xmax,xmin,ymax,ymin,zmax,zmin ;
+  public:
+    inBox(vect3d p1, vect3d p2) {
+      xmax = max(p1.x,p2.x) ;
+      xmin = min(p1.x,p2.x) ;
+    
+      ymax = max(p1.y,p2.y) ;
+      ymin = min(p1.y,p2.y) ;
+    
+      zmax = max(p1.z,p2.z) ;
+      zmin = min(p1.z,p2.z) ;
+    }
+    inBox(const options_list &ol) {
+      if(!ol.optionExists("p1") || !ol.optionExists("p2")) {
+        cerr << "inBox needs two points, 'p1' and 'p2'" << endl ;
+        Loci::Abort() ;
+      }
+      vect3d p1,p2 ;
+      get_vect3dOption(ol,"p1","m",p1) ;
+      get_vect3dOption(ol,"p2","m",p2) ;
+      xmax = max(p1.x,p2.x) ;
+      xmin = min(p1.x,p2.x) ;
+    
+      ymax = max(p1.y,p2.y) ;
+      ymin = min(p1.y,p2.y) ;
+    
+      zmax = max(p1.z,p2.z) ;
+      zmin = min(p1.z,p2.z) ;
+    }
+    
+    bool inGeomPt(vect3d pt) const ;
+  } ;
+
+  bool inBox::inGeomPt(vect3d p) const {
+    if(p.x >= xmin && p.x <= xmax &&
+       p.y >= ymin && p.y <= ymax &&
+       p.z >= zmin && p.z <= zmax)
+      return true ;
+    return false ;
+  }
+      
+  class inSphere : public geomTest {
+    double r ;
+    double r2 ;
+    vect3d center ;
+  public:
+    inSphere(double ri,  vect3d c) { r=ri; center=c; r2=r*r ; }
+    inSphere(const options_list &ol) {
+      // Here get sphere information
+      if(!ol.optionExists("radius") || !ol.optionExists("center")) {
+        cerr << "inSphere needs a radius and center" << endl ;
+        Loci::Abort() ;
+      }
+      ol.getOptionUnits("radius","m",r) ;
+      get_vect3dOption(ol,"center","m",center) ;
+      r2=r*r ;
+    }      
+    bool inGeomPt(vect3d pt) const ;
+  } ;
+
+  bool inSphere::inGeomPt(vect3d pt) const {
+    if(dot(pt-center,pt-center) < r2)
+      return true ;
+    return false ;
+  }
+
+  class inCylinder : public geomTest {
+    double r ;
+    double r2 ;
+    vect3d p1,p2 ;
+    vect3d n ;
+    double mag ;
+  public:
+    inCylinder(double ri,  vect3d p1i,vect3d p2i) {
+      r=ri;r2=r*r ;
+      p1=p1i;p2=p2i;
+      n = p2-p1 ;
+      mag = norm(n) ;
+      n *= 1./mag ;
+    }
+    inCylinder(const options_list &ol) {
+      // Here get sphere information
+      if(!ol.optionExists("radius") || !ol.optionExists("p1")
+         || !ol.optionExists("p2")) {
+        cerr << "inCylinder needs a radius and two axis points (p1 and p2)" << endl ;
+        Loci::Abort() ;
+      }
+      ol.getOptionUnits("radius","m",r) ;
+      get_vect3dOption(ol,"p1","m",p1) ;
+      get_vect3dOption(ol,"p2","m",p2) ;
+      n = p2-p1 ;
+      mag = norm(n) ;
+      n *= 1./mag ;
+      r2=r*r ;
+    }      
+    bool inGeomPt(vect3d pt) const ;
+  } ;
+
+  bool inCylinder::inGeomPt(vect3d pt) const {
+    double v = dot(pt-p1,n) ;
+    if(v < 0.0 || v > mag)
+      return false ;
+    // project point onto axis
+    vect3d paxis = p1 + n*v ;
+    if(dot(pt-paxis,pt-paxis) > r2) // Check radius
+      return false ; // outside
+    return true ;// otherwise inside cylinder
+  }
+
+  class inCone : public geomTest {
+    double r1 ;
+    double r2 ;
+    vect3d p1,p2 ;
+    vect3d n ;
+    double mag ;
+  public:
+    inCone(double r1i, double r2i, vect3d p1i,vect3d p2i) {
+      r1=r1i;r2=r2i ;
+      p1=p1i;p2=p2i;
+      n = p2-p1 ;
+      mag = norm(n) ;
+      n *= 1./mag ;
+    }
+    inCone(const options_list &ol) {
+      // Here get sphere information
+      if(!ol.optionExists("r1") || !ol.optionExists("r2") ||
+         !ol.optionExists("p1") || !ol.optionExists("p2")) {
+        cerr << "inCone needs a two radii (r1 and r2) and two axis points (p1 and p2)" << endl ;
+        Loci::Abort() ;
+      }
+      ol.getOptionUnits("r1","m",r1) ;
+      ol.getOptionUnits("r2","m",r2) ;
+      get_vect3dOption(ol,"p1","m",p1) ;
+      get_vect3dOption(ol,"p2","m",p2) ;
+      n = p2-p1 ;
+      mag = norm(n) ;
+      n *= 1./mag ;
+    }      
+    bool inGeomPt(vect3d pt) const ;
+  } ;
+
+  bool inCone::inGeomPt(vect3d pt) const {
+    double v = dot(pt-p1,n) ;
+    if(v < 0.0 || v > mag)
+      return false ;
+    // project point onto axis
+    double t = v/mag ;
+    double rx = r1*(1.-t) + r2*t ;
+    double rx2 = rx*rx ;
+    vect3d paxis = p1 + n*v ;
+    if(dot(pt-paxis,pt-paxis) > rx2) // Check radius
+      return false ; // outside
+    return true ;// otherwise inside cone
+  }
+
+  Loci::CPTR<geomTest> geomTestFactory(string name, const options_list ol) {
+    Loci::CPTR<geomTest> gp ;
+    if(name == "inSphere") {
+      gp = new inSphere(ol) ;
+    } else if(name == "inBox") {
+      gp = new inBox(ol) ;
+    } else if(name == "inCylinder") {
+      gp = new inCylinder(ol) ;
+    } else if(name == "inCone") {
+      gp = new inCone(ol) ;
+    } else if(name == "leftPlane") {
+      gp = new leftPlane(ol) ;
+    } else {
+      cerr << "don't know what to do with '" << name << "'" << endl ;
+      return 0 ;
+    }
+    return gp ;
+  }
+
+
+  Loci::options_list getStateFromList(const Loci::options_list &ol, 
+				      string name) {
+    Loci::option_value_type ovt= ol.getOptionValueType(name) ;
+    if(ovt != Loci::FUNCTION) {
+      cerr << "getState failed for variable '" << name 
+           << "' expecting state function" << endl ;
+      Loci::Abort() ;
+    }
+    options_list::arg_list value_list ;
+    string fname ;
+    ol.getOption(name,fname,value_list) ;
+    if(fname != "state") {
+      cerr << "expecting to define function 'state', instead found '"
+           << fname << "'" << endl ;
+      Loci::Abort() ;
+    }
+    Loci::options_list ro ;
+    ro.Input(value_list) ;
+    return ro ;
+  }
+
+  $rule singleton(icRegionInfo<-initialConditions) {
+    vector<flowPsi::ICstate_info> regionInfo ;
+    ICstate_info def;
+    def.name = "default" ;
+    def.state_info = $initialConditions ;
+    regionInfo.push_back(def) ;
+    $icRegionInfo.swap(regionInfo) ;
+  }
+
+  $rule singleton(icRegionInfo<-initialConditionRegions),option(disable_threading) {
+    using Loci::options_list ;
+
+    if(!$initialConditionRegions.optionExists("default")) {
+      cerr << "default initial condition must be set in initialConditionRegions" << endl ;
+      Loci::Abort() ;
+    }
+
+    vector<flowPsi::ICstate_info> regionInfo ;
+    // Make sure default is the first item
+    ICstate_info def;
+    def.name = "default" ;
+    def.state_info = getStateFromList($initialConditionRegions,"default") ;
+    regionInfo.push_back(def) ;
+    options_list::option_namelist nl = $initialConditionRegions.getOptionNameList() ;
+    options_list::option_namelist::const_iterator nli ;
+    for(nli=nl.begin();nli!=nl.end();++nli) {
+      if(*nli == "default" || *nli == "regions")
+	continue ;
+      ICstate_info state ;
+      state.name = *nli ;
+      state.state_info = getStateFromList($initialConditionRegions,*nli) ;
+      regionInfo.push_back(state) ;
+    }
+    $icRegionInfo.swap(regionInfo) ;
+  }
+  $type regionsGeomInfo blackbox<vector<ICgeom_info> > ;
+
+  $rule singleton(regionsGeomInfo<-initialConditions),option(disable_threading) {
+    $regionsGeomInfo = vector<ICgeom_info>() ;
+  }
+    
+  $rule singleton(regionsGeomInfo<-icRegionInfo,initialConditionRegions),option(disable_threading) {
+    vector<ICgeom_info> geomInfo ;
+    if($initialConditionRegions.optionExists("regions")) {
+      using namespace Loci ;
+      option_value_type ovt= $initialConditionRegions.getOptionValueType("regions") ;
+      if(ovt != LIST) {
+        cerr << "regions in initialConditionRegions should define a list" << endl ;
+        Loci::Abort() ;
+      }
+      options_list::arg_list value_list ;
+      $initialConditionRegions.getOption("regions",value_list) ;
+      int sz = value_list.size() ;
+      for(int i=0;i<sz;++i) {
+        if(value_list[i].type_of() != FUNCTION) {
+          cerr << "regions is a list of geometric test functions" << endl ;
+          Loci::Abort() ;
+        }
+        string name ;
+        value_list[i].get_value(name) ;
+        options_list::arg_list fvalues ;
+        value_list[i].get_value(fvalues) ;
+        options_list fol ;
+        fol.Input(fvalues) ;
+        ICgeom_info ginfo ;
+        string composition = "default" ;
+        if(fol.optionExists("composition")) {
+          option_value_type ovt= fol.getOptionValueType("composition") ;
+          if(ovt != NAME) {
+            cerr << "composition should be set to the name of a specified state." << endl ;
+          } else {
+            fol.getOption("composition",composition) ;
+          }
+        }
+
+	int id = 0 ;
+	int ncomp = $icRegionInfo.size() ;
+	for(int i=0;i<ncomp;++i)
+	  if($icRegionInfo[i].name == composition) 
+	    id = i ;
+	
+	ginfo.id = id ;
+        ginfo.geomTestFunc = geomTestFactory(name,fol) ;
+        geomInfo.push_back(ginfo) ;
+      }
+    } else {
+      if(Loci::MPI_rank == 0)
+        cerr << "Warning: No regions defined in initialConditionRegions!" 
+	     << endl ;
+    }
+    $regionsGeomInfo.swap(geomInfo) ;
+  }
+  
+  $rule pointwise(icRegionId<-regionsGeomInfo,cellcenter) {
+    $icRegionId = 0 ;
+    const int gsz = $regionsGeomInfo.size() ;
+    for(int i=0;i<gsz;++i)
+      if($regionsGeomInfo[i].geomTestFunc->inGeomPt($cellcenter))
+	$icRegionId = $regionsGeomInfo[i].id ;
+  }
+
+
+  $type initialConditionsTemperature param<vector<real> > ;
+  $type initialConditionsGagePressure param<vector<real> > ;
+  $type initialConditionsU param<vector<vect3d> > ;
 
   $rule singleton(initialConditionsTemperature,initialConditionsGagePressure,
-		  initialConditionsU<-initialConditions,Rtilde,Pambient,gamma) {
-    bool T_set = false ;
-    bool p_set = false ;
-    bool rho_set = false ;
-    double T = 0 ;
-    double p = 0 ;
-    double rho = 0 ;
-    const Loci::options_list finput = $initialConditions ;
-    if(finput.optionExists("rho")) {
-      if(finput.getOptionValueType("rho") == Loci::REAL) {
-        finput.getOption("rho",rho) ;
-        rho_set = true ;
-      } else if(finput.getOptionValueType("rho") == Loci::UNIT_VALUE) {
-        Loci::UNIT_type rhou ;
-        finput.getOption("rho",rhou) ;
-        if(!rhou.is_compatible("kg/m/m/m")) {
-          string err = "wrong type of unit for density: " + toString(rhou) ;
-          throw StringError(err) ;
-        } else {
-          rho = rhou.get_value_in("kg/m/m/m") ;
-          rho_set = true ;
-        }
-      } else {
-        throw StringError("incorrect type for 'rho' in initialConditions") ;
+		  initialConditionsU<-icRegionInfo,Rtilde,Pambient,gamma) {
+    const int sz = $icRegionInfo.size() ;
+    vector<real> T_list ;
+    vector<real> pg_list ;
+    vector<vect3d> u_list ;
+
+    for(int i=0;i<sz;++i) {
+      bool T_set = false ;
+      bool p_set = false ;
+      bool rho_set = false ;
+      double T = 0 ;
+      double p = 0 ;
+      double rho = 0 ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("rho")) {
+	if(finput.getOptionValueType("rho") == Loci::REAL) {
+	  finput.getOption("rho",rho) ;
+	  rho_set = true ;
+	} else if(finput.getOptionValueType("rho") == Loci::UNIT_VALUE) {
+	  Loci::UNIT_type rhou ;
+	  finput.getOption("rho",rhou) ;
+	  if(!rhou.is_compatible("kg/m/m/m")) {
+	    string err = "wrong type of unit for density: " + toString(rhou) ;
+	    throw StringError(err) ;
+	  } else {
+	    rho = rhou.get_value_in("kg/m/m/m") ;
+	    rho_set = true ;
+	  }
+	} else {
+	  throw StringError("incorrect type for 'rho' in initialConditions") ;
+	}
       }
-    }
-    if(finput.optionExists("T")) {
-      if(finput.getOptionValueType("T") == Loci::REAL) {
-        finput.getOption("T",T) ;
-        T_set = true ;
-      } else if(finput.getOptionValueType("T") == Loci::UNIT_VALUE) {
-        Loci::UNIT_type Tu ;
-        finput.getOption("T",Tu) ;
-        if(!Tu.is_compatible("kelvin")) {
-          string err = "wrong type of unit for temperature: " + toString(Tu) ;
-          throw StringError(err) ;
-        } else {
-          T = Tu.get_value_in("kelvin") ;
-          T_set = true ;
-        }
-      } else {
-        throw StringError("incorrect type for 'T' in fluidState") ;
+      if(finput.optionExists("T")) {
+	if(finput.getOptionValueType("T") == Loci::REAL) {
+	  finput.getOption("T",T) ;
+	  T_set = true ;
+	} else if(finput.getOptionValueType("T") == Loci::UNIT_VALUE) {
+	  Loci::UNIT_type Tu ;
+	  finput.getOption("T",Tu) ;
+	  if(!Tu.is_compatible("kelvin")) {
+	    string err = "wrong type of unit for temperature: " + toString(Tu) ;
+	    throw StringError(err) ;
+	  } else {
+	    T = Tu.get_value_in("kelvin") ;
+	    T_set = true ;
+	  }
+	} else {
+	  throw StringError("incorrect type for 'T' in fluidState") ;
+	}
       }
-    }
     
-    if(finput.optionExists("p")) {
-      if(finput.getOptionValueType("p") == Loci::REAL) {
-        finput.getOption("p",p) ;
-        p_set = true ;
-      } else if(finput.getOptionValueType("p") == Loci::UNIT_VALUE) {
-        Loci::UNIT_type pu ;
-        finput.getOption("p",pu) ;
-        if(!pu.is_compatible("Pa"))  {
-          string err = "wrong type of unit for pressure: " + toString(pu) ;
-          throw StringError(err) ;
-        } else {
-          p = pu.get_value_in("Pa") ;
-          p_set = true ;
-        }
-      } else {
-        throw StringError("incorrect type for 'p' in fluidState") ;
+      if(finput.optionExists("p")) {
+	if(finput.getOptionValueType("p") == Loci::REAL) {
+	  finput.getOption("p",p) ;
+	  p_set = true ;
+	} else if(finput.getOptionValueType("p") == Loci::UNIT_VALUE) {
+	  Loci::UNIT_type pu ;
+	  finput.getOption("p",pu) ;
+	  if(!pu.is_compatible("Pa"))  {
+	    string err = "wrong type of unit for pressure: " + toString(pu) ;
+	    throw StringError(err) ;
+	  } else {
+	    p = pu.get_value_in("Pa") ;
+	    p_set = true ;
+	  }
+	} else {
+	  throw StringError("incorrect type for 'p' in fluidState") ;
+	}
       }
-    }
-    int cnt = 0 ;
-    if(rho_set)
-      cnt++ ;
-    if(p_set)
-      cnt++ ;
-    if(T_set)
-      cnt++ ;
-    if(cnt > 2) 
-      throw StringError("overspecification of rho,p, and T in initialConditions") ;
-    if(cnt < 2) 
-      throw StringError("underspecification of rho,p, and T in initialConditions") ;
-
-    if(p_set && rho_set) {
-      T = p/(rho*$Rtilde) ;
-    }
-    if(T_set && rho_set) {
-      p = rho*$Rtilde*T ;
-    }
-
-    $initialConditionsGagePressure = p-$Pambient ;
-    $initialConditionsTemperature = T ;
-    bool u_set = false ;
-    bool M_set = false ;
-    vect3d u = vect3d(0,0,0) ;
-
-    if(finput.optionExists("M")) {
-      get_vect3dOption(finput,"M","",u) ;
-      real soundSpeed = sqrt($gamma*$Rtilde*T) ;
-      u *= soundSpeed ;
-      M_set = true ;
-    }
-    
-    if(finput.optionExists("u")) {
-      get_vect3dOption(finput,"u","m/s",u) ;
-      u_set = true ;
-    }
-    if(M_set && u_set) {
-      throw StringError("overspecification of u and M in initialConditions") ;
-    }
-    if(!M_set && !u_set) {
-      throw StringError("must specify either  u or M in initialConditions") ;
+      int cnt = 0 ;
+      if(rho_set)
+	cnt++ ;
+      if(p_set)
+	cnt++ ;
+      if(T_set)
+	cnt++ ;
+      if(cnt > 2) 
+	throw StringError("overspecification of rho,p, and T in initialConditions") ;
+      if(cnt < 2) 
+	throw StringError("underspecification of rho,p, and T in initialConditions") ;
       
+      if(p_set && rho_set) {
+	T = p/(rho*$Rtilde) ;
+      }
+      if(T_set && rho_set) {
+	p = rho*$Rtilde*T ;
+      }
+      pg_list.push_back(p-$Pambient) ;
+      T_list.push_back(T) ;
+
+      bool u_set = false ;
+      bool M_set = false ;
+      vect3d u = vect3d(0,0,0) ;
+      
+      if(finput.optionExists("M")) {
+	get_vect3dOption(finput,"M","",u) ;
+	real soundSpeed = sqrt($gamma*$Rtilde*T) ;
+	u *= soundSpeed ;
+	M_set = true ;
+      }
+    
+      if(finput.optionExists("u")) {
+	get_vect3dOption(finput,"u","m/s",u) ;
+	u_set = true ;
+      }
+      if(M_set && u_set) {
+	throw StringError("overspecification of u and M in initialConditions") ;
+      }
+      if(!M_set && !u_set) {
+	throw StringError("must specify either  u or M in initialConditions") ;
+      }
+      u_list.push_back(u) ;
     }
-    $initialConditionsU = u ;
+    $initialConditionsTemperature.swap(T_list) ;
+    $initialConditionsGagePressure.swap(pg_list) ;
+    $initialConditionsU.swap(u_list) ;
   }
 
-  $rule pointwise(temperature_ic,gagePressure_ic<-
+  $rule pointwise(temperature_ic<-
 		  initialConditionsTemperature,
-		  initialConditionsGagePressure),
-    constraint(initialConditions,geom_cells) {
-    $gagePressure_ic = $initialConditionsGagePressure ;
-    $temperature_ic = $initialConditionsTemperature ;
+		  icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $temperature_ic = $initialConditionsTemperature[$icRegionId] ;
   }
 
-  $rule pointwise(u_ic<-initialConditionsU),
-    constraint(initialConditions,geom_cells) {
-    $u_ic = $initialConditionsU ;
+  $rule pointwise(gagePressure_ic<-
+		  initialConditionsGagePressure,
+		  icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $gagePressure_ic = $initialConditionsGagePressure[$icRegionId] ;
   }
 
+  $rule pointwise(u_ic<-initialConditionsU,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $u_ic = $initialConditionsU[$icRegionId] ;
+  }
   
+  $rule pointwise(icfile::temperature_ic,icfile::gagePressure_ic,
+		  icfile::u_ic<-icfile,modelName,Pambient),
+    constraint(geom_cells,icfile),  option(disable_threading),  prelude {
+    
+    string filename = *$icfile+"flowVars_"+*$modelName ;
+    if(Loci::MPI_rank == 0)
+      cout << "restarting flow variables from '" << filename << "'"<<endl ;
+    struct stat buf ;
+    int has_file = 0 ;
+    if(Loci::MPI_rank == 0) {
+      if(stat(filename.c_str(),&buf)==0) {
+	if(buf.st_size != 0 && S_ISREG(buf.st_mode))
+	  has_file = 1 ;
+	else
+	  has_file = 2 ;
+      }
+    }
+    MPI_Bcast(&has_file,1,MPI_INT,0,MPI_COMM_WORLD) ;
+    if(has_file == 2)  {
+      if(Loci::MPI_rank == 0)
+	cerr << "unable to find file '" << filename << "'" << endl ;
+      Loci::Abort() ;
+    }
+    hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+					 H5F_ACC_RDONLY, H5P_DEFAULT);
+    entitySet read_set = entitySet(seq) ;
+    Loci::readContainer(file_id,"temperature",$temperature_ic.Rep(),read_set) ;
+    Loci::readContainer(file_id,"gagePressure",$gagePressure_ic.Rep(),read_set) ;
+    Loci::readContainer(file_id,"u",$u_ic.Rep(),read_set) ;
+    param<real> Pref ;
+    Loci::readContainer(file_id,"Pambient",Pref.Rep(),read_set) ;
+    double dp = *Pref-*$Pambient ;
+    FORALL(read_set,ii) {
+      $gagePressure_ic[ii] += dp ;
+    } ENDFORALL ;
+    Loci::hdf5CloseFile(file_id) ;
+  } ;
 }
