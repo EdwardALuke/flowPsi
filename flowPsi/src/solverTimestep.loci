@@ -191,8 +191,25 @@ namespace flowPsi {
     $rhs{n,it}[4] = $src{n,it}[4] - (rhonp*e0np - rhon*e0n)*rdtvol ;
   }
   
-  $rule pointwise(localPBias<-vol) {
-    $localPBias = 0.0 ;
+  $type timePressureBiasControl param<double> ;
+  $rule default(timePressureBiasControl) {
+    $timePressureBiasControl = 0.0 ;
+  }
+
+  // Compute local pressure bias using cfl
+  $rule pointwise(localPBias<-cflpdt,dtmax,timePressureBiasControl),
+    constraint(geom_cells) {
+    double cfl = $cflpdt*$dtmax ;
+    double factor = min(1.0,max(0.0,0.1*(cfl-1.))) ;
+    $localPBias = max($timePressureBiasControl,pow(factor,0.7)) ;
+  }
+  
+  $rule pointwise(localPBias_next{n,it=0}),constraint(geom_cells{n}) {
+    $localPBias_next{n,it=0} = 1.0 ;
+  }
+
+  $rule pointwise(localPBias_next{n,it+1}<-localPBias{n,it}) {
+    $localPBias_next{n,it+1} = $localPBias{n,it} ;
   }
   
   // Time accurate second order scheme using centered variation of

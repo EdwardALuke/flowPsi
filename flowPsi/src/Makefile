@@ -22,7 +22,7 @@ OBJS =  \
 	solverSetup.o\
 	IOplot.o IOintegrated.o IOgrid.o \
 	linearSolverSGS.o linearSolverFSGS.o linearSolverLSGS.o \
-	fluxInviscid.o fluxViscous.o
+	fluxInviscid.o fluxLowDiss.o fluxViscous.o
 
 
 

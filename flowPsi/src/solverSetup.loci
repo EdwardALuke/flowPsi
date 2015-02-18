@@ -55,5 +55,96 @@ namespace flowPsi {
       join(*$plot_status{n},2) ;
   } ;
   
+
+  // Compute eigenvalues for cfl estimation
+  $type maxev_f store<real> ;
+
+  $rule pointwise(maxev_f<-area,us_n,(cl,cr)->(u,soundSpeed)) {
+    $maxev_f = max(fabs(dot($cl->$u,$area.n)-$us_n)+$cl->$soundSpeed,
+                   fabs(dot($cr->$u,$area.n)-$us_n)+$cr->$soundSpeed) ;
+  }
+  $rule pointwise(maxev_f<-area,us_n,u_f,soundSpeed_f),constraint(ci->u) {
+    $maxev_f = fabs(dot($u_f,$area.n)-$us_n)+$soundSpeed_f ;
+  }
+  
+  $rule pointwise(cflpdt<-vol,(upper,lower,boundary_map)->(maxev_f,area)) {
+    real meva = 0.0 ;
+    for(const int *li=$lower.begin();li!=$lower.end();++li) {
+      meva += li->$maxev_f*li->$area.sada ;
+    }
+    for(const int *ui=$upper.begin();ui!=$upper.end();++ui) {
+      meva += ui->$maxev_f*ui->$area.sada ;
+    }
+    for(const int *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      meva += bi->$maxev_f*bi->$area.sada ;
+    }
+    $cflpdt = 0.5*meva/$vol; // Area counted twice so divide by 2
+  }
+
+  // Define maxmin operator
+  template <class T> struct MaxMin {
+    void operator()(T &r, const T &s) {
+      r.first = max(r.first,s.first) ;
+      r.second = min(r.second,s.second) ;
+    }
+  } ;
+
+  $rule unit(cfl),constraint(geom_cells) {
+    $cfl.first = real(0.0) ;    //base value for cflmax
+    $cfl.second = real(1e30) ;   //base value for cflmin
+  }
+
+  $rule apply(cfl<-cflpdt,dtau,iblank)[MaxMin],
+    constraint(timeStepSteadyState,cflpdt) {
+    std::pair<real,real> CFL ;
+    if($iblank < 2) {
+      CFL.first = $cflpdt*$dtau ;
+      CFL.second = CFL.first ;
+      join($cfl,CFL) ;
+    }
+  }
+
+  $rule apply(cfl<-cflpdt,dtmax,iblank)[MaxMin],
+    constraint(timeStepAccurate,cflpdt) {
+    std::pair<real,real> CFL ;
+    if($iblank < 2) {
+      CFL.first = $cflpdt*$dtmax ;
+      CFL.second = CFL.first ;
+      join($cfl,CFL) ;
+    }
+  }
+
+  // provides the condition under which cfl number is printed
+  $rule default(print_freq) {
+    $print_freq = 10 ;
+  }
+
+  $type do_print_cfl param<bool> ;
+  
+  $rule singleton(do_print_cfl{n,it}<-ncycle{n},print_freq,$it{n,it}) {
+    //the condition for dumping out cfl information
+    // print out cfl when we are dumping an output file (ncyc % print_freq) == 0
+    // and we are on the first newton iteration
+    $do_print_cfl{n,it} = ($ncycle{n} % $print_freq) == 0 && ($$it{n,it} == 0) ;
+  }
+
+  //Dump cfl
+  $rule singleton(OUTPUT{n,it}<-cfl{n,it}),
+    conditional(do_print_cfl{n,it}),option(disable_threading) {
+    // rules that produce output in some form have OUTPUT as a target variable
+    // The existence of the OUTPUT variable ensures that the rule will be
+    // scheduled, even though it is not needed to perform the calculation
+    // (i.e. not part of the deduction)
+    if(Loci::MPI_rank==0) {
+      using std::cout ;
+      using std::endl ;
+      cout.precision(5) ;
+      cout << " cflmax = " << $cfl{n,it}.first
+           << " cflmin = " << $cfl{n,it}.second << endl ;
+    }
+  }
+
+   
+    
   
 }

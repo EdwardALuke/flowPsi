@@ -73,7 +73,7 @@ namespace flowPsi {
   $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
 		  temperature{n,it},gagePressure{n,it},u{n,it},
                   temperature{n},gagePressure{n},u{n},
-                  localPBias{n,it},Pambient,Rtilde),
+                  localPBias_next{n,it},Pambient,Rtilde),
     inplace(temperature{n+1}|temperature{n,it}),
     inplace(gagePressure{n+1}|gagePressure{n,it}),
     inplace(u{n+1}|u{n,it}),
@@ -82,7 +82,7 @@ namespace flowPsi {
     const real Tstar = $temperature{n,it} ;
     const real pgstar = $gagePressure{n,it} ;
     const real Tnp1 = (2.*Tstar - $temperature{n}) ;
-    const real peps = $localPBias{n,it} ;
+    const real peps = $localPBias_next{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
     
     const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
@@ -99,7 +99,6 @@ namespace flowPsi {
     $u{n+1} = unp1 ;
   } 
 
-  $type newtonMaxIter param<int> ;
   $rule default(newtonMaxIter) {
     $newtonMaxIter = 6 ;
   }

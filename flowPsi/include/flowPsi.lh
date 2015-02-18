@@ -137,11 +137,12 @@ $type qwall_prescribed store<flowPsi::real> ;
 $type wallVelocity store<flowPsi::vect3d> ;
 $type stime             param<flowPsi::real> ; // simulation time
 $type ncycle            param<int> ; // simulation iteration number
-$type newton_iter       param<int> ;  // Timestepping controls
-$type newton_finished   param<bool> ;
+$type newtonMaxIter param<int> ;
+$type newtonFinished    param<bool> ;
 $type urelax            param<flowPsi::real> ;
 $type dtmax             param<flowPsi::TimeValue> ;
 $type cflmax            param<flowPsi::real> ;
+$type cflpdt            store<real> ; // Multiply this by dt to get cfl
 $type cfl               param<std::pair<double,double> > ;
 
 $type dtau              store<flowPsi::real> ;
@@ -174,6 +175,7 @@ $type initialConditionRegions param<Loci::options_list> ;
 $type icRegionInfo blackbox<std::vector<flowPsi::ICstate_info> >;
 $type icRegionId store<int> ;
 
+$type print_freq  param<int> ;
 $type plot_freq   param<int> ;
 $type plot_modulo param<int> ;
 $type do_plot     param<bool> ;
@@ -194,4 +196,5 @@ $type grid_vol_iblank param<flowPsi::real> ;
 $type integratedOutputFileManager blackbox<flowPsi::integratedFileDBManager> ;
 
 $type localPBias store<float> ;
+$type localPBias_next store<float> ;
 $type timeSteppingMode param<int> ;
