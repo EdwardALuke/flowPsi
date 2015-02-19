@@ -4,11 +4,11 @@ include revision.conf
 
 FLOWPSI_BASE = $(shell pwd)
 
-default: flowpsi tools test turbulence
+default: flowpsi tools turbulence particle
 
 all: default
 
-.PHONEY: FRC flowpsi tools test
+.PHONEY: FRC flowpsi tools test turbulence particle
 
 setup: FRC
 	mkdir -p lib
@@ -23,6 +23,9 @@ flowpsi: FRC
 
 turbulence: setup
 	cd turbulence; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+
+particle: setup
+	cd particle; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 tools: FRC
 	cd tools; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)"  all
@@ -41,10 +44,12 @@ clean: FRC
 	cd src; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..	
 	cd tools; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
 	cd turbulence; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
+	cd particle; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
 
 distclean: FRC
 	cd quickTest; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
 	cd src; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
 	cd tools; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
 	cd turbulence; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
+	cd particle; $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
 	rm -fr lib bin output debug *~ include/*~

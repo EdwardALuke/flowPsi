@@ -25,6 +25,9 @@ FRC :
 
 all: $(MODULE_NAME)_m.so 
 
+install: all
+	cp $(MODULE_NAME)_m.so $(FLOWPSI_BASE)/lib/$(MODULE_NAME)_m.so
+
 clean:
 	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(JUNK)
 
