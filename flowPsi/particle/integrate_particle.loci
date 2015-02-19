@@ -1,0 +1,511 @@
+// include the Loci finite-volume module
+$include "FVM.lh"
+
+#include "particle_config.h"
+#include "particle.h"
+#include "util.h"
+#include "par_util.h"
+#include "integrate_particle.h"
+#include "store_traverser.h"
+#include <Loci.h>
+#include <iostream>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list ;
+#include <map>
+using std::map ;
+#include <set>
+using std::set ;
+#include <string>
+using std::string ;
+#include <sstream>
+using std::stringstream ;
+#include <fstream>
+using std::ifstream ;
+using std::ofstream ;
+#include <utility>
+using std::pair ;
+
+#include <algorithm>
+
+#include "particle_model.h"
+
+using Loci::StringError ;
+
+
+////////////////////////////////////////////////////
+namespace lagrangianP {
+
+  //These rules compute the dynamic drag for a deforming droplet
+
+/*
+  float sphere_cd (const double Re) {
+    const float fp = 1.+0.15*pow(Re,0.687)+
+            0.0175*Re/(1.+4.25e4*pow(Re+1e-20,-1.16)) ; //from Crowe et al, 1998
+    return 24.*fp/(Re+1e-20) ;
+  }
+*/
+
+  float sphere_cd (const double Rein) {
+    float cd ;
+    const double Re = max(Rein,1e-6) ;
+    const double x = log10(Re) ;
+    if(Re<=0.01) {
+      cd = 3./16.+24./Re ;
+    } else if(Re<=20.) {
+      cd = (24./Re)*(1.+0.1315*pow(Re,0.82-0.05*x)) ;
+    } else if(Re<=260.) {
+      cd = (24./Re)*(1.+0.1935*pow(Re,0.6305)) ;
+    } else if(Re<=1500.) {
+      cd = pow(10.,1.6435-1.1242*x+0.1558*x*x) ;
+    } else if(Re<=12000.) {
+      cd = pow(10.,-2.4571+2.5558*x-0.9295*x*x+0.1049*x*x*x) ;
+    } else if(Re<=44000.) {
+      cd = pow(10.,-1.9181+0.6370*x-0.0636*x*x) ;
+    } else if(Re<=338000.) {
+      cd = pow(10.,-4.3390+1.5809*x-0.1546*x*x) ;
+    } else if(Re<=400000.) {
+      cd = 29.78-5.3*x ;
+    } else if(Re<=1e6) {
+      cd = 0.1*x-0.49 ;
+    } else {
+      cd = 0.19-80000./Re ;
+    }
+    return cd ; //standard drag curve from clift, grace, and weber, 1978
+  }
+
+  //This rule performs the time integration of the particle governing equations
+  //with fixed particle mass.
+
+  //  static int id_count = 0 ;
+  float particle_timestep(NewParticle &p,float dt) {
+    if((p.info & NEW_PARTICLE) == 0 )
+      return dt ;
+    p.info = p.info ^ NEW_PARTICLE ; // toggle newborn bit
+    return float(Loci::random()*dt) ;
+  }
+
+  void CliftGauvinIntegrator::
+  integrateMomentum(NewParticle &p,
+		    float dt, const fluid_info &fluidInfo,
+		    const vector3d<float> &accel, // external accelerations
+		    double &Re_out) const {
+    const vector3d<float> &cellcenter = fluidInfo.cellcenter ;
+    const vector3d<float> &ufluid = fluidInfo.ufluid ;
+    const tensor3d<float> &ugrad = fluidInfo.ugrad ;
+    const vector3d<float> &umax = fluidInfo.umax ;
+    const vector3d<float> &umin = fluidInfo.umin ;
+    const float rfluid = fluidInfo.rfluid ;
+    const float viscfluid = fluidInfo.viscfluid ;
+    const real beta = 2./3. ;
+    const real alpha1 = -4./3. ;
+    const real alpha2 = 1./3. ;
+    const real dtbeta = dt*beta ;
+    vector3d<float> vel1 = p.vel[0] ;
+    vector3d<float> pos1 = dtbeta*vel1 - alpha1*p.pos[0]-alpha2*p.pos[1] ;
+    const double rp = p.get_density(rhop) ;
+    const double diameter = p.get_diameter(rhop) ;
+    const double mfluid = rfluid*fluidInfo.fvolpp+1e-30 ; // mass of fluid around particle
+    const vector3d<float> fixedsrc = -alpha1*p.vel[0]-alpha2*p.vel[1] + accel*dtbeta ;
+    const double volp = pi*diameter*diameter*diameter/6.0 ;
+    const double volpp = fluidInfo.fvolpp ;
+    // enhance drag function for large droplets
+    const double alphav = volp/max(volpp,1e-30) ;
+    const double fp_vf = max(pow(8.*alphav,6.)-0.001,0.0) ;
+//    if(fp_vf > 0.0)
+//      cout << "fp_vf = " <<fp_vf << endl ;
+    for(int i=0;i<20;++i) {
+      vector3d<float> drvec = pos1-cellcenter ;
+      //vector3d<float> drvec=vector3d<float>(0.,0.,0.) ;
+      vector3d<float> fluid_v = ufluid  +
+        vector3d<float>(dot(ugrad.x,drvec),
+                        dot(ugrad.y,drvec),
+                        dot(ugrad.z,drvec)) ;
+      fluid_v.x = max(min(fluid_v.x,umax.x),umin.x) ;
+      fluid_v.y = max(min(fluid_v.y,umax.y),umin.y) ;
+      fluid_v.z = max(min(fluid_v.z,umax.z),umin.z) ;
+      fluid_v += p.ufluidp ;
+      // Update fluid velocity based on delta particle momentum
+      if(i>0)
+        fluid_v = fluid_v - ((vel1-p.vel[0]-accel*dt)*p.mass/mfluid ) ;
+
+      const float dv = norm(fluid_v - vel1) ;
+      const double Re = rfluid*diameter*dv/viscfluid ;
+      Re_out = Re ;
+
+      // Clift-Gauvin drag function (Crowe, 1998)
+      const float fp = 1.+0.15*pow(Re,0.687)+
+        0.0175*Re/(1.+4.25e4*pow(Re+1e-20,-1.16)) + fp_vf ;
+
+      const float taup = rp*pow(diameter,2)/(18.*viscfluid*fp) ;
+      const float vcoef = dtbeta/taup ;
+
+      //      vel1 =  (vcoef*fluid_v + fixedsrc)/(1.+vcoef) ;
+      const vector3d<float> f = (vcoef*fluid_v + fixedsrc)/(1.+vcoef) - vel1 ;
+      const float df = -vcoef*p.mass/(mfluid*(1.+vcoef))-1.0 ;
+      vel1 = vel1 - f/df ;
+      pos1 = dtbeta*vel1 - alpha1*p.pos[0]-alpha2*p.pos[1] ;
+
+      // If iterated at least 2 times, check for convergence
+      if(i>1 && (fabs(f.x)+fabs(f.y)+fabs(f.z))/
+         (fabs(df)*(.1+fabs(vel1.x)+fabs(vel1.y)+fabs(vel1.z)))< 1e-5) {
+        break ;
+      }
+
+    }
+
+    // Now advance the particle momentum in time
+    p.vel[2] = p.vel[1] ;
+    p.vel[1] = p.vel[0] ;
+    p.vel[0] = vel1 ;
+    p.pos[1] = p.pos[0] ;
+    p.pos[0] = pos1 ;
+  }
+
+  void CliftGauvinDropletIntegrator::
+  integrateMomentum(NewParticle &p,
+		    float dt, const fluid_info &fluidInfo,
+		    const vector3d<float> &accel, // external accelerations
+		    double &Re_out) const {
+    const vector3d<float> &cellcenter = fluidInfo.cellcenter ;
+    const vector3d<float> &ufluid = fluidInfo.ufluid ;
+    const tensor3d<float> &ugrad = fluidInfo.ugrad ;
+    const vector3d<float> &umax = fluidInfo.umax ;
+    const vector3d<float> &umin = fluidInfo.umin ;
+    const float rfluid = fluidInfo.rfluid ;
+    const float viscfluid = fluidInfo.viscfluid ;
+    const real beta = 2./3. ;
+    const real alpha1 = -4./3. ;
+    const real alpha2 = 1./3. ;
+    const real dtbeta = dt*beta ;
+    vector3d<float> vel1 = p.vel[0] ;
+    vector3d<float> pos1 = dtbeta*vel1 - alpha1*p.pos[0]-alpha2*p.pos[1] ;
+    const double rp = p.get_density(rhop) ;
+    const double diameter = p.get_diameter(rhop) ;
+    const double mfluid = rfluid*fluidInfo.fvolpp+1e-30 ; // mass of fluid around particle
+    const vector3d<float> fixedsrc = -alpha1*p.vel[0]-alpha2*p.vel[1] + accel*dtbeta ;
+
+    for(int i=0;i<20;++i) {
+      vector3d<float> drvec = pos1-cellcenter ;
+      //vector3d<float> drvec=vector3d<float>(0.,0.,0.) ;
+      vector3d<float> fluid_v = ufluid  +
+        vector3d<float>(dot(ugrad.x,drvec),
+                        dot(ugrad.y,drvec),
+                        dot(ugrad.z,drvec)) ;
+      fluid_v.x = max(min(fluid_v.x,umax.x),umin.x) ;
+      fluid_v.y = max(min(fluid_v.y,umax.y),umin.y) ;
+      fluid_v.z = max(min(fluid_v.z,umax.z),umin.z) ;
+      fluid_v += p.ufluidp ;
+      // Update fluid velocity based on delta particle momentum
+      if(i>0)
+        fluid_v = fluid_v - ((vel1-p.vel[0]-accel*dt)*p.mass/mfluid ) ;
+
+      const float dv = norm(fluid_v - vel1) ;
+      const double Re = rfluid*diameter*dv/viscfluid ;
+      Re_out = Re ;
+
+      // Clift-Gauvin drag function (Crowe, 1998)
+      float fp = 1.+0.15*pow(Re,0.687)+
+	0.0175*Re/(1.+4.25e4*pow(Re+1e-20,-1.16)) ;
+
+      // dynamic drag model for deforming droplets
+      const double sigma = tensionp.getTension() ;
+      const double weber = rfluid*dv*dv*diameter/sigma ;
+      const double ddef = (weber<100) ? 1+0.19*pow(weber,0.5) : 2.9 ; //correlation for deformed diameter ratio
+      const float cd = pow(ddef,2)*sphere_cd(Re) ;
+      fp = cd*Re/24. ;
+      
+      const float taup = rp*pow(diameter,2)/(18.*viscfluid*fp) ;
+      const float vcoef = dtbeta/taup ;
+
+      //      vel1 =  (vcoef*fluid_v + fixedsrc)/(1.+vcoef) ;
+      const vector3d<float> f = (vcoef*fluid_v + fixedsrc)/(1.+vcoef) - vel1 ;
+      const float df = -vcoef*p.mass/(mfluid*(1.+vcoef))-1.0 ;
+      vel1 = vel1 - f/df ;
+      pos1 = dtbeta*vel1 - alpha1*p.pos[0]-alpha2*p.pos[1] ;
+
+      // If iterated at least 2 times, check for convergence
+      if(i>1 && (fabs(f.x)+fabs(f.y)+fabs(f.z))/
+         (fabs(df)*(.1+fabs(vel1.x)+fabs(vel1.y)+fabs(vel1.z)))< 1e-5) {
+        break ;
+      }
+
+    }
+
+    // Now advance the particle momentum in time
+    p.vel[2] = p.vel[1] ;
+    p.vel[1] = p.vel[0] ;
+    p.vel[0] = vel1 ;
+    p.pos[1] = p.pos[0] ;
+    p.pos[0] = pos1 ;
+  }
+
+  
+  void noBreakupModel::breakup(NewParticle &p, float dt,
+			       const fluid_info &fluidInfo) const {}
+  simpleWeberBreakup::
+  simpleWeberBreakup(const particleBinEoS &particleBinInfo,
+		     const Loci::options_list &olarg,
+		     const Loci::options_list &ol,
+		     const std::map<std::string,Loci::options_list> &speciesDB)
+		     {
+    rhop = particleBinInfo.rhop ;
+    tensionp = particleBinInfo.tensionp ;
+    if(!particleBinInfo.tensionp.valid()) {
+      throw StringError("SimpleWeber breakup Model needs tension data.") ;
+    }
+    if(olarg.optionExists("Weber_crit")) {
+      olarg.getOption("Weber_crit",Weber_crit) ;
+    } else {
+      throw StringError("simpleWeber model must specify critical weber number using Weber_crit!") ;
+    }
+    if(olarg.optionExists("viscp")) {
+      olarg.getOption("viscp",viscp) ;
+    } else {
+      throw StringError("simpleWeber model must specify droplet viscosity using viscp!") ;
+    }
+  }
+
+  void simpleWeberBreakup::
+  breakup(NewParticle &p,  float dt,
+	  const fluid_info &fluidInfo) const {
+    const fluid_info &fi = fluidInfo ;
+    const vector3d<float> &cellcenter = fi.cellcenter ;
+    const vector3d<float> &ufluid = fi.ufluid ;
+    const tensor3d<float> &ugrad = fi.ugrad ;
+    const vector3d<float> &umax = fi.umax ;
+    const vector3d<float> &umin = fi.umin ;
+    float rfluid = fi.rfluid ;
+    
+    real diameter = p.get_diameter(rhop) ;
+    double volp = pi*diameter*diameter*diameter/6.0 ;
+    double volpp = fi.fvolpp ;
+    if(10.*volp > volpp) { 
+      // Not enough space for breakup, instead coalescense should happpen
+      // right now we don't have a coalescense model so we just don't breakup
+      //	cout << "coalescense disable, volp="<< volp <<",volpp=" << volpp << endl  ;
+    } else { // Breakup model
+      vector3d<float> drvec = p.pos[0]-cellcenter ;
+      vector3d<float> fluid_v = ufluid +
+	vector3d<float>(dot(ugrad.x,drvec),
+			dot(ugrad.y,drvec),
+			dot(ugrad.z,drvec)) ;
+      fluid_v.x = max(min(fluid_v.x,umax.x),umin.x) ;
+      fluid_v.y = max(min(fluid_v.y,umax.y),umin.y) ;
+      fluid_v.z = max(min(fluid_v.z,umax.z),umin.z) ;
+      fluid_v +=  p.ufluidp ;
+      vector3d<float> dv = (fluid_v - p.vel[0]) ;
+      const double sigma = tensionp.getTension() ;
+      const double weber = rfluid*dot(dv,dv)*diameter/sigma ;
+      const double density = p.get_density(rhop) ;
+      const double Oh = viscp/pow(density*diameter*sigma,0.5) ;
+      const float viscfluid = fluidInfo.viscfluid ;
+      const double Re = rfluid*diameter*norm(dv)/viscfluid+1e-30 ;
+      double Wec = 1e30 ;
+      if(Re < 200) {
+	Wec = 1e30 ;
+      } else if(Re < 2000) {
+	Wec = 55*(24/Re+20.1807*pow(Re,-0.615)-16*pow(Re,-2./3.))*(1+1.077*pow(Oh,1.64)) ;
+      } else {
+	Wec = 5.48*(1+1.077*pow(Oh,1.64)) ;
+      }
+      
+      if(weber > Wec && Oh < 4) {
+	//	if(weber > Weber_crit) {
+	double density = p.get_density(rhop) ;
+	
+	double tau_bk = diameter*sqrt(density/rfluid)/(norm(dv)+1e-30) ;
+	double wm12 = max(weber-Wec,1e-30) ;
+	double wp1 = pow(wm12,-0.25) ;
+	double wp2 = pow(wm12,0.25) ;
+	if(weber < 18.0) {
+	  tau_bk *= 6.*wp1 ;
+	} else if(weber < 45.0) {
+	  tau_bk *= 2.45*wp2 ;
+	} else if(weber < 351.0) {
+	  tau_bk *= 14.1*wp1 ;
+	} else if(weber < 2670.0) {
+	  tau_bk *= 0.766*wp2 ;
+	} else {
+	  tau_bk *= 5.5 ;
+	}
+	// Compute probability of breakup this timestep
+	double smd = 1.5*diameter*pow(Oh,0.2)*
+	  pow((1.+1.7*pow(Oh,0.25))/weber,0.25) ;
+	double mmd = 1.2*smd ;
+	//interpret as mean of log(mmd)
+	double sigmabr = 0.10 ;
+	double mean_diam = exp(log(mmd)-0.5*pow(sigmabr,2)) ; 
+	// compute new diameter using log normal distirbution
+	double new_diam = LND(mean_diam,sigmabr) ;
+	double ratio = pow(new_diam/diameter,3.0) ;
+	double break_p = (1.0/ratio-1.)*dt/tau_bk ; //number of particles created by breakup
+	//per original number of particles in time dt
+	
+	// role dice to see if breakup happens this timestep
+	if(Loci::random() < break_p) { 
+	  //            if(new_diam<1e-6) {
+	  //	      cout << "breakup event, tau_bk " << tau_bk << ",rfluid = " << rfluid << ", weber= " << weber << ", Wec= " << Wec << endl ;
+	  //              cout << "dv = " << norm(dv) << ", sigma = " << sigma << ", viscfluid = " << viscfluid << endl ;
+	  //              cout << "old_diam = " << diameter << ", new_diam = " << new_diam << ", Re = " << Re << ", Oh = " << Oh << ", break_p = " << break_p << endl ;
+	  //            }
+	  // breakup happens, compute size of resulting droplets
+	  p.mass *= ratio ;
+	  p.number_in_parcel *= 1./ratio ;
+	}
+      }
+    }
+  }
+
+
+  void  new_particle_advance_time(NewParticle &p,
+                                  float dt,
+                                  const fluid_info &fluidInfo,
+                                  const float *fluidAuxInfo,
+                                  const auxiliary_info &AuxMetaInfo,
+                                  const vector3d<float> &accel,
+                                  const particleEoSList& pm) {
+    double Re = 0 ;
+    int bin = p.bin ;
+    vector3d<float> accel_mod = accel ;
+    if(AuxMetaInfo.turbophoresisIndex >=0) { // enable turbophoresis
+      // to add Fturbo term Fturbo=0.5*rho*pi*dp^3/6d(k)/dy
+      float diameter = p.get_diameter(pm[bin].rhop) ;
+      float density = p.get_density(pm[bin].rhop) ;
+      int id = AuxMetaInfo.turbophoresisIndex ;
+      vector3d<float> kgrad(fluidAuxInfo[id+0],
+                            fluidAuxInfo[id+1],
+                            fluidAuxInfo[id+2]) ;
+      vector3d<float> fturbo = -density*pi*pow(diameter,3)/12.0*kgrad ;
+      accel_mod += fturbo ;
+    }
+    if(AuxMetaInfo.RlIndex >= 0 && AuxMetaInfo.TsigmaIndex >=0) {
+      // implement turbulent fluctuation model
+      float Rl = fluidAuxInfo[AuxMetaInfo.RlIndex] ;
+      float sigma = fluidAuxInfo[AuxMetaInfo.TsigmaIndex] ;
+      p.ufluidp.x = p.ufluidp.x*Rl + GSD(0.0,sigma) ;
+      p.ufluidp.y = p.ufluidp.y*Rl + GSD(0.0,sigma) ;
+      p.ufluidp.z = p.ufluidp.z*Rl + GSD(0.0,sigma) ;
+      //      cout <<"Rl=" << Rl << ",sigma = " << sigma << ",up=" << p.ufluidp << endl ;
+    }
+    // --------------------------------------------------------------------
+    // -- momentumIntegration portion
+    // --------------------------------------------------------------------
+    // compute fluid velocity and particle location
+
+    // Update momemtum coupling
+    pm[bin].momentumUpdater->integrateMomentum(p,dt,fluidInfo,accel_mod,Re) ;
+
+    // Then apply breakup model
+    pm[bin].breakupUpdater->breakup(p,dt,fluidInfo) ;
+
+  }
+
+  class integrate_particle:  public blackbox_rule {
+    const_param<TimeValue> dt ;
+    const_blackbox<lagrangianP::particleEoSList> particleBinEoS ;
+    const_param<lagrangianP::particleModel> particleModel ;
+    const_param<vector3d<double> > particleGrav ;
+    const_store<fluid_info> fluidInfo ;
+    const_storeVec<float> fluidAuxInfo ;
+    const_param<auxiliary_info> AuxMetaInfo ;
+    const_param<bool> request ; // the request for remote cell data
+
+    blackbox<list<Particle> > particle_bag ;
+  public:
+    integrate_particle() {
+      name_store("p_dtmax{n}",dt) ;
+      name_store("particleBinEoS{n}",particleBinEoS) ;
+      name_store("particleModel{n}",particleModel) ;
+      name_store("fluidInfo{n}",fluidInfo) ;
+      name_store("fluidAuxInfo{n}",fluidAuxInfo) ;
+      name_store("AuxMetaInfo{n}",AuxMetaInfo) ;
+      name_store("refresh_cell_space{n}", request) ;
+      name_store("particle_bag{n}", particle_bag) ;
+
+      name_store("particleGrav{n}",particleGrav) ;
+      input("particleGrav{n}") ;
+
+      input("refresh_cell_space{n}") ;
+      input("p_dtmax{n}") ;
+      input("particleBinEoS{n}") ;
+      input("particleModel{n}") ;
+      input("fluidInfo{n}") ;
+      input("fluidAuxInfo{n}") ;
+      input("AuxMetaInfo{n}") ;
+      input("particle_bag{n}") ;
+      output("particle_bag_integrated{n}=particle_bag{n}") ;
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      // first we get the needed stores from the CellSpace cache
+      store<fluid_info> dyn_fluidInfo(CellSpace::instance().fluidInfo) ;
+      storeVec<float> dyn_fluidAuxInfo(CellSpace::instance().fluidAuxInfo) ;
+      list<Particle>& lp = *particle_bag ;
+      list<Particle>::iterator li ;
+
+      vect3d grav = *particleGrav ;
+      for(li=lp.begin();li!=lp.end();++li) {
+        Entity cell = li->cell ;
+
+        vector3d<float> accel =
+          vector3d<float>(particleGrav[cell].x,
+                          particleGrav[cell].y,
+                          particleGrav[cell].z) ;
+
+        float delta_t = particle_timestep(*li,*dt) ;
+
+        new_particle_advance_time(*li,delta_t, dyn_fluidInfo[cell],
+                                  &(dyn_fluidAuxInfo[cell][0]),
+                                  *AuxMetaInfo,accel,
+                                  *particleBinEoS) ;
+
+      }
+    } // end of compute(seq)
+  } ;
+
+  register_rule<integrate_particle> register_integrate_particle ;
+
+  //This rule removes droplets that have zero mass
+
+  class Particle_Breakup : public  blackbox_rule {
+    const_param<bool> request ;
+
+    blackbox<list<Particle> > particle_bag ;
+  public:
+    Particle_Breakup() {
+      name_store("refresh_cell_space{n}", request) ;
+      name_store("particle_bag_integrated{n}", particle_bag) ;
+      input("refresh_cell_space{n}") ;
+      input("particle_bag_integrated{n}") ;
+      output("particle_bag_treated{n}=particle_bag_integrated{n}") ;
+    }
+
+    void compute(const sequence& seq) {
+      list<Particle>& lp = *particle_bag ;
+      list<Particle>::iterator li = (*particle_bag).begin() ;
+      list<Particle>::iterator lend = (*particle_bag).end() ;
+      while(li != lend) {
+	// Remove parcels with zero mass
+        if(li->get_mass()*li->number_in_parcel < 1e-30) { 
+          list<Particle>::iterator li2 = li ;
+          ++li2 ;
+          lp.erase(li) ;
+          li = li2 ;
+          continue ;
+        }
+        ++li ;
+      }
+    }
+  } ;
+  register_rule<Particle_Breakup> register_Particle_Breakup ;
+
+} // end of namespace lagrangianP
+
+// ... the end ...
+

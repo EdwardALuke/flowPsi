@@ -1,0 +1,366 @@
+#include <Loci.h>
+
+$include "FVM.lh"
+
+#include "particle_config.h"
+#include "particle.h"
+$include "particle.lh"
+
+#include <iostream>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list ;
+#include <map>
+using std::map ;
+#include <set>
+using std::set ;
+#include <string>
+using std::string ;
+#include <sstream>
+using std::stringstream ;
+#include <fstream>
+using std::ifstream ;
+using std::ofstream ;
+#include <utility>
+using std::pair ;
+#include <algorithm>
+
+#include "flowTypes.h"
+#include "readGrid.h"
+#include "bcTools.h"
+
+$include "flowPsi.lh"
+
+#include "particle_model.h"
+
+namespace lagrangianP {
+  
+  using namespace flowPsi ;
+  
+  //--------------------------------------------------------------------------
+  //
+  // Interface for BC checks for flowPsi
+  class inject_particle_check : public flowPsi::BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "*"; }
+    std::string variablesChecked() {
+      return "particleSizes,particleDistribution,particleType,particleVelocityRatio,particleSpeed,particleMassLoading,particleMassFlux,particleInjectDensity,particleBinSigma,prescribedParticle,parcelInjectionRate" ;
+    }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      bool error = false ;
+      bool has_sizes = false ;
+      bool has_inject = false ;
+      bool has_vel = false ;
+      bool has_mass_flux = false ;
+
+      bool has_type = false ;
+      int numbins = 1 ;
+      //      int num_bins = 0 ;
+      if(bc_options.optionExists("particleSizes")) {
+	if(!check_list_units(bc_options,"particleSizes","m")) {
+	  error_message += "Incompatible units for particleSizes. " ;
+	  error = true ;
+	} else {
+	  has_sizes = true ;
+	}
+        numbins = check_list_size(bc_options,"particleSizes") ;
+      }
+      bool has_prescribed = false ;
+      if(bc_options.optionExists("prescribedParticle")) {
+        has_prescribed = true ;
+        string filename  ;
+        bc_options.getOption("prescribedParticle",filename) ;
+        ifstream file(filename.c_str()) ;
+        if(file.fail()) {
+          error_message += "unable to open " + filename ;
+          error = true ;
+        }
+      }
+      
+      if(!has_prescribed && has_sizes && numbins > 1) {
+        if(!bc_options.optionExists("particleDistribution")) {
+          error_message += "Must have 'particleDistribution' defined to accompany 'particleSizes'. " ;
+          error = true ;
+        } else {
+          int sz = check_list_size(bc_options,"particleDistribution") ;
+          if(sz > 1 && sz != numbins) {
+            error_message +=  "'particleDistribution' list is not size compatible with 'particleSizes' " ;
+            error = true ;
+          }
+        }
+      }
+        
+      if(bc_options.optionExists("particleInjectDensity")) { 
+	if(bc_options.optionExists("parcelInjectionRate")) { 
+	  error_message += "parcelInjectionRate cannot be specified wiht particleInjectDensity! " ;
+	  error = true ;
+	}
+	has_inject = true ;
+        if(!flowPsi::check_scalar_units(bc_options,"particleInjectDensity","m/m/m/m")) { 
+          error_message += "Units are incompatible for 'particleInjectDensity' " ;
+          error = true ; 
+        }
+      } else {
+	if(bc_options.optionExists("parcelInjectionRate")) {
+	  has_inject = true ;
+	  if(!flowPsi::check_scalar_units(bc_options,"parcelInjectionRate","s/s/s")) { 
+	    error_message += "Units are incompatible for 'parcelInjectionRate' " ;
+	    error = true ; 
+	  }
+	} else {
+	  error_message += "Particle Injection must have parcelInjectionRate specified. " ;
+	  error = true ;
+	}
+      }
+      if(bc_options.optionExists("particleType")) {
+	has_type = true ;
+        int sz = check_list_size(bc_options,"particleType") ;
+        if(sz > 1 && sz != numbins) {
+          error_message +=  "'particleType' list is not size compatible with 'particleSizes' " ;
+          error = true ;
+        }
+      }
+
+      // Check velocity specification 
+      bool hasSpeed=false, hasVelRatio=false ;
+
+      if(bc_options.optionExists("particleSpeed")) {
+	hasSpeed = true ;
+	has_vel = true ;
+	if(!check_list_units(bc_options,"particleSpeed","m/s")) { 
+	  error_message += "Units are incompatible for 'particleSpeed' " ;
+	  error = true  ;
+	}
+        int sz = check_list_size(bc_options,"particleSpeed") ;
+        if(sz > 1 && sz != numbins) {
+          error_message +=  "'particleSpeed' list is not size compatible with 'particleSizes' " ;
+          error = true ;
+        }
+      }
+      if(bc_options.optionExists("particleVelocityRatio")) {
+	hasVelRatio = true ;
+	has_vel = true ;
+	if(!check_list_units(bc_options,"particleVelocityRatio","")) { 
+	  error_message += "'particleVelocityRatio' specification is incompatible. " ;
+	  error = true  ;
+	}
+        int sz = check_list_size(bc_options,"particleVelocityRatio") ;
+        if(sz > 1 && sz != numbins) {
+          error_message +=  "'particleVelocityRatio' list is not size compatible with 'particleSizes' " ;
+          error = true ;
+        }
+      }
+      if(hasVelRatio && hasSpeed) {
+	error_message += " Overspecification of particle velocity. " ;
+	error = true ;
+      }
+
+      // Check mass flux specification
+      bool hasMassFlux = false ;
+      bool hasMassLoading = false ;
+
+      if(bc_options.optionExists("particleMassFlux")) {
+	hasMassFlux = true ;
+	has_mass_flux = true ;
+	if(!flowPsi::check_scalar_units(bc_options,"particleMassFlux","kg/s/m/m")) { 
+	  error_message += "Units are incompatible for 'particleMassFlux' " ;
+	  error = true  ;
+	}
+      }
+      if(bc_options.optionExists("particleMassLoading")) {
+	hasMassLoading = true ;
+	has_mass_flux = true ;
+	if(bc_options.getOptionValueType("particleMassLoading") != Loci::REAL) {
+	  error_message += "'particleMassLoading' specification is incompatible. " ;
+	  error = true  ;
+	}
+      }
+      if(hasMassFlux && hasMassLoading) {
+	error_message += " Overspecification of particle mass flux. " ;
+	error = true ;
+      }
+      
+      if(has_prescribed) {
+        if(has_mass_flux || has_vel) {
+          error_message += "prescribedParticle not compatible with velocity, or mass flux specification. " ;
+          error = true ;
+        }
+        if(!has_inject || !has_type || !has_sizes) {
+          error_message += "prescribedParticle must have particleSizes, particleType and particleInjectDensity defined. " ;
+          error = true ;
+        }
+      } else if(has_sizes) {
+            if(!has_inject || !has_vel || !has_mass_flux || !has_type) {
+	  error_message += "Particle specification must specify particle injection density, velocity, mass flux, and material type. " ;
+	  error = true ;
+	}
+      } else {
+        error_message += "Incomplete particle specification. " ;
+        error = true ;
+      }
+      if(error)
+	return false ;
+      return true ;
+
+    }
+    
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+    
+  } ;
+  
+  flowPsi::register_BC<inject_particle_check> register_BC_inject_particle_check ;
+
+
+  class particle_wall_check : public flowPsi::BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "*"; }
+    std::string variablesChecked() { return "stickwall,bouncewall,poolwall,erodewall" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      int count=0 ;
+
+      if(bc_options.optionExists("stickwall"))
+        count++ ;
+      if(bc_options.optionExists("bouncewall"))
+        count++ ;
+      if(bc_options.optionExists("poolwall"))
+	count++	;
+      if(bc_options.optionExists("erodewall"))
+	count++	;
+
+      if(count > 1) {
+        error_message = "Must specify one of stickwall, bouncewall, poolwall, or erodewall particle boundary conditions" ;
+        return false ;
+      }
+
+      return true ;
+    }
+    
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+    
+  } ;
+  
+  flowPsi::register_BC<particle_wall_check> register_BC_particle_wall_check ;
+
+
+  
+  
+  //--------------------------------------------------------------------------
+  //
+  // Interface to get time history of boundary fluxes/velocities
+  
+   $rule pointwise(ufluidBCIC<-ci->u_ic),constraint(ci->u_ic,no_symmetry_BC) {
+     $ufluidBCIC = $ci->$u_ic ;
+   }
+  
+  $rule pointwise(mdotfluidBC{n,it}<-iflux{n,it}),
+     constraint(ci{n,it}->u{n,it}) {
+     $mdotfluidBC{n,it} = $iflux{n,it}[0] ;
+  }
+
+//--------------------------------------------------------------------------
+//
+// Interface to get flowPsi fluid properties
+
+  $rule pointwise(viscfluid <- mu) { $viscfluid = $mu ; }
+  $rule pointwise(Tfluid<-temperature) { $Tfluid = $temperature ; }
+  $rule pointwise(ufluid<-u) { $ufluid = $u ; }
+  $rule pointwise(rfluid<-rho) { $rfluid = $rho ; }
+  $rule pointwise(pfluid{n}<-gagePressure{n},Pambient{n}) {
+     $pfluid{n} = $gagePressure{n}+$Pambient{n} ;
+  }
+
+
+  $type k store<flowPsi::real> ;
+  $type w store<flowPsi::real> ;
+
+  $rule pointwise(kfluid<-k) { $kfluid = $k ; }
+  $rule pointwise(omegafluid<-w) { $omegafluid = $w ; }
+
+  $rule apply(src<-coupling_src)[Loci::Summation],
+    constraint(geom_cells) {
+    for(int i=0;i<5;++i)
+      $src[i] += $coupling_src[i] ;
+  }
+
+  $rule singleton(particleGrav<-gravityAccel) {
+    $particleGrav = $gravityAccel ;
+  }
+
+  $type IC store<float> ;
+  $type COLLECT store<float> ;
+  $rule pointwise(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n=0}<-IC),
+    constraint(CONSTRAINT) {
+    $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n=0} = $IC ;
+  }
+
+  $rule pointwise(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it=0}<-
+                  timeHistoryScalar(COLLECT,IC,CONSTRAINT){n}),
+    constraint(CONSTRAINT) {
+    $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it=0} =
+      $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n} ;
+  }
+  
+  $rule pointwise(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it+1}<-
+                  timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it},COLLECT{n,it}),
+    inplace(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it+1}|timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it}),constraint(CONSTRAINT) {
+        $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it+1} = $COLLECT{n,it} ;
+  }
+
+  $rule pointwise(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n+1}<-timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it}),
+    conditional(newtonFinished{n,it}) {
+    $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n+1} = $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it} ;
+  }
+  
+  $type IC store<vector3d<float> > ;
+  $type COLLECT store<vector3d<double> > ;
+  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n=0}<-IC),
+    constraint(CONSTRAINT) {
+    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n=0} = $IC ;
+  }
+
+  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it=0}<-
+                  timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n}),
+    constraint(CONSTRAINT) {
+    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it=0} =
+      $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n} ;
+  }
+  
+  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1}<-
+                  timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it},COLLECT{n,it}),
+    inplace(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1}|timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it}),constraint(CONSTRAINT) {
+        $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1} = $COLLECT{n,it} ;
+  }
+
+  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n+1}<-timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it}),
+    conditional(newtonFinished{n,it}) {
+    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n+1} = $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it} ;
+  }
+
+  // copy iblanking information from newton iteration
+  $type iblankCell store<int>;
+  $type iblankCellN store<int>;
+
+  // iblankCell is generated every {n,it} iteration and we
+  // are collapsing it back to the {n} level to be used by
+  // the particle code
+  $rule pointwise(iblankCellN{n} <- iblankCell{n,it}),
+    conditional(newtonFinished{n,it}) {
+      $iblankCellN{n} = $iblankCell{n,it};
+    }
+                          
+  
+}

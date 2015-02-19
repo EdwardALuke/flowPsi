@@ -1,0 +1,422 @@
+#include <Loci.h>
+
+#include <fstream>
+#include "particle.h"
+#include "particle_model.h"
+
+using std::vector ;
+using std::string ;
+using std::map ;
+using std::cerr ;
+using std::endl ;
+using std::cout ;
+using std::ifstream ;
+using std::ios ;
+
+using std::istream ;
+using std::ostream ;
+using Loci::StringError ;
+
+namespace lagrangianP {
+
+  $type particle_model param<std::string> ;
+  $type particleModel param<lagrangianP::particleModel> ;
+
+  ostream &operator<<(ostream &s, const particleModel &pm) {
+    s << "{" << endl;
+    s << "bins: {" << endl ;
+    for(size_t i = 0; i<pm.binDB.size();++i) {
+      s << pm.binDB[i] << endl ;
+    }
+    s << "}" << endl << endl ;
+    s << "species: {" << endl ;
+    std::map<string,Loci::options_list>::const_iterator mi ;
+    for(mi=pm.speciesDB.begin();mi!=pm.speciesDB.end();++mi) {
+      s << mi->first << ":" << mi->second << endl ;
+    }
+    s << "}" << endl << endl ;
+
+    s << "momentumCoupling: " << pm.momentumCouplingModel << endl ;;
+    s << "}" << endl ;
+    return s ;
+  }
+
+  istream &operator>>(istream &s, particleModel &pm) {
+    Loci::parse::kill_white_space(s) ;
+    if(s.peek() != '{') 
+      throw StringError("particleModel should start with '{'") ;
+    s.get() ;
+    Loci::parse::kill_white_space(s) ;
+
+    bool set_bins = false ;
+    bool set_species = false ;
+    bool set_mcoupling = false ;
+
+    while(s.peek() != '}') {
+      if(s.eof()) 
+        throw StringError("unexpected EOF while reading particleModel") ;
+      if(!Loci::parse::is_name(s)) {
+        throw StringError("expecting identifier in particleModel reading") ;
+      }
+      string name = Loci::parse::get_name(s) ;
+      Loci::parse::kill_white_space(s) ;
+      if(s.peek() != ':')
+        throw StringError("expecting colon when reading idenifier in particleModel") ;
+      s.get() ;
+      
+      if(name == "bins") {
+        {
+          // clear out bins
+          std::vector<lagrangianP::particleModel::binInfo> bintmp ;
+          pm.bins.swap(bintmp);
+        }
+	pm.binDB.clear() ;
+        set_bins = true ;
+        Loci::parse::kill_white_space(s) ;
+        if(s.peek() != '{')
+          throw StringError("expecting '{' in bins definition in particleModel") ;
+        s.get() ;
+        Loci::parse::kill_white_space(s) ;
+        while(s.peek() != '}') {
+          if(s.eof()) 
+            throw StringError("unexpected EOF while reading particleModel") ;
+          if(s.peek() != '<')
+            throw StringError("expecting '<' in bin definition in particleModel") ;
+          Loci::options_list ol ;
+          s >> ol ;
+	  pm.binDB.push_back(ol) ;
+          Loci::parse::kill_white_space(s) ;
+//          double diameter =0;
+          
+	  double COR = 1.0 ;
+	  if(ol.optionExists("COR"))
+	    ol.getOption("COR",COR) ;
+
+          string name ;
+          if(ol.optionExists("name")) {
+            ol.getOption("name",name) ;
+          } else {
+            char buf[512] ;
+	    bzero(buf,512);
+            int ident = pm.bins.size()+1 ;
+            snprintf(buf,511,"bin%02d",ident) ;
+            name = string(buf) ;
+          }
+          
+
+          vector<string> snames ;
+          vector<double> mf ;
+          if(ol.optionExists("species")) {
+            if(ol.getOptionValueType("species") != Loci::LIST) 
+              throw StringError("species should be assigned a list") ;
+            
+            Loci::options_list::arg_list species_list ;
+            ol.getOption("species",species_list) ;
+            Loci::options_list::arg_list::iterator li ;
+            for(li=species_list.begin();li!=species_list.end();++li) {
+              Loci::option_values::value_list_type species_arg ;
+              li->get_value(species_arg) ;
+              if(li->type_of() != Loci::NAME_ASSIGN || species_arg.size() != 1
+                 || species_arg.front().type_of() != Loci::REAL) 
+                throw StringError("error in species assignment in particleModel") ;
+            }
+          } else
+            throw StringError("particle bin must have species specified") ;
+          particleModel::binInfo bi ;
+          bi.name = name ;
+          pm.bins.push_back(bi) ;
+        }
+        s.get() ;
+      } else if(name == "species") {
+	pm.speciesDB.clear() ;
+        set_species = true ;
+        Loci::parse::kill_white_space(s) ;
+        if(s.peek() != '{')
+          throw StringError("expecting '{' in bins definition in particleModel") ;
+        s.get() ;
+        Loci::parse::kill_white_space(s) ;
+        while(s.peek() != '}') {
+          if(s.eof()) 
+            throw StringError("unexpected EOF while reading particleModel") ;
+          if(!Loci::parse::is_name(s))
+            throw StringError("expecting species name in particleModel") ;
+          string species = Loci::parse::get_name(s) ;
+          Loci::parse::kill_white_space(s) ;
+          if(s.peek() != ':')
+            throw StringError("expecting ':' after species name in particleModel") ;
+          s.get()  ;
+          Loci::parse::kill_white_space(s) ;
+          if(s.peek() != '<')
+            throw StringError("expecting '<' after species name in particleModel") ;
+          Loci::options_list ol ;
+          s >> ol ;
+	  pm.speciesDB.insert(pair<string,Loci::options_list>(species,ol)) ;
+            
+          Loci::parse::kill_white_space(s) ;
+        }
+        s.get() ;
+      } else if(name == "momentumCoupling") {
+        set_mcoupling = true ;
+        Loci::parse::kill_white_space(s) ;
+        s >> pm.momentumCouplingModel ;
+        pm.momentumCouplingMethod = CLIFT_GAUVIN ;
+        if(pm.momentumCouplingModel == "CliftGauvin") {
+        } else if(pm.momentumCouplingModel == "DynamicDroplet") {
+	  pm.momentumCouplingMethod = DYNAMIC_DROPLET ;
+	} else if(pm.momentumCouplingModel == "Loth") {
+          pm.momentumCouplingMethod = LOTH ;
+        } else {
+          cerr << "unable to interpret momentum coupling method" << endl ;
+        }
+        
+      } else {
+        string error = string("unknown identifier, '") + name + "' in reader for particleModel" ;
+        throw StringError(error) ;
+      }
+      Loci::parse::kill_white_space(s) ;
+    }
+    s.get() ;
+
+    if(!set_bins || !set_species) 
+      throw StringError("particleModel must have both bins and species defined") ;
+
+    if(!set_mcoupling)
+      throw StringError("Must select momentum coupling in particleModel file") ;
+
+    bool set_momentumCouplingModel ;
+    if(pm.momentumCouplingModel == "CliftGauvin" || pm.momentumCouplingModel == "Loth") {
+      set_momentumCouplingModel = true ;
+    } else {
+      set_momentumCouplingModel = false ;
+      string name = pm.momentumCouplingModel ;
+      string error = string("unknown momentum coupling model '") + name + "' in reader for particleModel" ;
+      throw StringError(error) ;
+    }
+
+        
+    return s ;
+  }
+
+  $rule optional(particle_model) {
+  }
+
+  void readParticleModel(particleModel &m, string name) {
+    string fname = name + ".pmdl" ;
+    ifstream pin(fname.c_str(),ios::in) ;
+    if(pin.fail()) {
+      const char *base = getenv("CHEMISTRY_DATABASE") ;
+      if(base == NULL) {
+        cerr << "Warning: CHEMISTRY_DATABASE environment variable not defined"
+             << endl ;
+        base = "./" ;
+      }
+      fname = string(base)+"/data_base/models/" + name + ".pmdl";
+      ifstream pin(fname.c_str(),ios::in) ;
+      if(pin.fail()) {
+        cerr << "can't find model '" << name <<"' looked for file '"
+             << fname << "' with no luck." << endl ;
+          Loci::Abort() ;
+      }
+      m = particleModel() ;
+      pin >> m ;
+    } else {
+      m = particleModel() ;
+      pin >> m ;
+    }
+  }
+
+  $rule singleton(particleModel<-particle_model) {
+    readParticleModel($particleModel,$particle_model) ;
+    $[Once] {
+      cout << "Lagrangian particle model = " << $particleModel << endl ;
+    }
+  }
+
+  void extract_species(const Loci::options_list &ol,
+		       vector<string> &species_names,
+		       vector<double> &species_mf) {
+    species_names.clear() ;
+    species_mf.clear() ;
+    if(ol.optionExists("species")) {
+      if(ol.getOptionValueType("species") != Loci::LIST) 
+	throw StringError("species should be assigned a list") ;
+      
+      Loci::options_list::arg_list species_list ;
+      ol.getOption("species",species_list) ;
+      Loci::options_list::arg_list::iterator li ;
+      for(li=species_list.begin();li!=species_list.end();++li) {
+	Loci::option_values::value_list_type species_arg ;
+	li->get_value(species_arg) ;
+	if(li->type_of() != Loci::NAME_ASSIGN || species_arg.size() != 1
+	   || species_arg.front().type_of() != Loci::REAL) 
+	  throw StringError("error in species assignment in particleModel") ;
+	string sn ;
+	double sv ;
+	li->get_value(sn) ;
+	species_arg.front().get_value(sv) ;
+	species_names.push_back(sn) ;
+	species_mf.push_back(sv) ;
+      }
+    } else
+      throw StringError("particle bin must have species specified") ;
+
+    if(species_names.size() == 0 || species_names.size() > 2) {
+      throw StringError("particle model can only handle 1-2 species") ;
+    }
+  }
+
+  densityFunction::
+  densityFunction(const Loci::options_list &ol,
+		  const std::map<std::string,Loci::options_list> &speciesDB) {
+    vector<string> species_names ;
+    vector<double> species_mf ;
+    extract_species(ol,species_names,species_mf) ;
+    map<string,Loci::options_list>::const_iterator mi ;
+    mi=speciesDB.find(species_names[0]) ;
+    if(mi == speciesDB.end()) {
+      string error = "particle bin references undefined species='" + species_names[0] + "'" ;
+      throw StringError(error) ;
+    }
+    double rho1 = 1 ;
+    if(mi->second.optionExists("density")) {
+      double density ;
+      mi->second.getOptionUnits("density","kg/m/m/m",density) ;
+      rho1 = density ;
+    } else
+      throw StringError(string("density not defined for species ") +
+			species_names[0] + "in particleModel reader") ;
+    specificVolume = 1./rho1 ;
+  }
+
+  tensionFunction::
+  tensionFunction(const Loci::options_list &ol,
+		  const std::map<std::string,Loci::options_list> &speciesDB) {
+    vector<string> species_names ;
+    vector<double> species_mf ;
+    extract_species(ol,species_names,species_mf) ;
+    extract_species(ol,species_names,species_mf) ;
+    int ns = species_names.size();
+    
+    int valid_cnt = 0 ;
+    for(int i=0;i<2;++i) {
+      int pi = min(i,ns-1) ;
+      map<string,Loci::options_list>::const_iterator mi ;
+      mi=speciesDB.find(species_names[pi]) ;
+      if(mi == speciesDB.end()) {
+	string error = "particle bin references undefined species='" + species_names[pi] + "'" ;
+	throw StringError(error) ;
+      }
+      const options_list &ol = mi->second ;
+      if(ol.optionExists("tension")) {
+	double t ;
+	ol.getOptionUnits("tension","N/m",t) ;
+	tension = t ;
+	valid_cnt++ ;
+      }
+    }
+    if(valid_cnt ==  2)
+      is_defined = true ;
+    else
+      is_defined = false ;
+  }
+
+  void particleBinEoS::
+  initialize(const particleModel &pm,  string binname,
+	     const Loci::options_list &ol,
+	     const std::map<std::string,Loci::options_list> &speciesDB) {
+    // Extract particle species names and default mixture
+    {
+      name = binname ;
+
+      vector<string> species_names ;
+      vector<double> species_mf ;
+      extract_species(ol,species_names,species_mf) ;
+      ns = 1 ;
+      if(species_mf.size() == 1) {
+	massFractions[0] = 1 ;
+	massFractions[1] = 0 ;
+      } else {
+	ns = 2 ;
+	massFractions[0] = species_mf[0] ;
+	massFractions[1] = species_mf[1] ;
+      }
+    }
+
+    // extract material density
+    rhop = densityFunction(ol,speciesDB) ;
+    // extract material pressure
+    tensionp = tensionFunction(ol,speciesDB) ;
+    // extract material saturation pressure curve
+    vector<string> species_names ;
+    vector<double> species_mf ;
+    extract_species(ol,species_names,species_mf) ;
+    int ns = species_names.size();
+    if(ns == 1) {
+      int pi = 0 ;
+      map<string,Loci::options_list>::const_iterator mi ;
+      mi=speciesDB.find(species_names[pi]) ;
+      if(mi == speciesDB.end()) {
+	string error = "particle bin references undefined species='" + species_names[pi] + "'" ;
+	throw StringError(error) ;
+      }
+    }
+    // extract particel coefficient of restitution
+    COR = 1.0 ;
+    if(ol.optionExists("COR"))
+      ol.getOption("COR",COR) ;
+
+    // Setup momentum coupling method
+    momentumUpdater = 0 ;
+    if(pm.momentumCouplingMethod == CLIFT_GAUVIN) {
+      momentumUpdater = new CliftGauvinIntegrator(rhop) ;
+    } else if(pm.momentumCouplingMethod == DYNAMIC_DROPLET) {
+      if(tensionp.valid()) { // use liquid version of Clift-Gauvin
+	momentumUpdater = new CliftGauvinDropletIntegrator(rhop,tensionp) ;
+      } else {
+	momentumUpdater = new CliftGauvinIntegrator(rhop) ;
+      }
+    } else {
+      cerr << "Warning: momentum coupling method unknown, defaulting to Clift-Gauvin" ;
+      momentumUpdater = new CliftGauvinIntegrator(rhop) ;
+    }
+
+    breakupUpdater = 0 ;
+    if(ol.optionExists("breakupModel")) {
+      if(ol.getOptionValueType("breakupModel") == Loci::FUNCTION) {
+	string model ;
+	options_list::arg_list alist ;
+	ol.getOption("breakupModel",model,alist) ;
+	options_list olarg ;
+	olarg.Input(alist) ;
+	if(model == "simpleWeber") {
+	  breakupUpdater = new simpleWeberBreakup(*this,olarg,ol,speciesDB) ;
+	}  else {
+	  string err = "breakupModel '" + model + "' is unknown." ;
+	  throw StringError(err) ;
+	}
+	
+      } else {
+	throw StringError("breakupModel should define a function") ;
+      }
+    } else {
+      breakupUpdater = new noBreakupModel ;
+    }
+  }
+
+      
+  $type particleBinEoS blackbox<particleEoSList>  ;
+
+  // The equation of state object
+  $rule singleton(particleBinEoS<-particleModel) {
+    const int nbins = $particleModel.binDB.size() ;
+    particleEoSList tmp(nbins) ;
+    for(int i=0;i<nbins;++i) {
+      tmp[i].initialize($particleModel, $particleModel.bins[i].name,
+			$particleModel.binDB[i],
+			$particleModel.speciesDB) ;
+    }
+    
+    $particleBinEoS.swap(tmp) ;
+  }
+  
+}

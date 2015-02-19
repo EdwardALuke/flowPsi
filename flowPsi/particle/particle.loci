@@ -1,0 +1,1787 @@
+// this is a dynamic version of the particle tracking program.
+// the computation is particle centered. in this file, we try
+// to use the Loci::blackbox facility to simulate the dynamic
+// programming.
+
+// include the Loci finite-volume module
+$include "FVM.lh"
+
+#include "particle_config.h"
+$include "particle.lh"
+#include "util.h"
+#include "par_util.h"
+#include "store_traverser.h"
+
+#include <Loci.h>
+#include <iostream>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list ;
+#include <map>
+using std::map ;
+#include <string>
+using std::string ;
+#include <fstream>
+using std::ifstream ;
+using std::ofstream ;
+#include <sstream>
+using std::ostringstream ;
+#include <utility>
+using std::pair ;
+
+
+
+#include "particle_model.h"
+
+
+////////////////////////////////////////////////////
+namespace lagrangianP {
+
+  //#define TIMING
+#ifdef TIMING 
+  basic_timer timer_particle ;
+#endif
+  
+  
+  $rule default(turbophoresis_model),
+    comments("add the particle turbophoresis model") {
+    $turbophoresis_model = "none" ;
+  }
+
+  ///////////////////////////////////////////////////////////////
+  // Implementation of the CellSpace methods
+  ///////////////////////////////////////////////////////////////
+  void
+  CellSpace::refresh_cell_space(Loci::storeRepP fluidInfo_rep,
+                                Loci::storeRepP fluidAuxInfo_rep,
+                                const ParticleSpace& pspace) {
+    if(!parallel_run) {
+      // if a sequential run, simply cache the reps directly
+      fluidInfo = fluidInfo_rep ;
+      fluidAuxInfo = fluidAuxInfo_rep ;
+      return ;
+    }
+    // otherwise we will need "pull" the data from the cell partition
+    const ParticleSpace::Communicator& comm = pspace.get_pull_comm() ;
+    vector<Loci::storeRepP> in(2), out(2) ;
+    in[0]  = fluidInfo_rep ;
+    in[1]  = fluidAuxInfo_rep ;
+    
+    get_remote_stores(in, out, comm) ;
+
+    fluidInfo      = out[0] ;
+    fluidAuxInfo   = out[1] ;
+  }
+
+  //////////////////////////////////////////////////////////////
+  // particle rules start here
+  //////////////////////////////////////////////////////////////
+
+  /////////////////////////////////////////////////////////////
+  // Following we will define the iteration {n} in which
+  // the particles will be integrated and moved to their
+  // correct position.
+  // NOTE: the {n} loop shares structure with the CHEM {n}
+  // iteration and will get other data that CHEM computes
+  // at iteration level {n}.
+  //
+  // The major flow of this loop is to compute:
+  //
+  // particle_bag{n} -> particle_bag_integrated{n}
+  //                 -> particle_bag_located{n}
+  //                 -> particle_bag{n+1}
+  //
+  // the "particle_bag_redistributed{n} ->
+  //      particle_bag_integrated{n}" is
+  // computed in the integration loop in {n,pi}.
+  // the outer iteration then moves the integrated particles
+  // to their correct position.
+  /////////////////////////////////////////////////////////////
+
+
+  $type considerMeshMotion param<int> ;
+  $rule unit(considerMeshMotion),constraint(UNIVERSE) {
+    $considerMeshMotion = 0 ;
+  }
+  $rule apply(considerMeshMotion)[Loci::Maximum],constraint(geom_cells),
+    prelude {
+  } ;
+
+  $rule apply(considerMeshMotion)[Loci::Maximum],constraint(movingMesh,geom_cells), prelude {
+    *$considerMeshMotion = 1 ;
+  } ;
+  
+  // A rule that locates the entire particle bag
+  // while also collects particles that hit the boundary,
+  // as well as particles that enters a mesh hole
+  class locate_particle_bag: public blackbox_rule {
+  private:
+    const_param<int> considerMeshMotion ;
+    const_store<int> particle_wall_bc ;
+    const_store<Area> area ;
+    const_store<vect3d> facecenter ;
+    const_store<vect3d> cellcenter ;
+    const_store<byte_t> iblank;
+    multiMap upper,lower,boundary_map ;
+   
+    blackbox<list<Particle> > particle_bag ;
+    blackbox<vector<Particle> > bounce_particles ;
+    blackbox<vector<int> > bounce_faces ;
+    blackbox<vector<Particle> > iblanked_particles;
+  public:
+    locate_particle_bag() {
+      name_store("considerMeshMotion",considerMeshMotion) ;
+      name_store("iblank{n}",iblank);
+      name_store("particle_bag_treated{n}", particle_bag) ;
+      // NOTE including the "particle_wall_bc" as an input
+      // at here is a hack for possible geometric re-caching
+      // if the mesh is somehow changing. because "particle_wall_bc"
+      // is needed in the re-caching, including it here as
+      // input will ensure that it is not deleted.
+      name_store("particle_wall_bc{n}", particle_wall_bc) ;
+
+      name_store("cellcenter{n}",cellcenter) ;
+      name_store("facecenter{n}",facecenter) ;
+      name_store("area{n}",area) ;
+      name_store("upper{n}",upper) ;
+      name_store("lower{n}",lower) ;
+      name_store("boundary_map{n}",boundary_map) ;
+      input("(upper{n},lower{n},boundary_map{n})->(area{n},facecenter{n})") ;
+      input("cellcenter{n}") ;
+      input("considerMeshMotion") ;
+      input("iblank{n}");
+      input("particle_bag_treated{n},particle_wall_bc{n}") ;
+      output("particle_bag_located{n} = particle_bag_treated{n}") ;
+
+      name_store("bounce_particles{n}", bounce_particles) ;
+      name_store("bounce_faces{n}", bounce_faces) ;
+      output("bounce_particles{n}, bounce_faces{n}") ;
+      
+      name_store("iblanked_particles{n}",iblanked_particles);
+      output("iblanked_particles{n}");
+
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      if(*considerMeshMotion != 0)
+        ParticleSpace::instance().turn_on_recache() ;
+      // we will just delegate the work to the ParticleSpace
+      list<Particle>& bag = *particle_bag ;
+      vector<Particle>& bp = *bounce_particles ;
+      vector<int>& bf =  *bounce_faces ;
+      vector<Particle>& ip = *iblanked_particles;
+      bp.clear(), bf.clear() ; ip.clear();
+      ParticleSpace::instance().locate_particles(bag, bp, bf, ip) ;
+      // NOTICE that if you wish to relocate the bounce particles "bp"
+      // you must call ParticleSpace::register_particles to
+      // register them again in the ParticleSpace object. And also note:
+      // when registering "bp", you must merge it to the main particle
+      // list.  This is because currently the ParticleSpace object
+      // can only manage a single particle list.
+      // e.g., suppose "particle_bag" is the main particle list,
+      // you want to register "bp" like this:
+      // ParticleSpace::instance().
+      //   register_particles(bp.begin(),
+      //                      bp.end(), particle_bag) ;
+    }
+  } ;
+  register_rule<locate_particle_bag> register_locate_particle_bag ;
+  
+  
+  struct faceflux_info {
+    int face ;  // Face the particle interacted with
+    double mdot; // mass flux  (mass per this timestep)
+    vect3d momdot ; // momentum flux
+    double hdot ; // energy flux
+    double numdot ; // numberflux
+    double numbounce ; // bouncing number of particles
+    double erosionRate ; // material penetration rate due to impacting particles (per this timestep)
+  } ;
+
+  // erosion models
+  void erosion_model_1 (double &eRatio, const vect3d vpb, const double theta) { 
+    // model constants for sand and steel
+    const double n = 2.41 ;
+    const double C = 2.17e-7 ;
+    // particle constants
+           //  const double Fs = 1.0 ; // sharp particles
+           //  const double Fs = 0.53 ; // semi-rounded particles
+    const double Fs = 0.20 ; // fully rounded particles
+    // eroding material constants
+           //  const double materialDensity = 2700. ; //hardwired for aluminum, kg/m^3
+    const double HB = 120 ; //Brinell hardness number, steel
+    const double materialDensity = 7850. ; //hardwired for steel, kg/m^3
+    // compute erosion ratio, volume of material removed per mass of impacting particles
+    const double ftheta = theta*(5.3983+theta*(-10.1068+theta*(10.9327+theta*(-6.3283+theta*1.4234)))) ;
+    const double pSpeed = norm(vpb) ;
+    eRatio = C*pow(HB,-0.59)*Fs*pow(pSpeed,n)*ftheta/materialDensity ;
+  }
+
+  void erosion_model_2 (double &eRatio, const vect3d vpb, const double theta) { 
+    // model constants for sand and steel
+    const double n = 1.73 ;
+    const double C = 3.82e-6 ;
+    // particle constants
+           //  const double Fs = 1.0 ; // sharp particles
+           //  const double Fs = 0.53 ; // semi-rounded particles
+    const double Fs = 0.20 ; // fully rounded particles
+    // eroding material constants
+           //  const double materialDensity = 2700. ; //hardwired for aluminum, kg/m^3
+    const double HB = 120 ; //Brinell hardness number, steel
+    const double materialDensity = 7850. ; //hardwired for steel, kg/m^3
+    // compute erosion ratio, volume of material removed per mass of impacting particles
+    const double ftheta = theta*(5.3983+theta*(-10.1068+theta*(10.9327+theta*(-6.3283+theta*1.4234)))) ;
+    const double pSpeed = norm(vpb) ;
+    eRatio = C*pow(HB,-0.59)*Fs*pow(pSpeed,n)*ftheta/materialDensity ;
+  }
+
+  void erosion_model_3 (double &eRatio, const vect3d vpb, const double theta) { 
+    // zhang, ph.d. dissertation, univ. of tulsa, 2006
+    const double n = 1.73 ;
+    const double C = 1.559e-6 ;
+    // particle constants
+           //  const double Fs = 1.0 ; // sharp particles
+           //  const double Fs = 0.53 ; // semi-rounded particles
+    const double Fs = 0.20 ; // fully rounded particles
+    // eroding material constants
+           //  const double materialDensity = 2700. ; //hardwired for aluminum, kg/m^3
+    const double HB = 120 ; //Brinell hardness number, steel
+    const double materialDensity = 7850. ; //hardwired for steel, kg/m^3
+    // angle function constants
+    const double theta0 = 15*M_PI/180. ;
+    const double a = -33.4 ;
+    const double b = 17.9 ;
+    const double w = 1 ;
+    const double x = 1.239 ;
+    const double y = -1.192 ;
+    const double z = 2.167 ;
+    // compute erosion ratio, volume of material removed per mass of impacting particles
+    double ftheta ;
+    if(theta<=theta0) {
+      ftheta = a*pow(theta,2)+b*theta ;
+    } else {
+      ftheta = x*pow(cos(theta),2)*sin(w*theta)+y*pow(sin(theta),2)+z ;
+    }
+    const double pSpeed = norm(vpb) ;
+    eRatio = C*pow(HB,-0.59)*Fs*pow(pSpeed,n)*ftheta/materialDensity ;
+  }
+
+  void erosion_model_4 (double &eRatio, const vect3d vpb, const double theta, const double pDiam) { 
+    // Oka model
+    // eroding material constants
+      //  const double HV = 1.37 ; //Vickers number, steel (GPa)
+    const double HV = 2.20 ; //Vickers number, steel (GPa)
+      //  const double HV = 5.00 ; //Vickers number, steel (GPa)
+    // model constants
+    const double a = 1 ;
+    const double b = 1 ;
+    const double s1 = 0.71 ;
+    const double s2 = 2.4 ;
+    const double q1 = 0.14 ;
+    const double q2 = -0.94 ;
+    const double n1 = s1*pow(HV,q1) ;
+    const double n2 = s2*pow(HV,q2) ;
+    const double K = 50 ;
+    const double k1 = -0.12 ;
+    const double k2 = 2.5 ;    //2.3*pow(pHV,0.038) ; //depends on particle material hardness
+    const double k3 = 0.19 ;
+    const double vref = 104 ;
+    const double dref = 3.26e-4 ;
+    // compute erosion ratio, volume of material removed per mass of impacting particles
+    const double pSpeed = norm(vpb) ;
+    const double gtheta = pow(sin(theta),n1)*pow(1+HV*(1-sin(theta)),n2) ;
+    const double E90 = K*pow(a*HV,b*k1)*pow(pSpeed/vref,k2)*pow(pDiam/dref,k3) ;
+    eRatio = 1e-9*gtheta*E90 ;
+  }
+
+  void erosion_model_5 (double &eRatio, const vect3d vpb, const double theta) { 
+    // tabakoff model (1973)
+    // eroding material constants
+           //  const double materialDensity = 2700. ; //hardwired for aluminum, kg/m^3
+    const double materialDensity = 7850. ; //hardwired for steel, kg/m^3
+    // model constants
+    const double theta0 = 24*M_PI/180. ;
+    const double ka = 3.67e-6 ;
+    const double kb = 0.585 ;
+    const double kc = 6e-12 ;
+    // compute erosion ratio, volume of material removed per mass of impacting particles
+    const double ck = (theta<=2*theta0) ? 1.0 : 0.0 ;
+    const double pSpeed = 3.281*norm(vpb) ;
+    const double rt = 1-0.0016*pSpeed*sin(theta) ;
+    const double fvin = kc*pow(pSpeed*sin(theta),4) ;
+    const double ftheta = pow(1+ck*kb*sin(0.5*M_PI*theta/theta0),2) ;
+    eRatio = 1e-3*(ka*ftheta*pow(pSpeed*cos(theta),2)*(1-pow(rt,2))+fvin)/materialDensity ;
+  }
+
+  $type particle_wall_bc store<int> ;
+  
+  // This rule treats all particles that intersect a boundary face
+  
+  class separate_bounce_particles: public blackbox_rule {
+  private:
+    const_store<Area> area ;
+    const_store<vect3d> facecenter ;
+    const_store<int> particle_wall_bc ;
+    const_blackbox<particleEoSList> particleBinEoS ;
+    const_blackbox<vector<Particle> > bounce_particles ;
+    const_blackbox<vector<int> > bounce_faces ;
+
+    blackbox<vector<Particle> > bounce_wall_particles ;
+    blackbox<vector<int> > bounce_wall_faces ;
+
+    blackbox<vector<faceflux_info> > boundaryTransfer ;
+
+    // these are for particles that pass through the boundaries
+    blackbox<vector<Particle> > pass_through_particles;
+    blackbox<vector<int> > pass_through_faces;
+    
+  public:
+    separate_bounce_particles() {
+      name_store("area{n}",area) ;
+      name_store("facecenter{n}",facecenter) ;
+      name_store("particle_wall_bc{n}", particle_wall_bc) ;
+
+      name_store("bounce_particles{n}", bounce_particles) ;
+      name_store("bounce_faces{n}", bounce_faces) ;
+      
+      name_store("bounce_wall_particles{n}", bounce_wall_particles) ;
+      name_store("bounce_wall_faces{n}", bounce_wall_faces) ;
+
+      name_store("pass_through_particles{n}", pass_through_particles) ;
+      name_store("pass_through_faces{n}", pass_through_faces) ;
+
+      name_store("boundaryTransfer{n}",boundaryTransfer) ;
+      
+      
+      name_store("particleBinEoS{n}",particleBinEoS) ;
+
+      input("particleBinEoS{n}") ;
+      input("area{n}, facecenter{n}, particle_wall_bc{n}") ;
+      input("bounce_particles{n}, bounce_faces{n}") ;
+      
+      output("bounce_wall_particles{n}, bounce_wall_faces{n}") ;
+      output("pass_through_particles{n}, pass_through_faces{n}");
+      output("boundaryTransfer{n}") ;
+
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      entitySet fdom = area.domain() ;
+
+      const vector<Particle>& bcp = *bounce_particles ;
+      const vector<int>& bcf = *bounce_faces ;
+
+      vector<Particle>& bwp = *bounce_wall_particles ;
+      vector<int>& bwf = *bounce_wall_faces ;
+      bwp.clear(), bwf.clear() ;
+
+      vector<Particle>& ptp = *pass_through_particles;
+      vector<int>& ptf = *pass_through_faces;
+      ptp.clear(), ptf.clear();
+      
+      vector<faceflux_info> &ffi = *boundaryTransfer ;
+      ffi.clear() ;
+      // first is to change the partice property according
+      // to the boundary wall type
+      for(size_t i=0;i!=bcp.size();++i) {
+        int f = bcf[i] ;
+        if(!fdom.inSet(f)) {
+          cerr << "bounds error on face id=" << f << ", p=" <<Loci::MPI_rank << endl ;
+        }
+        // Get particle
+        Particle p = bcp[i] ;
+        // if wall type is 2, then bounce, otherwise remove the particle
+        if(particle_wall_bc[f] < 2) { // stick wall
+          faceflux_info fi ;
+          fi.face = f ;
+        } else if(particle_wall_bc[f] == 2 || particle_wall_bc[f] == 4) {
+	 // bounce wall or pool wall
+          Particle p = bcp[i] ;
+          // since all the boundary face normals are pointing to the
+          // outside of the volume, we need to flip it (since we
+          // want the normal to be pointing toward the cellcenter)
+          vector3d<float> fn = vector3d<float>(-area[f].n.x,
+                                               -area[f].n.y,
+                                               -area[f].n.z) ;
+          vector3d<float> fc = vector3d<float>(facecenter[f].x,
+                                               facecenter[f].y,
+                                               facecenter[f].z) ;
+	  
+	  double COR = (*particleBinEoS)[p.bin].COR ;
+          
+          vector3d<float> vpb = p.vel[0] ;
+          p.pos[0] = p.pos[0] - (((1.+COR*COR)*dot(p.pos[0]-fc,fn))*fn) ;
+          p.pos[1] = p.pos[1] - (((1.+COR*COR)*dot(p.pos[1]-fc,fn))*fn) ;
+          p.vel[0] = p.vel[0] - (((1.+COR)*dot(p.vel[0],fn))*fn) ;
+          p.vel[1] = p.vel[1] - (((1.+COR)*dot(p.vel[1],fn))*fn) ;
+
+          bwp.push_back(p) ;
+          bwf.push_back(f) ;
+          faceflux_info fi ;
+          fi.face = f ;
+          fi.mdot = 0 ;
+          double mass = bcp[i].mass*bcp[i].number_in_parcel ;
+          fi.momdot.x = mass*(vpb.x-bcp[i].vel[0].x) ;
+          fi.momdot.y = mass*(vpb.y-bcp[i].vel[0].y) ;
+          fi.momdot.z = mass*(vpb.z-bcp[i].vel[0].z) ;
+          fi.hdot = 0 ; 
+          fi.numdot = 0 ;
+          fi.numbounce = bcp[i].number_in_parcel ;
+          fi.erosionRate = 0 ;
+          ffi.push_back(fi) ;
+        } else if(particle_wall_bc[f] == 5) {
+	 // erode wall
+          Particle p = bcp[i] ;
+          // since all the boundary face normals are pointing to the
+          // outside of the volume, we need to flip it (since we
+          // want the normal to be pointing toward the cellcenter)
+          vector3d<float> fn = vector3d<float>(-area[f].n.x,
+                                               -area[f].n.y,
+                                               -area[f].n.z) ;
+          vector3d<float> fc = vector3d<float>(facecenter[f].x,
+                                               facecenter[f].y,
+                                               facecenter[f].z) ;
+	  
+	  //   double COR = (*particleBinEoS)[p.bin].COR ;
+          
+          vector3d<float> vpb = p.vel[0] ;
+          const double theta = asin(-dot(p.pos[0]-fc,fn)/norm(p.pos[0]-fc)) ; //impact angle
+            //  const double theta = max(asin(-dot(vpb,fn)/norm(vpb)),0.0f) ; //impact angle
+          // forder
+              //    const double CORn = 1-0.4159*theta+0.5994*pow(theta,2)-0.292*pow(theta,3) ;
+              //    const double CORt = 1-2.12*theta+3.077*pow(theta,2)-1.1*pow(theta,3) ;
+          // grant and tabakoff
+          const double CORn_mean = 0.993-1.76*theta+1.56*pow(theta,2)-0.49*pow(theta,3) ;
+          const double CORt_mean = 0.998-1.66*theta+2.11*pow(theta,2)-0.67*pow(theta,3) ;
+          const double sigman = 2.15*theta-5.02*pow(theta,2)+4.05*pow(theta,3)-1.085*pow(theta,4) ;
+          const double sigmat = -5e-4+0.62*theta-0.535*pow(theta,2)+0.089*pow(theta,3) ;
+          const double CORn = GSD(CORn_mean,sigman) ;
+          const double CORt = GSD(CORt_mean,sigmat) ;
+
+          vector3d<float> ft0 = (p.pos[0]-fc)/norm(p.pos[0]-fc)+fn ;
+          vector3d<float> ft1 = (p.pos[1]-fc)/norm(p.pos[1]-fc)+fn ;
+          vector3d<float> dx0 = (1.-CORt*CORt)*dot(p.pos[0]-fc,ft0)*ft0 ;
+          vector3d<float> dx1 = (1.-CORt*CORt)*dot(p.pos[1]-fc,ft1)*ft1 ;
+          p.pos[0] = p.pos[0] - (((1.+CORn*CORn)*dot(p.pos[0]-fc,fn))*fn) - dx0 ;
+          p.pos[1] = p.pos[1] - (((1.+CORn*CORn)*dot(p.pos[1]-fc,fn))*fn) - dx1 ;
+          p.vel[0] = CORt*p.vel[0] - (((CORt+CORn)*dot(p.vel[0],fn))*fn) ;
+          p.vel[1] = CORt*p.vel[1] - (((CORt+CORn)*dot(p.vel[1],fn))*fn) ;
+          bwp.push_back(p) ;
+          bwf.push_back(f) ;
+          faceflux_info fi ;
+          fi.face = f ;
+	    //  double diameter = bcp[i].get_diameter(*particleBinEoS) ;
+          double mass = bcp[i].mass*bcp[i].number_in_parcel ;
+          fi.mdot = mass ; // mass of impinging particles
+          fi.momdot.x = mass*(vpb.x-bcp[i].vel[0].x) ;
+          fi.momdot.y = mass*(vpb.y-bcp[i].vel[0].y) ;
+          fi.momdot.z = mass*(vpb.z-bcp[i].vel[0].z) ;
+          fi.hdot = 0 ; 
+          fi.numdot = 0 ;
+          fi.numbounce = bcp[i].number_in_parcel ;
+          double eRatio ;
+            //  erosion_model_1(eRatio,vpb,theta) ;
+            //  erosion_model_2(eRatio,vpb,theta) ;
+            //  erosion_model_3(eRatio,vpb,theta) ;
+            //  erosion_model_4(eRatio,vpb,theta,diameter) ;
+          erosion_model_5(eRatio,vpb,theta) ;
+          fi.erosionRate = mass*eRatio ;
+          ffi.push_back(fi) ;
+        } else if(particle_wall_bc[f] == 3) { // symmetry BCs
+          Particle p = bcp[i] ;
+          // since all the boundary face normals are pointing to the
+          // outside of the volume, we need to flip it (since we
+          // want the normal to be pointing toward the cellcenter)
+          vector3d<float> fn = vector3d<float>(-area[f].n.x,
+                                               -area[f].n.y,
+                                               -area[f].n.z) ;
+          vector3d<float> fc = vector3d<float>(facecenter[f].x,
+                                              facecenter[f].y,
+                                               facecenter[f].z) ;
+	  
+	  double COR = 1.0 ;
+
+          p.pos[0] = p.pos[0] - (((1.+COR*COR)*dot(p.pos[0]-fc,fn))*fn) ;
+          p.pos[1] = p.pos[1] - (((1.+COR*COR)*dot(p.pos[1]-fc,fn))*fn) ;
+          p.vel[0] = p.vel[0] - (((1.+COR)*dot(p.vel[0],fn))*fn) ;
+          p.vel[1] = p.vel[1] - (((1.+COR)*dot(p.vel[1],fn))*fn) ;
+        } else if(particle_wall_bc[f] == 6) {
+          // particles will pass through the boundaries
+          ptp.push_back(bcp[i]);
+          ptf.push_back(f);
+        } else {                // unknown wall type
+          faceflux_info fi ;
+          fi.face = f ;
+          fi.mdot = bcp[i].mass*bcp[i].number_in_parcel ;
+          fi.momdot.x = fi.mdot*bcp[i].vel[0].x ;
+          fi.momdot.y = fi.mdot*bcp[i].vel[0].y ;
+          fi.momdot.z = fi.mdot*bcp[i].vel[0].z ;
+          fi.hdot = 0 ; // energy flux is ambiguous here
+          fi.numdot = bcp[i].number_in_parcel ;
+          fi.numbounce = 0 ;
+          fi.erosionRate = 0 ;
+          ffi.push_back(fi) ;
+        }
+      }
+    }
+  } ;
+  register_rule<separate_bounce_particles>
+  register_separate_bounce_particles ;
+
+  // we will want to inject the particles that passed through the walls
+  $type pass_through_particles blackbox<vector<Particle> >;
+  $type pass_through_particles_updated blackbox<vector<Particle> >;
+  $type pass_through_faces blackbox<vector<int> >;
+  $type pass_through_link blackbox<map<int,int> >;
+
+  $rule blackbox(pass_through_particles_updated{n} <-
+                 pass_through_particles{n}, pass_through_faces{n},
+                 pass_through_link{n}),
+    inplace(pass_through_particles_updated{n}|pass_through_particles{n}),
+    prelude {
+    vector<Particle>& pp = *$pass_through_particles{n};
+    const vector<int>& pf = *$pass_through_faces{n};
+    const map<int,int>& link = *$pass_through_link{n};
+    // reset the particle's containing cells to the linked one
+    for(size_t i=0;i<pp.size();++i) {
+      int f = pf[i];
+      map<int,int>::const_iterator mi=link.find(f);
+      if(mi != link.end()) {
+        pp[i].set_cell(mi->second);
+      } else {
+        cerr << "Errors occurred when particles trying to cross boundaries"
+             << endl;
+        Loci::Abort();
+      }
+    }
+  };
+
+  // here we will transport the particles in iblanked cells to
+  // their corresponding destination
+
+  // iblankCellN is transported from {n,it} to {n} in the chem_interface.loci
+  // file
+  $type iblankCellN store<int>;
+
+
+  $type iblanked_particles blackbox<vector<Particle> >;
+  $type iblanked_particles_transported blackbox<vector<Particle> >;
+  $rule blackbox(iblanked_particles_transported{n} <-
+                 iblanked_particles{n}, iblankCellN{n}),
+    inplace(iblanked_particles_transported{n}|iblanked_particles{n}),
+    prelude {
+      vector<Particle>& ip = *$iblanked_particles{n};
+      Loci::entitySet ib_cells = $iblankCellN{n}.domain();
+      for(size_t i=0;i<ip.size();++i) {
+        int c = ip[i].get_cell();
+#ifdef PARTICLE_HOLE_CHECK
+        if(!ib_cells.inSet(c)) {
+          cerr << "Errors occurred when particles trying to cross holes"
+            << endl;
+          Loci::Abort();
+        }
+#endif
+        c = $iblankCellN{n}[c];
+#ifdef PARTICLE_HOLE_CHECK
+        if(c < 0) {
+          cerr << "Errors occurred when particles trying to cross holes"
+            << endl;
+          Loci::Abort();
+        }
+#endif
+        ip[i].set_cell(c);
+      }
+    };
+
+  $type particle_bag_injected blackbox<list<Particle> >;
+
+  $rule unit(particle_bag_injected{n}),constraint(UNIVERSE{n}) {}
+
+  // inject the pass through particles back
+  $rule apply(particle_bag_injected{n} <-
+              pass_through_particles_updated{n}) [Loci::NullOp],
+    option(disable_threading), prelude {
+    list<Particle>& lp = *$particle_bag_injected{n};
+    const vector<Particle>& pp = *$pass_through_particles_updated{n};
+
+//    int pps = pp.size();
+//    int tpps = 0;
+//    MPI_Allreduce(&pps, &tpps, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+
+    ParticleSpace::instance().
+      register_particles(pp.begin(),pp.end(),lp);
+  };
+
+  // inject the transported particles back  
+  $rule apply(particle_bag_injected{n} <-
+              iblanked_particles_transported{n}) [Loci::NullOp],
+    option(disable_threading), prelude {
+      list<Particle>& lp = *$particle_bag_injected{n};
+      const vector<Particle>& ipt = *$iblanked_particles_transported{n};
+
+#ifdef PARTICLE_HOLE_VERBOSE
+      int ibn = ipt.size();
+      int ibn_global = 0;
+      MPI_Reduce(&ibn, &ibn_global, 1,
+          MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+      $[Once] {
+        cerr << "registering " << ibn_global 
+             << " iblanked particles" << endl;
+      }
+#endif
+
+      ParticleSpace::instance().
+        register_particles(ipt.begin(), ipt.end(), lp);
+    };
+
+  // this rule advances the particle_bag
+  // particle_bag_located{n} -> particle_bag{n+1}
+  // this rule uses the distributed injection feature
+
+  $type bounce_wall_particles blackbox<vector<Particle> > ;
+  $type bounce_wall_faces blackbox<vector<int> > ;
+  $type injected_particles store<list<Particle> > ;
+
+  $rule apply(ci->injected_particles<-bounce_wall_particles,bounce_wall_faces,
+	      particle_wall_bc,area,facecenter,particleBinEoS)[summation_list], prelude {
+    int sz = (*$bounce_wall_particles).size() ;
+    store<list<Particle> > pool_list ;
+    int pooled = 0 ;
+    entitySet dom = entitySet(seq) ;
+    pool_list.allocate(dom) ;
+    for(int i=0;i<sz;++i) {
+      Particle p((*$bounce_wall_particles)[i]) ;
+      int f = (*$bounce_wall_faces)[i] ;
+      p.cell = $ci[f] ;
+      if($particle_wall_bc[f] == 4) {
+        p.info |= POOL_PARTICLE ;
+	pool_list[f].push_back(p) ;
+	pooled++ ;
+      } else {
+	$injected_particles[$ci[f]].push_back(p) ;
+      }
+    }
+    //    cout << "pooled = " << pooled << endl ;
+    if(pooled != 0) {
+      FORALL(dom,f) {
+	if(!pool_list[f].empty()) {
+	  map<int,Particle> combine ;
+	  list<Particle>::iterator li ;
+	  map<int,Particle>::iterator mi ;
+	  for(li=pool_list[f].begin();li!=pool_list[f].end();++li) {
+	    Particle p = *li ;
+            float num_p = max(p.number_in_parcel,1.0f) ;
+	    p.mass *= num_p ;
+	    p.number_in_parcel /= num_p ; ;
+	    int bin = p.bin ;
+	    mi=combine.find(bin) ;
+	    if(mi == combine.end()) {
+	      combine[bin] = p ;
+	    } else {
+	      Particle &p0 = mi->second ;
+              float ntot = p0.number_in_parcel + p.number_in_parcel ;
+	      float m0 = p0.mass*p0.number_in_parcel ;
+	      float m1 = p.mass*p.number_in_parcel ;
+	      float mtot = m0+m1 ;
+	      vector3d<float> ptot = (m0*p0.pos[0]+m1*p.pos[0])/mtot ;
+	      vector3d<float> vtot = (m0*p0.vel[0]+m1*p.vel[0])/mtot ;
+
+	      p0.pos[0] = ptot ;
+	      p0.pos[1] = ptot ;
+	      p0.vel[0] = vtot ;
+	      p0.vel[1] = vtot ;
+              p0.number_in_parcel = .5*ntot ;
+	      p0.mass = 2.*mtot/ntot ;
+	    }
+	  }
+	  // now loop over map and insert particles
+	  for(mi=combine.begin();mi!=combine.end();++mi) {
+	    const int bin = mi->second.bin ;
+	    double d = mi->second.get_diameter((*$particleBinEoS)[bin].rhop) ;
+	    vect3d pp = mi->second.get_position() ;
+	    double dist = -dot(pp-$facecenter[f],$area[f].n) ;
+	    if(dist < d) {
+	      pp -= (d-dist)*$area[f].n ;
+	      mi->second.set_position(pp) ;
+	    }
+	    $injected_particles[$ci[f]].push_back(mi->second) ;
+	  }
+	}
+      } ENDFORALL ;
+    }
+  } ;
+
+  // this rule uses normal injection
+  // class advance_particle_bag_normal_injection: public apply_rule<blackbox<list<Particle> >, Loci::NullOp<blackbox<list<Particle> > > > {
+  // private:
+  //   // injected into the mesh at every iteration.
+  //   const_store<list<Particle> > injected_particles ;
+  //   blackbox<list<Particle> > particle_bag ;
+  // public:
+  //   advance_particle_bag_normal_injection() {
+  //     name_store("injected_particles{n}", injected_particles) ;
+  //     name_store("particle_bag_located{n}", particle_bag) ;
+
+  //     input("injected_particles{n}") ;
+  //     input("particle_bag_located{n}") ;
+  //     output("particle_bag{n+1} = particle_bag_located{n}") ;
+
+  //     disable_threading() ;
+  //   }
+  //   void
+  //   compute(const sequence& seq) {
+  //     Loci::storeRepP sp = injected_particles.Rep() ;
+  //     list<Particle>& lp = *particle_bag ;
+  //     ParticleSpace::instance().register_particles(sp, lp) ;
+  //   }
+  // } ;
+  // register_rule<advance_particle_bag_normal_injection>
+  // register_advance_particle_bag_normal_injection ;
+  $type particle_bag_located blackbox<list<Particle> >;
+
+  $rule apply(particle_bag_injected{n} <-
+              particle_bag_located{n}, injected_particles{n}) [Loci::NullOp],
+    inplace(particle_bag_injected{n}|particle_bag_located{n}),
+    option(disable_threading), prelude {
+    Loci::storeRepP sp = $injected_particles{n}.Rep();
+    list<Particle>& lp = *$particle_bag_located{n};
+    ParticleSpace::instance().register_particles(sp,lp);
+  };
+
+  $rule blackbox(particle_bag{n+1} <- particle_bag_injected{n}),
+    option(disable_threading),
+    inplace(particle_bag{n+1}|particle_bag_injected{n}), prelude {};
+  
+
+  //////////////////////////////////////////////////////////////////
+  // we need to build the outer iteration {n}
+  // built rule
+  // initialize particle lists at the beginning
+
+  class init_particle_bag: public blackbox_rule {
+  private:
+    // "particle_space_init" must be included so that
+    // the particle space object can be properly constructed
+    const_param<bool> particle_space_init ;
+    const_param<string> modelName ;
+    const_store<vect3d> cellcenter ;
+    const_blackbox<list<Particle> > loaded_particles ;
+    blackbox<list<Particle> > particle_bag ;
+  public:
+    init_particle_bag() {
+      name_store("particle_space_init", particle_space_init) ;
+      name_store("modelName", modelName) ;
+      name_store("loaded_particles",loaded_particles) ;
+      name_store("cellcenter",cellcenter) ;
+      name_store("particle_bag{n=0}", particle_bag) ;
+      input("cellcenter") ;
+      input("particle_space_init") ;
+      input("modelName") ;
+      input("loaded_particles") ;
+
+      output("particle_bag{n=0}") ;
+
+      disable_threading() ;
+    }
+
+    void
+    compute(const sequence& seq) {
+      $[Once] {
+        cout << "Particle Tracking with Dual-decomposition Method" << endl ;
+      }
+
+      // we will need to check if this is a restart run, if yes,
+      // then we need to read particle info from restart file
+      // and also set up everything to restart.
+      // currently, we will determine a restart run by checking
+      // if the fact "icfile" is inside the fact_db, if yes,
+      // then this is a restart run.
+      Loci::fact_db* factsP = Loci::exec_current_fact_db ;
+      Loci::storeRepP srp = factsP->get_variable("icfile") ;
+      if(srp != 0) {
+        // a restart run
+        param<string> icfile(srp) ;
+        // get the particle restart file name first
+        string filename = *icfile + "particleRestart_" + *modelName ;
+
+        list<Particle>& bag = *particle_bag ;
+        // let the particle space object manage the
+        // reconstruction of the particles
+	$[Once] {
+          cout << "--Reading particles from: "
+               << filename << "..." ;
+          cout.flush() ;
+        }
+        //ParticleSpace::instance().register_particles(filename, bag) ;
+        ParticleSpace::instance().restart_particles(filename,bag);
+	$[Once] {
+          cout << "Done" << endl ;
+        }
+      } else {
+        // a normal run
+        const list<Particle>& loaded_input = *loaded_particles ;
+        vector<Particle> loaded ;
+        list<Particle>::const_iterator li ;
+        for(li=loaded_input.begin();li!=loaded_input.end();++li)
+          loaded.push_back(*li) ;
+        list<Particle>& bag = *particle_bag ;
+        ParticleSpace::instance().
+          insert_new_particles(loaded,bag) ;
+        
+      }
+      Loci::debugout << "Start particle tracking with "
+                     << "dual-decomposition method" << endl ;
+      Loci::debugout << "--Initial particle number: "
+                     << ParticleSpace::instance().get_particle_number()
+                     << endl ;
+#ifdef TIMING
+      timer_particle.start() ;
+#endif
+    } // end of compute()
+  } ; // end of class
+  register_rule<init_particle_bag> register_init_particle_bag ;
+
+  // a rule that generate various information based on
+  // the passed in particle list.
+  void get_cell_particle_num(const list<Particle>&,
+                             Loci::fact_db*, store<int>&) ;
+  
+
+
+  // here is a function that outputs the particle info into hdf5
+  // formatted files. taking a list of particles, this routine
+  // will output in the "output" directory the following files:
+  // 1) ptpos_ptvec.n_casename 2) ptvel_ptvec.n_casename
+  // where "n" is the iteration number, "casename" is the name of
+  // the running application.
+  void
+  hdf5_particle_output(const list<Particle>& particles, 
+                       const particleEoSList& pm,
+                       const string& casename, int iteration) {
+    hid_t file_id = 0 ;
+    string filename ;
+    // first we will write out the particle positions
+    // we will be using the "writeUnorderedVector" function
+    // so that we will first need to create a vector<vec3d>
+    // for the particle positions first
+    vector<vec3d> vec(particles.size()) ;
+    list<Particle>::const_iterator li ;
+    int idx = 0 ;
+    for(li=particles.begin();li!=particles.end();++li,++idx)
+      vec[idx] = li->get_position() ;
+    // create the hdf5 file
+    filename = string("output/particle_pos.") +
+      num2str(iteration) + "_" + casename ;
+    $[Once] {
+      cout << "writing file " << filename << endl ;
+      file_id = H5Fcreate(filename.c_str(),
+                          H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+    }
+    Loci::writeUnorderedVector(file_id, "particle position", vec) ;
+    $[Once] {
+      H5Fclose(file_id) ;
+    }
+    // then we write out the velocity
+    idx = 0 ;
+    for(li=particles.begin();li!=particles.end();++li,++idx)
+      vec[idx] = li->get_velocity() ;
+    filename = string("output/ptvel_ptvec.") +
+      num2str(iteration) + "_" + casename ;
+    $[Once] {
+      cout << "writing file " << filename << endl ;
+      file_id = H5Fcreate(filename.c_str(),
+                          H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+    }
+    Loci::writeUnorderedVector(file_id, "ptvel", vec) ;
+    $[Once] {
+      H5Fclose(file_id) ;
+    }
+    
+     // output the diameter of particles
+     idx = 0 ;
+     vector<double> dia(particles.size()) ;
+     for(li=particles.begin();li!=particles.end();++li,++idx) {
+       const int bin = li->bin ;
+       dia[idx] = li->get_diameter(pm[bin].rhop) ;
+     }
+     filename = string("output/ptdia_ptsca.") +
+       num2str(iteration) + "_" + casename ;
+     $[Once] {
+       cout << "writing file " << filename << endl ;
+       file_id = H5Fcreate(filename.c_str(),
+                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+     }
+     Loci::writeUnorderedVector(file_id, "ptdia", dia) ;
+     $[Once] {
+       H5Fclose(file_id) ;
+     }
+
+     // output the mass of particles
+     idx = 0 ;
+     vector<double> mass(particles.size()) ;
+     for(li=particles.begin();li!=particles.end();++li,++idx) {
+       mass[idx] = li->get_mass() ;
+     }
+     filename = string("output/ptmass_ptsca.") +
+       num2str(iteration) + "_" + casename ;
+     $[Once] {
+       cout << "writing file " << filename << endl ;
+       file_id = H5Fcreate(filename.c_str(),
+                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+     }
+     Loci::writeUnorderedVector(file_id, "ptmass", mass) ;
+     $[Once] {
+       H5Fclose(file_id) ;
+     }
+     
+     // output the number of particles
+     idx = 0 ;
+     vector<double> nump(particles.size()) ;
+     for(li=particles.begin();li!=particles.end();++li,++idx) {
+       nump[idx] = li->number_in_parcel ;
+     }
+     filename = string("output/ptnump_ptsca.") +
+       num2str(iteration) + "_" + casename ;
+     $[Once] {
+       cout << "writing file " << filename << endl ;
+       file_id = H5Fcreate(filename.c_str(),
+                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+     }
+     Loci::writeUnorderedVector(file_id, "ptnump", nump) ;
+     $[Once] {
+       H5Fclose(file_id) ;
+     }
+     
+     // output the id of the particle
+     idx = 0 ;
+     vector<int> pid(particles.size()) ;
+     vector<int> bin(particles.size()) ;
+     for(li=particles.begin();li!=particles.end();++li,++idx) {
+       pid[idx] = li->id ;
+       bin[idx] = li->bin ;
+     }
+     filename = string("output/ptinfo.") +
+       num2str(iteration) + "_" + casename ;
+     $[Once] {
+       cout << "writing file " << filename << endl ;
+       file_id = H5Fcreate(filename.c_str(),
+                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+     }
+     Loci::writeUnorderedVector(file_id, "id", pid) ;
+     Loci::writeUnorderedVector(file_id, "bin", bin) ;
+     $[Once] {
+       H5Fclose(file_id) ;
+     }
+  }
+
+  // this function generates a store with "cell" domain that
+  // contains particle numbers
+  void
+  get_cell_particle_num(const list<Particle>& particles,
+                        Loci::fact_db* factsP, store<int>& cpnum) {
+    const ParticleSpace::Communicator& comm =
+      ParticleSpace::instance().get_push_comm() ;
+     
+    store<int> cpnum_local ;
+    cpnum_local.allocate(comm.send_alloc) ;
+       
+    constraint geom_cells = factsP->get_variable("geom_cells") ;
+    entitySet cells = *geom_cells ;
+       
+    cpnum.allocate(cells) ;
+       
+    // set unit values
+    entitySet dom = cpnum.domain() ;
+    for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei)
+      cpnum[*ei] = 0 ;
+    dom = cpnum_local.domain() ;
+    for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei)
+      cpnum_local[*ei] = 0 ;
+
+    // perform local reduction first
+    list<Particle>::const_iterator li ;
+    for(li=particles.begin();li!=particles.end();++li)
+      ++cpnum_local[li->cell] ;
+       
+    // perform global reduction for cpnum_local
+    store<int> cpnum_global ;
+    // create a unit op
+    store_traverserP unit_op =
+      create_store_transformer<store<int>,
+                               set_default_value<int> >() ;
+    // create a join op
+    loci_joinerP join_op =
+      create_loci_joiner<store<int>, Loci::Summation<int> >() ;
+
+    cpnum_global.setRep(reduce_remote_stores(cpnum_local.Rep(),
+                                             unit_op, join_op, comm)) ;
+
+
+    // combining cpnum_global into cpnum
+    dom = cpnum_global.domain() ;
+    for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei)
+      cpnum[*ei] += cpnum_global[*ei] ;
+
+  }
+
+  // this function writes all particles' info into an hdf5 file
+  // used for retrieving restart info later.
+  // the restart file name for particles is:
+  // particle_restart.n_casename
+
+  // NOTE: this function relies on having a uniform particle
+  // structure, i.e., there cannot be variable size records
+  // in the particle's structure
+  void
+  save_particles_info(const list<Particle>& particles,
+                      const string directory_name,
+                      const string casename,
+                      Loci::fact_db* factsP) {
+    hid_t file_id = 0 ;
+
+    vector<Particle> vec(particles.size()) ;
+    list<Particle>::const_iterator li ;
+    int idx = 0 ;
+
+    for(li=particles.begin();li!=particles.end();++li,++idx)
+      vec[idx] = *li ;
+
+    // we want to replace the global cell number referenced by a particle
+    // by its file numbering.  doing so would allow the restart process
+    // to reset the containing cell for each particle directly without
+    // the need for a relocation.  however we will need to convert the
+    // file number back to a (possibly different) global number when we
+    // read in the restart file.  this is addressed in the restart
+    // function.
+
+    // to get the cell's file number, we need to communicate (pull) the
+    // stores that contain the file numbers from the cell space
+    // first we will need to build a local global to file number mapping.
+    if(Loci::MPI_processes > 1) {
+      constraint geom_cells = factsP->get_variable("geom_cells");
+      entitySet cells = *geom_cells;
+      Loci::fact_db::distribute_infoP df = factsP->get_distribute_info() ;
+      Map l2g ;  l2g = df->l2g.Rep();
+      dMap g2f;  g2f = df->g2f.Rep();
+
+      Loci::store<int> local_fnum;
+      local_fnum.allocate(cells);
+
+      for(entitySet::const_iterator ei=cells.begin();
+          ei!=cells.end();++ei)
+        local_fnum[*ei] = g2f[l2g[*ei]];
+
+      const ParticleSpace::Communicator& comm =
+        ParticleSpace::instance().get_pull_comm();
+
+      store<int> fnum(get_remote_stores(local_fnum.Rep(), comm));
+      
+      // now we are ready to convert to file number
+      for(size_t i=0;i!=vec.size();++i) {
+        Loci::Entity c = vec[i].get_cell();
+        vec[i].set_cell(fnum[c]);
+      }
+    }
+
+    // create the hdf5 file for particle restart file
+    string filename = directory_name + string("particleRestart_") + casename ;
+    $[Once] {
+      cout << "writing particle restart file " << filename << endl ;
+      file_id = H5Fcreate(filename.c_str(),
+                          H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
+    }
+    Loci::writeUnorderedVector(file_id, "particle restart", vec) ;
+    $[Once] {
+      H5Fclose(file_id) ;
+    }
+
+    // then write out the cell weight file that contains the
+    // total particle number per cell
+    store<int> cpnum ;
+    get_cell_particle_num(particles,factsP,cpnum) ;
+
+    filename = directory_name + "cellWeight_" + casename ;
+
+    $[Once] {
+      cout << "writing cell weight file " << filename << endl ;
+    }
+    file_id = Loci::hdf5CreateFile(filename.c_str(),
+                                   H5F_ACC_TRUNC,
+                                   H5P_DEFAULT, H5P_DEFAULT) ;
+    if(file_id < 0) {
+      $[Once] {
+        cerr << "...failed to create file: " << filename
+             << ", Aborting..." << endl ;
+      }
+      Loci::Abort() ;
+    }
+    // write cpnum
+    Loci::writeContainer(file_id,"cell weight",cpnum.Rep()) ;
+
+    Loci::hdf5CloseFile(file_id) ;
+  }
+
+
+  $type ncycle param<int> ; // CHEM specific?
+  $type plot_freq param<int> ;
+  $type plot_modulo param<int> ;
+  $type restart_modulo param<int> ;
+  $type modelName param<string> ;
+  $type do_restart param<bool> ;
+  $type restart_directory param<string> ;
+
+  $rule pointwise(OUTPUT{n} <- ncycle{n},
+                  plot_freq{n}, plot_modulo{n},
+                  restart_modulo{n}, do_restart{n},
+                  particleBinEoS{n},
+                  modelName{n}, restart_directory{n},
+                  particle_bag{n}),
+    option(disable_threading), prelude {
+
+    long long int psize = ParticleSpace::instance().get_particle_number() ;
+    long long int total_size = 0 ;
+    MPI_Allreduce(&psize, &total_size, 1, MPI_LONG_LONG_INT, MPI_SUM, MPI_COMM_WORLD) ;
+    int min_size = 0 ;
+    int max_size = 0 ;
+    MPI_Allreduce(&psize, &min_size, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) ;
+    MPI_Allreduce(&psize, &max_size, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) ;
+
+    $[Once] {
+#ifdef TIMING
+      cout << "Particle: " << *$ncycle{n}
+      << ", pnum=" << total_size << ", dist=["
+      << min_size << ", " << max_size << "], steps="
+      << ParticleSpace::instance().get_last_location_steps()
+      << ", t=" << timer_particle.glance() << endl ;
+#else
+      cout << "Particle: " << *$ncycle{n}
+      << ", pnum=" << total_size << ", dist=["
+      << min_size << ", " << max_size << "], steps="
+      << ParticleSpace::instance().get_last_location_steps()
+      << endl ;
+#endif
+    }
+
+    // dumping particle output files
+    if(*$ncycle{n} % *$plot_freq{n} == 0) {
+      int cycle = *$ncycle{n} ;
+      if(*($plot_modulo{n})!=0)
+        cycle = cycle % (*($plot_modulo{n})) ;
+      hdf5_particle_output(*($particle_bag{n}),
+                           *($particleBinEoS{n}),*($modelName{n}), cycle) ;
+    }
+    // save restart file
+    if(*$do_restart{n}) {
+      int cycle = *$ncycle{n} ;
+      if(*($restart_modulo{n})!=0)
+        cycle = cycle % (*($restart_modulo{n})) ;
+      save_particles_info(*($particle_bag{n}),
+                          *($restart_directory{n}),
+                          *($modelName{n}),
+                          Loci::exec_current_fact_db) ;
+    }
+
+  } ;
+
+  //////////////////////////////////////////////////////////////
+  // Here is the particle position calculation code
+  // it is currently using a 2nd order numerical integration
+  // it is a nested loop "{n,pi}" inside the {n} iteration
+  //////////////////////////////////////////////////////////////
+
+  $rule default(p_dtmax) {$p_dtmax=1;}
+
+  $rule pointwise(kfluid<-cellcenter) {
+    $kfluid = 0 ;
+  }
+
+
+  $rule pointwise(boundary_map->ufluid_f <- ufluid) {
+    int size = $boundary_map.size() ;
+    for(int i=0;i<size;++i)
+      $boundary_map[i]->$ufluid_f = $ufluid ;
+  }
+  $rule pointwise(ugrad<-gradv3d(ufluid),limiterv3d(ufluid)) {
+    const vec3d& lim = $limiterv3d(ufluid) ;
+    const tens3d& gra = $gradv3d(ufluid) ;
+    $ugrad = tens3d((lim.x)*gra.x,(lim.y)*gra.y,(lim.z)*gra.z) ;
+  }
+
+  $rule unit(AuxInfoDatabase), constraint(UNIVERSE), prelude {
+  } ;
+  
+  // A rule to make sure there are no complaints about nothing being applied
+  $rule apply(AuxInfoDatabase)[Loci::NullOp],constraint(geom_cells), prelude {
+  } ;
+  
+  $rule apply(AuxInfoDatabase)[Loci::NullOp],
+    constraint(geom_cells,LagrangianTurbophoresis), prelude {
+    $AuxInfoDatabase->insertItem("kgrad",3) ;
+  } ;
+
+  $rule apply(AuxInfoDatabase)[Loci::NullOp],
+    constraint(geom_cells,turbulentScattering), prelude {
+    $AuxInfoDatabase->insertItem("Rl",1) ;
+    $AuxInfoDatabase->insertItem("sigmaT",1) ;
+  } ;
+
+
+  $rule unit(fluidAuxInfo<-AuxInfoDatabase),constraint(geom_cells), prelude {
+    $fluidAuxInfo.setVecSize($AuxInfoDatabase->getAuxSize()) ;
+  } compute {
+    int sz = $AuxInfoDatabase.getAuxSize() ;
+    for(int i=0;i<sz;++i)
+      $fluidAuxInfo[i] = 0.0  ;
+  }
+
+  // Rule to make sure the Auxillary Info 
+  $rule apply(fluidAuxInfo)[Loci::Summation], constraint(geom_cells),
+      prelude {} ;
+
+  $rule singleton(kgradAuxIndex<-AuxInfoDatabase) {
+    $kgradAuxIndex = $AuxInfoDatabase.getItemLoc("kgrad") ;
+  }
+  
+  $rule apply(fluidAuxInfo<-kgrad,kgradAuxIndex)[Loci::Summation],
+    constraint(geom_cells,LagrangianTurbophoresis) {
+    int id = $kgradAuxIndex ;
+    $fluidAuxInfo[id+0] = $kgrad.x ;
+    $fluidAuxInfo[id+1] = $kgrad.y ;
+    $fluidAuxInfo[id+2] = $kgrad.z ;
+  }
+
+  $rule apply(fluidAuxInfo<-kfluid,omegafluid,p_dtmax,AuxMetaInfo)[Loci::Summation],constraint(geom_cells,turbulentScattering) {
+    real Cmu = 0.09 ;
+    float Tl = 2./(3.*Cmu*$omegafluid) ;
+    float dt = $p_dtmax ;
+    float Rl = exp(-dt/Tl) ;
+    float sigmaT = sqrt(2.*$kfluid/3.) ;
+    float sigmaT2 = sigmaT*sqrt(1.-Rl*Rl) ;
+    int Rlindex = $AuxMetaInfo.RlIndex ;
+    if(Rlindex >=0)
+      $fluidAuxInfo[Rlindex] = Rl ;
+    int TsigmaIndex = $AuxMetaInfo.TsigmaIndex ;
+    if(TsigmaIndex >= 0)
+      $fluidAuxInfo[TsigmaIndex] = sigmaT2 ;
+  }
+
+  
+  $type pfluidAuxIndex param<int> ;
+  $rule singleton(pfluidAuxIndex<-AuxInfoDatabase) {
+    $pfluidAuxIndex = $AuxInfoDatabase.getItemLoc("pfluid") ;
+  }
+  
+  $rule apply(fluidAuxInfo<-pfluid,pfluidAuxIndex)[Loci::Summation] {
+    int id = $pfluidAuxIndex ;
+    if(id >=0)
+      $fluidAuxInfo[id] = $pfluid ;
+  }
+  
+
+  $rule pointwise(boundary_map->kfluid_f <- kfluid) {
+    int size = $boundary_map.size() ;
+    for(int i=0;i<size;++i)
+      $boundary_map[i]->$kfluid_f = 0.0 ;
+  }
+
+  $type dist_noslip store<real> ;
+  $type min_cell2noslip Map ;
+  
+  $rule pointwise(noslip::kgrad<-grads(kfluid),limiters(kfluid),dist_noslip,min_cell2noslip->area) {
+    vec3d an = $min_cell2noslip->$area.n ;
+    real kmag = dot($limiters(kfluid)*$grads(kfluid),an) ;
+    const real dref = 0.001 ;
+    real coef = exp(-$dist_noslip/dref) ;
+    $kgrad = coef*min(kmag,0.0)*an ;
+  }
+
+  $rule pointwise(kgrad<-cellcenter) {
+    $kgrad = vec3d(0,0,0) ;
+  }
+
+  $type X store<double> ;
+  $type X_f store<double> ;
+  
+  $rule pointwise(maxVals(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
+    double mval = $X ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      mval = max(mval,$upper[i]->$cr->$X) ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      mval = max(mval,$lower[i]->$cl->$X) ;
+    int bsz = $boundary_map.size() ;
+    for(int i=0;i<bsz;++i)
+      mval = max(mval,$boundary_map[i]->$X_f) ;
+    $maxVals(X) = mval ;
+  }
+  
+  $rule pointwise(minVals(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
+    double mval = $X ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      mval = min(mval,$upper[i]->$cr->$X) ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      mval = min(mval,$lower[i]->$cl->$X) ;
+    int bsz = $boundary_map.size() ;
+    for(int i=0;i<bsz;++i)
+      mval = min(mval,$boundary_map[i]->$X_f) ;
+    $minVals(X) = mval ;
+  }
+  
+  $type X store<vect3d> ;
+  $type X_f store<vect3d> ;
+    
+  $rule pointwise(maxValv3d(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
+    vect3d mval = $X ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      mval.x = max(mval.x,$upper[i]->$cr->$X.x) ;
+      mval.y = max(mval.y,$upper[i]->$cr->$X.y) ;
+      mval.z = max(mval.z,$upper[i]->$cr->$X.z) ;
+    }
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      mval.x = max(mval.x,$lower[i]->$cl->$X.x) ;
+      mval.y = max(mval.y,$lower[i]->$cl->$X.y) ;
+      mval.z = max(mval.z,$lower[i]->$cl->$X.z) ;
+    }
+    int bsz = $boundary_map.size() ;
+    for(int i=0;i<bsz;++i) {
+      mval.x = max(mval.x,$boundary_map[i]->$X_f.x) ;
+      mval.y = max(mval.y,$boundary_map[i]->$X_f.y) ;
+      mval.z = max(mval.z,$boundary_map[i]->$X_f.z) ;
+    }
+    $maxValv3d(X) = mval ;
+  }
+  
+  $rule pointwise(minValv3d(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
+    vect3d mval = $X ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      mval.x = min(mval.x,$upper[i]->$cr->$X.x) ;
+      mval.y = min(mval.y,$upper[i]->$cr->$X.y) ;
+      mval.z = min(mval.z,$upper[i]->$cr->$X.z) ;
+    }
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      mval.x = min(mval.x,$lower[i]->$cl->$X.x) ;
+      mval.y = min(mval.y,$lower[i]->$cl->$X.y) ;
+      mval.z = min(mval.z,$lower[i]->$cl->$X.z) ;
+    }
+    int bsz = $boundary_map.size() ;
+    for(int i=0;i<bsz;++i) {
+      mval.x = min(mval.x,$boundary_map[i]->$X_f.x) ;
+      mval.y = min(mval.y,$boundary_map[i]->$X_f.y) ;
+      mval.z = min(mval.z,$boundary_map[i]->$X_f.z) ;
+    }
+    $minValv3d(X) = mval ;
+  }
+  
+  // Compute the fluid cell volume per particle.
+  class pt_count: public pointwise_rule {
+    const_blackbox<list<Particle> > particle_bag ;
+    const_store<real> vol ;
+    const_param<bool> request ;
+    
+    store<float> volpp ;
+  public:
+    pt_count() {
+      name_store("vol{n}",vol) ;
+      name_store("particle_bag{n}", particle_bag) ;
+      name_store("volpp{n}",volpp) ;
+      //      name_store("refresh_cell_space{n}", request) ;
+      
+      input("vol{n}") ;
+      input("particle_bag{n}") ;
+      //      input("refresh_cell_space{n}") ;
+      
+      output("volpp{n}") ;
+      disable_threading() ;
+    }
+
+    virtual void compute(const sequence &seq) {
+
+      // get the needed communicator from particle space
+      // since we are doing reduction, it should be a push comm
+      const ParticleSpace::Communicator& comm =
+        ParticleSpace::instance().get_push_comm() ;
+
+      // define temp stores for local reduction
+      store<real> local_nump ;
+      local_nump.allocate(comm.send_alloc) ;
+      // set unit value
+      entitySet dom = volpp.domain() ;
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei) {
+        volpp[*ei] = 0.0 ;
+      }
+      
+      dom = local_nump.domain() ;
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei) {
+        local_nump[*ei] = 0.0 ;
+      }
+
+      for(list<Particle>::const_iterator li=(*particle_bag).begin();
+          li!=(*particle_bag).end();++li) {
+        Entity cell = li->cell ;
+        // contribute source terms to its containing cell
+        local_nump[cell] += (li->number_in_parcel) ;
+      }
+ 
+      // perform global reduction for "local_nump"
+      vector<Loci::storeRepP> in(1), out(1) ;
+      in[0] = local_nump.Rep() ;
+      
+      vector<store_traverserP> unit_op(1) ;
+      unit_op[0] =
+        create_store_transformer<store<real>,
+                                 set_default_value<real> >() ;
+
+      vector<loci_joinerP> join_op(1) ;
+      join_op[0] =
+        create_loci_joiner<store<real>,Loci::Summation<real> >() ;
+      
+      reduce_remote_stores(in,unit_op,join_op,out,comm) ;
+
+      store<real> global_nump ;
+      
+      global_nump.setRep(out[0]) ;
+      
+      // compute cell volume per particle
+      dom = global_nump.domain() ;
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei) {
+        volpp[*ei] = vol[*ei]/max(1e-20,global_nump[*ei]) ;
+//        volpp[*ei] = 1e30 ;
+      }
+
+    }
+  } ;
+
+  register_rule<pt_count>  register_pt_count ;
+  
+  $type volpp store<float> ;
+  
+  $rule pointwise(fluidInfo<-cellcenter,rfluid,viscfluid,
+                  ufluid,ugrad,maxValv3d(ufluid),minValv3d(ufluid),
+                  volpp) {
+    $fluidInfo.cellcenter = vector3d<float>($cellcenter.x,
+                                            $cellcenter.y,
+                                            $cellcenter.z) ;
+    $fluidInfo.rfluid = $rfluid ;
+    $fluidInfo.ufluid = vector3d<float>($ufluid.x,
+                                        $ufluid.y,
+                                        $ufluid.z) ;
+    $fluidInfo.ugrad.x.x = $ugrad.x.x ;
+    $fluidInfo.ugrad.x.y = $ugrad.x.y ;
+    $fluidInfo.ugrad.x.z = $ugrad.x.z ;
+    $fluidInfo.ugrad.y.x = $ugrad.y.x ;
+    $fluidInfo.ugrad.y.y = $ugrad.y.y ;
+    $fluidInfo.ugrad.y.z = $ugrad.y.z ;
+    $fluidInfo.ugrad.z.x = $ugrad.z.x ;
+    $fluidInfo.ugrad.z.y = $ugrad.z.y ;
+    $fluidInfo.ugrad.z.z = $ugrad.z.z ;
+    $fluidInfo.umax.x = $maxValv3d(ufluid).x ;
+    $fluidInfo.umax.y = $maxValv3d(ufluid).y ;
+    $fluidInfo.umax.z = $maxValv3d(ufluid).z ;
+    $fluidInfo.umin.x = $minValv3d(ufluid).x ;
+    $fluidInfo.umin.y = $minValv3d(ufluid).y ;
+    $fluidInfo.umin.z = $minValv3d(ufluid).z ;
+    $fluidInfo.viscfluid = $viscfluid ;
+    $fluidInfo.fvolpp = $volpp ;
+  }
+  // here is a rule that builds all the necessary remote
+  // data for particle integration and two-way coupling code
+  // it generates a param<bool> refresh_cell_space,
+  // any rule that needs remote cell data (e.g., integration
+  // rule and two-way coupling rule) needs to include this
+  // variable as an input
+  class refresh_cell_space: public singleton_rule {
+    const_store<fluid_info> fluidInfo ;
+    const_storeVec<float> fluidAuxInfo ;
+    const_param<bool> particle_space_init ;
+  
+    param<bool> request ;
+  public:
+    refresh_cell_space() { 
+      name_store("fluidInfo{n}", fluidInfo) ;
+
+      name_store("fluidAuxInfo{n}", fluidAuxInfo) ;
+      name_store("particle_space_init", particle_space_init) ;
+
+      name_store("refresh_cell_space{n}", request) ;
+
+      input("fluidInfo{n}") ;
+      input("fluidAuxInfo{n}") ;
+      input("particle_space_init") ;
+      output("refresh_cell_space{n}") ;
+
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+
+      CellSpace::instance().
+        refresh_cell_space(fluidInfo.Rep(),
+                           fluidAuxInfo.Rep(),
+                           ParticleSpace::instance()) ;
+
+      *request = true ;
+    }
+  } ;
+  register_rule<refresh_cell_space>
+  register_refresh_cell_space ;
+
+  void particle_coupling_new(real dt,
+                             const int mi,
+                             const int ei,
+                             const NewParticle &p,
+                             const particleEoSList &pm,
+                             const vector3d<double> &grav,
+                             const fluid_info &fluidInfo,
+                             const float *fluidAuxInfo,
+                             const auxiliary_info &AuxMetaInfo,
+                             real *src) {
+    
+    float nparcel = p.number_in_parcel ;
+    float rdt = nparcel/dt ;
+    const real beta = 2./3. ;
+    const real alpha1 = -4./3. ;
+    const real alpha2 = 1./3. ;
+    const real dtbeta = dt*beta ;
+
+    // If the particle is pooled, then don't couple momentum to fluid.
+    if((p.info&POOL_PARTICLE) == 0) {
+      vect3d v0(p.vel[0].x,p.vel[0].y,p.vel[0].z) ;
+      vect3d v1(p.vel[1].x,p.vel[1].y,p.vel[1].z) ;
+      vect3d v2(p.vel[2].x,p.vel[2].y,p.vel[2].z) ;
+    
+      
+      vect3d v0nd = dtbeta*grav - alpha1*v1 - alpha2*v2 ;
+      
+      vector3d<double> mom_rate = p.mass*(v0-v0nd)*rdt ;
+
+      
+      src[mi+0] -= mom_rate.x ;
+      src[mi+1] -= mom_rate.y ;
+      src[mi+2] -= mom_rate.z ;
+      // Delta kinetic energy due to fluid drag (not added here, added
+      // when fluid update is computed
+      //    src[ei] -=  .5*(dot(p.vel[0],p.vel[0])-dot(p.vel[1],p.vel[1]))*p.mass*rdt ;
+      src[ei] -= dot(mom_rate,v0) ;
+    }
+  }
+  
+
+  // this pointwise rule will generate a store the source terms
+  // to add to the carrier phase.
+  // through particle -> cell reduction.
+  class get_coupling_src: public pointwise_rule {
+  private:
+    const_blackbox<list<Particle> > particle_bag ;
+    const_param<lagrangianP::TimeValue> dt ;
+    const_param<auxiliary_info> AuxMetaInfo ;
+    const_blackbox<lagrangianP::particleEoSList> particleBinEoS ;
+    const_store<fluid_info> fluidInfo ;
+    const_storeVec<float> fluidAuxInfo ;
+    const_param<bool> request ;
+    const_param<vector3d<double> > particleGrav ;
+    
+    const_store<real> vol ;
+    storeVec<real> src ;
+  public:
+    get_coupling_src() {
+      name_store("vol{n}",vol) ;
+      input("vol{n}") ;
+      name_store("p_dtmax{n}", dt) ;
+      name_store("particle_bag_integrated{n}", particle_bag) ;
+      name_store("coupling_src{n}", src) ;
+      name_store("AuxMetaInfo{n}",AuxMetaInfo) ;
+      name_store("particleBinEoS{n}",particleBinEoS) ;
+      name_store("refresh_cell_space{n}", request) ;
+      name_store("particleGrav{n}",particleGrav) ;
+      name_store("fluidInfo{n}",fluidInfo) ;
+      name_store("fluidAuxInfo{n}",fluidAuxInfo) ;
+      input("fluidInfo{n}") ;
+      input("fluidAuxInfo{n}") ;
+      input("particleGrav{n}") ;
+      input("p_dtmax{n}") ;
+      input("refresh_cell_space{n}") ;
+      input("particle_bag_integrated{n}") ;
+      input("AuxMetaInfo{n}") ;
+      input("particleBinEoS{n}") ;
+      
+      output("coupling_src{n}") ;
+      // the constraint here is used to make the resulting store
+      // have a correct domain so that it can be allocated
+      // automatically by the Loci scheduler
+      constraint("geom_cells{n}") ;
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      int vs = 5 ;
+      src.setVecSize(vs) ;
+                                                                                
+      // first we get the needed stores from the CellSpace cache
+      store<fluid_info> dyn_fluidInfo(CellSpace::instance().fluidInfo) ;
+      storeVec<float> dyn_fluidAuxInfo(CellSpace::instance().fluidAuxInfo) ;
+      
+      // since we are doing reduction, it should be a push comm
+      const ParticleSpace::Communicator& comm =
+        ParticleSpace::instance().get_push_comm() ;
+                                                                                
+      // define a temp store for local reduction
+      storeVec<real> local_src ;
+      local_src.setVecSize(vs) ;
+      local_src.allocate(comm.send_alloc) ;
+                                                                                
+      entitySet dom = src.domain() ;
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei)
+        src[*ei] = mk_Scalar(0.0) ;
+                                                                                
+      dom = local_src.domain() ;
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei)
+        local_src[*ei] = mk_Scalar(0.0) ;
+                                                                                
+      vect3d grav = *particleGrav ;
+      // perform local reduction first
+      const int mi = 1 ;
+      const int ei = mi+3 ;
+      for(list<Particle>::const_iterator li=(*particle_bag).begin();
+          li!=(*particle_bag).end();++li) {
+        Entity cell = li->cell ;
+
+        particle_coupling_new(*dt,mi,ei,*li,*particleBinEoS,grav,
+                              dyn_fluidInfo[cell],
+                              &(dyn_fluidAuxInfo[cell][0]),
+                              *AuxMetaInfo,
+                              local_src[cell]) ;
+      }
+                                                                                
+      // perform global reduction for "local_src"
+                                                                                
+      // create a unit_op first
+      store_traverserP unit_op =
+        create_store_transformer<storeVec<real>,
+                                 set_default_value<real> >() ;
+      // create a join_op then
+      loci_joinerP join_op =
+        create_loci_joiner<storeVec<real>,
+                           Loci::Summation<Vect<real> > >() ;
+                                                                                
+      storeVec<real> global_src ;
+      global_src.setRep(reduce_remote_stores(local_src.Rep(),
+                                             unit_op, join_op, comm)) ;
+                                                                                
+      // combining global_reduce to "src"
+      dom = global_src.domain() ;
+      int global_src_vecsize = global_src.vecSize() ;
+
+      for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei)
+        for(int i=0;i<global_src_vecsize;i++)
+          src[*ei][i] += global_src[*ei][i] ;
+                                                                                
+    } // end of compute(seq)
+  } ;
+
+  register_rule<get_coupling_src> register_get_coupling_src ;
+
+  $type turbulentParticleScattering param<std::string> ;
+
+  $rule optional(turbulentParticleScattering) {
+    $turbulentParticleScattering = "" ;
+  }
+
+  $type turbulentScattering param<int> ;
+  $rule singleton(turbulentScattering<-turbulentParticleScattering) {
+    $turbulentScattering = 1 ;
+    if($turbulentParticleScattering != "on") {
+      cerr << "warning, set turbulentParticleScattering to on to enable"  
+	   << endl
+	   << "to disable, comment out this turbulentParticleScattering input"
+	   << endl ;
+    }
+  }
+
+  class constraint_turbophoresis: public  constraint_rule {
+    const_param<std::string> turbophoresis_model ;
+    Constraint LagrangianTurbophoresis ;
+  public:
+    constraint_turbophoresis() {
+      name_store("turbophoresis_model",turbophoresis_model) ;
+      name_store("LagrangianTurbophoresis",LagrangianTurbophoresis) ;
+      input("turbophoresis_model") ;
+      output("LagrangianTurbophoresis") ;
+    } 
+
+    virtual void compute(const sequence& seq) {
+      LagrangianTurbophoresis = EMPTY ;
+      if(*turbophoresis_model == "true") {
+        LagrangianTurbophoresis = ~EMPTY ;
+      }
+    }
+  } ;
+
+  register_rule<constraint_turbophoresis> register_constraint_turbophoresis ;
+
+
+  $rule singleton(AuxMetaInfo<-AuxInfoDatabase) {
+    $AuxMetaInfo.turbophoresisIndex = $AuxInfoDatabase.getItemLoc("kgrad") ;
+    $AuxMetaInfo.pfluidIndex = $AuxInfoDatabase.getItemLoc("pfluid") ;
+    $AuxMetaInfo.RlIndex = $AuxInfoDatabase.getItemLoc("Rl") ;
+    $AuxMetaInfo.TsigmaIndex = $AuxInfoDatabase.getItemLoc("sigmaT") ;
+  }
+  
+  $rule unit(particleBoundaryFluxes<-ci->vol) {
+    for(int i=0;i<8;++i)
+      $particleBoundaryFluxes[i] = 0 ;
+  }
+  
+  
+  $rule apply(particleBoundaryFluxes<-boundaryTransfer,ci->vol)[Loci::Summation],option(disable_threading),prelude {
+    const vector<faceflux_info> &bti = (*$boundaryTransfer) ;
+    int sz = bti.size() ;
+    for(int i=0;i<sz;++i) {
+      int f = bti[i].face ;
+      $particleBoundaryFluxes[f][0] += bti[i].mdot ;
+      $particleBoundaryFluxes[f][1] += bti[i].momdot.x ;
+      $particleBoundaryFluxes[f][2] += bti[i].momdot.y ;
+      $particleBoundaryFluxes[f][3] += bti[i].momdot.z ;
+      $particleBoundaryFluxes[f][4] += bti[i].hdot ;
+      $particleBoundaryFluxes[f][5] += bti[i].numdot ;
+      $particleBoundaryFluxes[f][6] += bti[i].numbounce ;
+      $particleBoundaryFluxes[f][7] += bti[i].erosionRate ;
+    }
+  } ;
+    
+  
+  $rule apply(particleBoundaryFluxes<-injectedParticles_f,ci->vol)[Loci::Summation]  {
+    list<Particle>::const_iterator li ;
+    for(li=$injectedParticles_f.begin();li != $injectedParticles_f.end();++li) {
+      const Particle &p=*li ;
+      real mdot = -p.mass*p.number_in_parcel ;
+      $particleBoundaryFluxes[0] += mdot ;
+      $particleBoundaryFluxes[1] += mdot*p.vel[0].x ;
+      $particleBoundaryFluxes[2] += mdot*p.vel[0].y ;
+      $particleBoundaryFluxes[3] += mdot*p.vel[0].z ;
+      $particleBoundaryFluxes[5] += -p.number_in_parcel ;
+    }
+  }  
+
+
+} // end of namespace lagrangianP
+
+// ... the end ...

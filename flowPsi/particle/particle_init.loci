@@ -1,0 +1,504 @@
+// This file implements the necessary stuffs for properly
+// initiate the ParticleSpace object for use later in the code
+#include "particle_base.h"
+#include <limits>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+using std::vector ;
+$include "FVM.lh"
+
+////////////////////////////////////////////////////
+namespace lagrangianP {
+
+  // some default rules to set some default parameters
+
+  // the global threshold to start particle tracking with
+  // face history tracing. it means that after this number of
+  // steps in the walking algorithm, we start to record faces
+  // for those particles that are still walking
+  $type face_history_tracing_start param<int> ;
+  $rule default(face_history_tracing_start) {
+    $face_history_tracing_start = 9 ;
+  }
+  // default particle distribution interval
+  $type particle_redistribution_freq param<int> ;
+  $rule default(particle_redistribution_freq) {
+    $particle_redistribution_freq = 250 ;
+  }
+  // default maximum walking step warning threshold
+  $type max_walking_step_warning param<int> ;
+  $rule default(max_walking_step_warning) {
+    $max_walking_step_warning = 500 ;
+  }
+  // default particle distribution mode is using Hilbert curve
+  // but could be configured to use the ORB method
+  $type particle_distribution_method param<string>;
+  $rule default(particle_distribution_method) {
+    $particle_distribution_method = "hilbert";
+  }
+
+  // rules that compute the global minimum
+  // and maximum edge length in the mesh
+  $type min_edge_len param<double> ; // minimum edge length in the mesh
+  $type max_edge_len param<double> ; // maximum edge length in the mesh
+
+  // a rule that computes the global minimum edge length
+  // this is a unit/apply rule that performs a reduction
+  $rule unit(min_edge_len), constraint(UNIVERSE) {
+    $min_edge_len = std::numeric_limits<double>::max() ;
+  }
+  $rule apply(min_edge_len <- face2node->pos)[Loci::Minimum] {
+    // get the number of nodes in a face2node map for a particular face
+    int size = $face2node.size() ;
+    double local_min_edge_len = std::numeric_limits<double>::max() ;
+    double local_len = 0 ;
+    // looping over all edges to compute each edge length
+    for(int i=0;i<size-1;++i) {
+      local_len = norm($face2node[i]->$pos -
+                       $face2node[i+1]->$pos) ;
+      if(local_len < local_min_edge_len)
+        local_min_edge_len = local_len ;
+    }
+    // last edge
+    local_len = norm($face2node[0]->$pos -
+                     $face2node[size-1]->$pos) ;
+    if(local_len < local_min_edge_len)
+      local_min_edge_len = local_len ;
+    // merge the result
+    join($min_edge_len,local_min_edge_len) ;
+  }
+
+  // the same to compute the maximum edge length in the mesh
+  $rule unit(max_edge_len), constraint(UNIVERSE) {
+    $max_edge_len = 0 ;
+  }
+  $rule apply(max_edge_len <- face2node->pos)[Loci::Maximum] {
+    int size = $face2node.size() ;
+    double local_max_edge_len = 0 ;
+    double local_len = 0 ;
+    for(int i=0;i<size-1;++i) {
+      local_len = norm($face2node[i]->$pos -
+                       $face2node[i+1]->$pos) ;
+      if(local_len > local_max_edge_len)
+        local_max_edge_len = local_len ;
+    }
+    local_len = norm($face2node[0]->$pos -
+                     $face2node[size-1]->$pos) ;
+    if(local_len > local_max_edge_len)
+      local_max_edge_len = local_len ;
+    join($max_edge_len,local_max_edge_len) ;
+  }
+
+  // these are rules that compute the bounding box of the entire
+  // mesh, i.e., the minimum and maximum x, y, and z coordinates
+  // of all the points that define the mesh
+  $type mesh_min_x param<double> ;
+  $type mesh_max_x param<double> ;
+  $type mesh_min_y param<double> ;
+  $type mesh_max_y param<double> ;
+  $type mesh_min_z param<double> ;
+  $type mesh_max_z param<double> ;
+  $rule unit(mesh_min_x), constraint(UNIVERSE) {
+    $mesh_min_x = std::numeric_limits<double>::max() ;
+  }
+  $rule apply(mesh_min_x <- pos)[Loci::Minimum] {
+    double local_x = $pos.x ;
+    join($mesh_min_x, local_x) ;
+  }
+  $rule unit(mesh_max_x), constraint(UNIVERSE) {
+    $mesh_max_x = std::numeric_limits<double>::min() ;
+  }
+  $rule apply(mesh_max_x <- pos)[Loci::Maximum] {
+    double local_x = $pos.x ;
+    join($mesh_max_x, local_x) ;
+  }
+  $rule unit(mesh_min_y), constraint(UNIVERSE) {
+    $mesh_min_y = std::numeric_limits<double>::max() ;
+  }
+  $rule apply(mesh_min_y <- pos)[Loci::Minimum] {
+    double local_y = $pos.y ;
+    join($mesh_min_y, local_y) ;
+  }
+  $rule unit(mesh_max_y), constraint(UNIVERSE) {
+    $mesh_max_y = std::numeric_limits<double>::min() ;
+  }
+  $rule apply(mesh_max_y <- pos)[Loci::Maximum] {
+    double local_y = $pos.y ;
+    join($mesh_max_y, local_y) ;
+  }
+  $rule unit(mesh_min_z), constraint(UNIVERSE) {
+    $mesh_min_z = std::numeric_limits<double>::max() ;
+  }
+  $rule apply(mesh_min_z <- pos)[Loci::Minimum] {
+    double local_z = $pos.z ;
+    join($mesh_min_z, local_z) ;
+  }
+  $rule unit(mesh_max_z), constraint(UNIVERSE) {
+    $mesh_max_z = std::numeric_limits<double>::min() ;
+  }
+  $rule apply(mesh_max_z <- pos)[Loci::Maximum] {
+    double local_z = $pos.z ;
+    join($mesh_max_z, local_z) ;
+  }
+
+  // define a global threshold used in containing cell location
+  // computation to avoid possible errors caused by floating point
+  // round-off errors. it is now defined to be the 1/100 of the
+  // global minimum edge length in the mesh
+  $type dot_threshold param<double> ;
+  $rule singleton(dot_threshold <- min_edge_len) {
+    $dot_threshold = $min_edge_len / 100 ;
+    //$dot_threshold = 0 ;
+  }
+
+  // we'll define a rule that is used to generate
+  // the local geometry data for all the mesh face topology
+  // this one also generates a param<bool> to indicate
+  // that the local face topology is ready
+  class generate_cell_topo: public pointwise_rule {
+  private:
+    const_store<Loci::Area> area ;
+    const_store<vec3d> facecenter ;
+    const_store<vec3d> cellcenter ;
+    const_Map cl, cr ;
+    const_multiMap upper, lower ;
+    const_multiMap boundary_map ;
+    const_store<int> particle_wall_bc ;
+    const_store<byte_t> iblank; // iblank value needed to build 
+                                // the mesh topology data
+#ifdef CHECK_PARTICLE_WALK
+    const_multiMap face2node ;
+    const_store<vec3d> pos ;
+    store<double> cell_sphere ;
+    store<Loci::Array<double,6> > cell_box ;
+#endif
+
+    store<vector<MeshInteriorFaceTopo> > cell_int_face_topo ;
+    store<vector<MeshBoundaryFaceTopo> > cell_bnd_face_topo ;
+  public:
+    generate_cell_topo() {
+      name_store("area", area) ;
+      name_store("facecenter", facecenter) ;
+      name_store("cellcenter", cellcenter) ;
+      name_store("cl", cl) ;
+      name_store("cr", cr) ;
+      name_store("upper", upper) ;
+      name_store("lower", lower) ;
+      name_store("boundary_map", boundary_map) ;
+      name_store("particle_wall_bc", particle_wall_bc) ;
+      name_store("iblank", iblank);
+#ifdef CHECK_PARTICLE_WALK
+      name_store("face2node", face2node) ;
+      name_store("pos", pos) ;
+      name_store("cell_sphere", cell_sphere) ;
+      name_store("cell_box", cell_box) ;
+#endif
+
+      name_store("cell_int_face_topo", cell_int_face_topo) ;
+      name_store("cell_bnd_face_topo", cell_bnd_face_topo) ;
+
+      input("upper->area") ;
+      input("lower->area") ;
+      input("boundary_map->area") ;
+      input("upper->facecenter") ;
+      input("lower->facecenter") ;
+      input("boundary_map->facecenter") ;
+      input("upper->cr") ;
+      input("lower->cl") ;
+      input("cellcenter") ;
+      input("boundary_map->particle_wall_bc") ;
+      input("upper->cr->iblank");
+      input("lower->cl->iblank");
+#ifdef CHECK_PARTICLE_WALK
+      input("upper->face2node->pos") ;
+      input("lower->face2node->pos") ;
+      input("boundary_map->face2node->pos") ;
+
+      output("cell_sphere") ;
+      output("cell_box") ;
+#endif
+
+      output("cell_int_face_topo,cell_bnd_face_topo") ;
+
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      Loci::fact_db* factsP = Loci::exec_current_fact_db ;
+      if(factsP->is_distributed_start()) {
+        Loci::fact_db::distribute_infoP df = factsP->get_distribute_info() ;
+        for(sequence::const_iterator si=seq.begin();
+            si!=seq.end();++si) {
+          int local_cell = *si ;
+          vector<MeshInteriorFaceTopo>& vmift =
+            cell_int_face_topo[local_cell] ;
+          vector<MeshBoundaryFaceTopo>& vmbft =
+            cell_bnd_face_topo[local_cell] ;
+          // loop over lower
+          int lower_size = lower[local_cell].size() ;
+          for(int i=0;i<lower_size;++i) {
+            int local_face = lower[local_cell][i] ;
+            // see if we need to flip the face_normal
+            vec3d face_normal = area[local_face].n ;
+            // face normal has to point toward the cell center
+            // for all lower faces, this is already the case.
+            vmift.push_back
+              (MeshInteriorFaceTopo(df->l2g[local_face],
+                                    facecenter[local_face],
+                                    face_normal,
+                                    df->l2g[cl[local_face]],
+                                    iblank[cl[local_face]])) ;
+          }
+          // loop over upper
+          int upper_size = upper[local_cell].size() ;
+          for(int i=0;i<upper_size;++i) {
+            int local_face = upper[local_cell][i] ;
+
+            vec3d face_normal = area[local_face].n ;
+            // upper face's normal points away from the cell center
+            // so we need to flip it.
+            face_normal = -1.0 * face_normal ;
+
+            vmift.push_back
+              (MeshInteriorFaceTopo(df->l2g[local_face],
+                                    facecenter[local_face],
+                                    face_normal,
+                                    df->l2g[cr[local_face]],
+                                    iblank[cr[local_face]])) ;
+          }
+          // loop over boundary_map
+          int bnd_map_size = boundary_map[local_cell].size() ;
+          for(int i=0;i<bnd_map_size;++i) {
+            int bnd_face = boundary_map[local_cell][i] ;
+            int wall_type = particle_wall_bc[bnd_face] ;
+
+            vec3d face_normal = area[bnd_face].n ;
+            // boundary face's normal also points away from the cell
+            // center and we need to flip it
+            face_normal = -1.0 * face_normal ;
+
+            vmbft.push_back(MeshBoundaryFaceTopo(df->l2g[bnd_face],
+                                                 facecenter[bnd_face],
+                                                 face_normal,
+                                                 wall_type)) ;
+          }
+        } // end for(seq)        
+      } else {
+        // sequential code
+        for(sequence::const_iterator si=seq.begin();
+            si!=seq.end();++si) {
+          int local_cell = *si ;
+          vector<MeshInteriorFaceTopo>& vmift =
+            cell_int_face_topo[local_cell] ;
+          vector<MeshBoundaryFaceTopo>& vmbft =
+            cell_bnd_face_topo[local_cell] ;
+          // loop over lower
+          int lower_size = lower[local_cell].size() ;
+          for(int i=0;i<lower_size;++i) {
+            int local_face = lower[local_cell][i] ;
+            vec3d face_normal = area[local_face].n ;
+            vmift.push_back(MeshInteriorFaceTopo(local_face,
+                                                 facecenter[local_face],
+                                                 face_normal,
+                                                 cl[local_face],
+                                                 iblank[cl[local_face]])) ;
+          }
+          // loop over upper
+          int upper_size = upper[local_cell].size() ;
+          for(int i=0;i<upper_size;++i) {
+            int local_face = upper[local_cell][i] ;
+            vec3d face_normal = area[local_face].n ;
+            face_normal = -1.0 * face_normal ;
+            vmift.push_back(MeshInteriorFaceTopo(local_face,
+                                                 facecenter[local_face],
+                                                 face_normal,
+                                                 cr[local_face],
+                                                 iblank[cr[local_face]])) ;
+          }
+          // loop over boundary_map
+          int bnd_map_size = boundary_map[local_cell].size() ;
+          for(int i=0;i<bnd_map_size;++i) {
+            int bnd_face = boundary_map[local_cell][i] ;
+            int wall_type = particle_wall_bc[bnd_face] ;
+            vec3d face_normal = area[bnd_face].n ;
+            face_normal = -1.0 * face_normal ;
+            vmbft.push_back(MeshBoundaryFaceTopo(bnd_face,
+                                                 facecenter[bnd_face],
+                                                 face_normal,
+                                                 wall_type)) ;
+          }
+        } // end for(seq)
+      }   // end if/else
+
+#ifdef CHECK_PARTICLE_WALK
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        Entity cell = *si ;
+        // collect defining nodes for each cell
+        vector<Entity> cell2node ;
+        // lower faces first
+        int mm_size = lower[cell].size() ;
+        for(int i=0;i<mm_size;++i) {
+          Entity f = lower[cell][i] ;
+          int s = face2node[f].size() ;
+          for(int k=0;k<s;++k)
+            cell2node.push_back(face2node[f][k]) ;
+        }
+        // upper faces
+        mm_size = upper[cell].size() ;
+        for(int i=0;i<mm_size;++i) {
+          Entity f = upper[cell][i] ;
+          int s = face2node[f].size() ;
+          for(int k=0;k<s;++k)
+            cell2node.push_back(face2node[f][k]) ;
+        }
+        // boundary faces
+        mm_size = boundary_map[cell].size() ;
+        for(int i=0;i<mm_size;++i) {
+          Entity f = boundary_map[cell][i] ;
+          int s = face2node[f].size() ;
+          for(int k=0;k<s;++k)
+            cell2node.push_back(face2node[f][k]) ;
+        }
+        // remove duplicate nodes
+        std::sort(cell2node.begin(),cell2node.end()) ;
+        vector<Entity>::iterator new_end =
+          std::unique(cell2node.begin(),cell2node.end()) ;
+        // compute the radius of the sphere and the bounding box
+        const vec3d& cc = cellcenter[cell] ;
+        double r = std::numeric_limits<double>::min() ;
+        double x_min = std::numeric_limits<double>::max() ;
+        double x_max = std::numeric_limits<double>::min() ;
+        double y_min = std::numeric_limits<double>::max() ;
+        double y_max = std::numeric_limits<double>::min() ;
+        double z_min = std::numeric_limits<double>::max() ;
+        double z_max = std::numeric_limits<double>::min() ;
+        
+        for(vector<Entity>::iterator vi=cell2node.begin();
+            vi!=new_end;++vi) {
+          double local_r = norm(pos[*vi] - cc) ;
+          if(local_r > r)
+            r = local_r ;
+          double x = pos[*vi].x ;
+          double y = pos[*vi].y ;
+          double z = pos[*vi].z ;
+          if(x < x_min)
+            x_min = x ;
+          if(x > x_max)
+            x_max = x ;
+          if(y < y_min)
+            y_min = y ;
+          if(y > y_max)
+            y_max = y ;
+          if(z < z_min)
+            z_min = z ;
+          if(z > z_max)
+            z_max = z ;
+        }
+        cell_sphere[cell] = r ;
+        cell_box[cell][0] = x_min ;
+        cell_box[cell][1] = x_max ;
+        cell_box[cell][2] = y_min ;
+        cell_box[cell][3] = y_max ;
+        cell_box[cell][4] = z_min ;
+        cell_box[cell][5] = z_max ;
+      } // end for(seq)
+#endif
+
+    } // end compute
+  } ;
+  register_rule<generate_cell_topo> register_generate_cell_topo ;
+
+  $type cell_int_face_topo store<vector<MeshInteriorFaceTopo> > ;
+  $type cell_bnd_face_topo store<vector<MeshBoundaryFaceTopo> > ;
+  // NOTE: the current Loci preprocessor seems to be unable
+  // to process rule definitions that have #ifdef inside...
+  // this needs to be supported in the future.
+#ifdef CHECK_PARTICLE_WALK
+  $type cell_sphere store<double> ;
+  $type cell_box store<Loci::Array<double,6> > ;
+#endif
+
+  // a rule that initialize the particle space
+  // NOTE: this rule defines a fact "particle_space_init"
+  // that must be used as input to the initialize rule
+  // in the particle code
+  class init_particle_space: public singleton_rule {
+  private:
+    const_store<vector<MeshInteriorFaceTopo> > cell_int_face_topo ;
+    const_store<vector<MeshBoundaryFaceTopo> > cell_bnd_face_topo ;
+#ifdef CHECK_PARTICLE_WALK
+    const_store<double> cell_sphere ;
+    const_store<Loci::Array<double,6> > cell_box ;
+#endif
+    const_param<int> face_history_tracing_start ;
+    const_param<int> particle_redistribution_freq ;
+    const_param<int> max_walking_step_warning ;
+    const_param<string> particle_distribution_method;
+    const_param<double> dot_threshold ;
+
+    param<bool> particle_space_init ;
+  public:
+    init_particle_space() {
+      name_store("cell_int_face_topo", cell_int_face_topo) ;
+      name_store("cell_bnd_face_topo", cell_bnd_face_topo) ;
+#ifdef CHECK_PARTICLE_WALK
+      name_store("cell_sphere", cell_sphere) ;
+      name_store("cell_box", cell_box) ;
+#endif
+      name_store("face_history_tracing_start",
+                face_history_tracing_start) ;
+      name_store("particle_redistribution_freq",
+                particle_redistribution_freq) ;
+      name_store("max_walking_step_warning",
+                 max_walking_step_warning) ;
+      name_store("particle_distribution_method",
+                 particle_distribution_method);
+      name_store("dot_threshold", dot_threshold) ;
+      name_store("particle_space_init", particle_space_init) ;
+
+      input("cell_int_face_topo, cell_bnd_face_topo") ;
+#ifdef CHECK_PARTICLE_WALK
+      input("cell_sphere, cell_box") ;
+#endif
+      input("face_history_tracing_start") ;
+      input("particle_redistribution_freq") ;
+      input("max_walking_step_warning") ;
+      input("particle_distribution_method");
+      input("dot_threshold") ;
+      output("particle_space_init") ;
+
+      disable_threading() ;
+    }
+    void
+    compute(const sequence& seq) {
+      // set up the particle space parameters
+      ParticleSpace::instance().
+        set_face_history_tracing_start(*face_history_tracing_start) ;
+      ParticleSpace::instance().
+        set_particle_dist_freq(*particle_redistribution_freq) ;
+      ParticleSpace::instance().
+        set_max_walking_step_warning(*max_walking_step_warning) ;
+      ParticleSpace::instance().
+        set_particle_distribution_method(*particle_distribution_method);
+      ParticleSpace::instance().
+        set_dot_threshold(*dot_threshold) ;
+      // init the geom local cache
+      // IMPORTANT: must call this one
+      ParticleSpace::instance().
+        geom_cache_local(cell_int_face_topo,
+                         cell_bnd_face_topo
+#ifdef CHECK_PARTICLE_WALK
+                         ,cell_sphere,cell_box
+#endif
+                         ) ;
+
+      // indicate we're done
+      *particle_space_init = true ;
+    }
+  } ;
+  register_rule<init_particle_space> register_init_particle_space ;
+  
+} // end of namespace lagrangianP
+
+// ... the end ...

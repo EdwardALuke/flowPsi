@@ -1,0 +1,199 @@
+#include <Loci.h>
+
+#include "particle.h"
+#include "particle_model.h"
+#include "particle_config.h"
+
+#include <list>
+using std::list ;
+#include <vector>
+using std::vector ;
+
+#include <iostream>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+using std::ios ;
+
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list ;
+#include <map>
+using std::map ;
+#include <string>
+using std::string ;
+#include <fstream>
+using std::ifstream ;
+using std::ofstream ;
+#include <utility>
+using std::pair ;
+
+namespace lagrangianP {
+
+  $type particle_load_file param<string> ;
+  $rule default(particle_load_file) {
+    $particle_load_file = "" ;
+  }
+
+  $type constraint_load_particle_file Constraint ;
+  $rule constraint(constraint_load_particle_file<-particle_load_file) {
+    if($particle_load_file!="")
+      $constraint_load_particle_file = ~EMPTY ;
+    else
+      $constraint_load_particle_file = EMPTY ;
+  }
+
+//The function read in the user provided initial particle file
+  void read_particle_load_file(std::string filename,
+                               store<vect3d> &ploc,
+                               store<real> &pdia,
+                               store<vect3d> &pu,
+                               store<real> &pt,
+                               store<real> &mixture,
+                               store<real> &nparcel,
+                               store<int> &bin) {
+    ifstream pf(filename.c_str(),ios::in) ;
+    if(pf.fail()) {
+      cerr << "open faild on particle load file '" << filename << "'" << endl ;
+      Loci::Abort() ;
+    }
+    bool advanced_reader = false ;
+    Loci::parse::kill_white_space(pf) ;
+    if(Loci::parse::is_name(pf)) {
+      string token = Loci::parse::get_name(pf) ;
+      if(token != "advanced") {
+        cerr << "unrecognized file token " << token <<  " in file "
+             << filename << endl ;
+        Loci::Abort() ;
+      }
+      advanced_reader = true ;
+    }
+    int npnts = 0 ;
+    pf >> npnts ;
+    Loci::parse::kill_white_space(pf) ;
+
+    entitySet dom = interval(0,npnts-1) ;
+    ploc.allocate(dom) ;
+    pdia.allocate(dom) ;
+    pu.allocate(dom) ;
+    pt.allocate(dom) ;
+    mixture.allocate(dom) ;
+    nparcel.allocate(dom) ;
+    bin.allocate(dom) ;
+    if(!advanced_reader) {
+      for(int i=0;i<npnts;++i) {
+        pf >> ploc[i] ; // read in particle postions
+        pf >> pdia[i] ; // read in particle diameters 
+        pf >> pu[i] ;  // read in particle velocity
+        pf >> pt[i] ;  // read in particle temperature
+        mixture[i] = 1 ;
+        nparcel[i] = 1 ;
+        bin[i] = 0 ;
+      }
+    } else {
+      for(int i=0;i<npnts;++i) {
+        pf >> ploc[i] ; // read in particle postions
+        pf >> pdia[i] ; // read in particle diameters 
+        pf >> pu[i] ;  // read in particle velocity
+        pf >> pt[i] ;  // read in particle temperature
+        pf >> mixture[i] ; // read in particle mixture fraction
+        pf >> nparcel[i] ; // read in number of particles for this parcel
+        pf >> bin[i] ; // read in material number
+      }
+    }
+  }
+
+//The rule collects the particle list provided through the 
+// particle_load_file. 
+  class collect_load_particles: public blackbox_rule {
+    const_param<std::string> particle_load_file ;
+    const_blackbox<lagrangianP::particleEoSList> particleBinEoS ;
+    const_store<vec3d> cellcenter ;
+    blackbox<list<Particle> > particles ;
+  public:
+    collect_load_particles() {
+      name_store("particle_load_file",particle_load_file) ;
+      name_store("loaded_particles",particles) ;
+      name_store("particleBinEoS",particleBinEoS) ;
+      name_store("cellcenter",cellcenter) ;
+      input("particle_load_file") ;
+      input("particleBinEoS") ;
+      input("cellcenter") ;
+      output("loaded_particles") ;
+
+      disable_threading() ;
+    }
+
+    void compute(const sequence& seq) {
+      *particles = list<Particle>() ;
+      store<vec3d> ploc, pu ;
+      store<real> pdia, pt,nparcel,mf ;
+      store<int> bin ;
+
+      const lagrangianP::particleEoSList& pm = *particleBinEoS ;
+      // Processor zero reads in the file
+      $[Once] {
+	if( *particle_load_file!="")  {
+	  read_particle_load_file(*particle_load_file,
+				  ploc,pdia,pu,pt,mf,nparcel,bin) ;
+	}
+      }
+
+      int npnts = 0 ;
+      if(ploc.domain() != EMPTY)
+        npnts = ploc.domain().Max()+1 ;
+#ifdef FIND_LOC
+      // Now we need to get the cell id using nearest neighbor search
+      vector<Loci::kdTree::coord3d> target_pnts ;
+      vector<int> target_ids ;
+      
+      entitySet tdom = cellcenter.domain() ;
+      Loci::fact_db * factsP = Loci::exec_current_fact_db ;
+      Loci::fact_db::distribute_infoP df = 0 ;
+      if(Loci::MPI_processes > 1)
+        Loci::fact_db::distribute_infoP df = factsP->get_distribute_info() ;
+      if(df != 0)
+        tdom &= df->my_entities ;
+      FORALL(tdom,cc) {
+        Loci::kdTree::coord3d xpnt ;
+        xpnt[0] = cellcenter[cc].x ;
+        xpnt[1] = cellcenter[cc].y ;
+        xpnt[2] = cellcenter[cc].z ;
+        
+        target_pnts.push_back(xpnt) ;
+        int id = cc ;
+        if(df != 0)
+          id = df->l2g[cc] ;
+        target_ids.push_back(id) ;
+      } ENDFORALL ;
+      
+      vector<Loci::kdTree::coord3d> search_pnts ;
+      
+      for(int i=0;i<npnts;++i) {
+        Loci::kdTree::coord3d xpnt ;
+        xpnt[0] = ploc[i].x ;
+        xpnt[1] = ploc[i].y ;
+        xpnt[2] = ploc[i].z ;
+        search_pnts.push_back(xpnt) ;
+      }
+
+      vector<int> cell_id(search_pnts.size(),-1) ;
+      Loci::parallelNearestNeighbors(target_pnts,target_ids,
+                                     search_pnts,cell_id,
+                                     MPI_COMM_WORLD) ;
+#else
+      vector<int> cell_id(npnts,0) ;
+#endif
+      for(int i=0;i<npnts;++i) {
+        int b = bin[i] ;
+        Particle p(pdia[i],ploc[i],pu[i],nparcel[i],b,pm) ;
+        p.cell = cell_id[i] ;
+        p.id = i+1 ;
+        (*particles).push_back(p) ; 
+      }
+    }
+  } ;
+
+  register_rule<collect_load_particles> register_collect_load_particles ;
+}

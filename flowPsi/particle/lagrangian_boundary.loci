@@ -1,0 +1,837 @@
+#include <Loci.h>
+#include "interpolate.h"
+#include "particle.h"
+#include "particle_model.h"
+#include "particle_config.h"
+$include "FVM.lh"
+
+#include <list>
+using std::list ;
+#include <vector>
+using std::vector ;
+
+$include "particle.lh"
+
+namespace lagrangianP {
+  using std::cerr ;
+  using std::cout ;
+  using std::endl ;
+  using std::ifstream ;
+  using std::vector ;
+  using std::ios ;
+  extern void get_vect3dOption(const options_list &ol,std::string vname,
+                        std::string units, vect3d &vec, real scale) ;
+
+  $type BC_options store<Loci::options_list> ;
+
+  
+  $type particleSizes_BC store<vector<real> > ;
+  $type particleSpeed_BC store<vector<real> > ;
+  $type particleVelocityRatio_BC store<vector<real> > ;
+  $type particleDistribution_BC store<vector<real> >  ;
+  $type particleBinSigma_BC store<vector<real> > ;
+  $type particleType_BC store<vector<int> > ;
+  $type particleMassLoading_BC store<real> ;
+  $type particleMassFlux_BC store<real> ;
+  
+  void getList(const options_list &ol, std::string vname,
+               std::string units, vector<double> &valuelist) {
+    Loci::option_value_type ovt= ol.getOptionValueType(vname) ;
+    if(ovt == Loci::REAL) {
+      double v ;
+      ol.getOption(vname,v) ;
+      valuelist.push_back(v) ;
+    } else if(ol.getOptionValueType(vname) == Loci::UNIT_VALUE) {
+      Loci::UNIT_type vu ;
+      ol.getOption(vname,vu) ;
+      if(!vu.is_compatible(units)) {
+        std::cerr << "wrong type of units for " << vname
+                  << ": " << vu << std::endl ;
+        Loci::Abort() ;
+      } else {
+        double v ;
+        v = vu.get_value_in(units) ;
+        valuelist.push_back(v) ;
+      }
+    } else  if(ol.getOptionValueType(vname) == Loci::LIST) {
+      Loci::options_list::arg_list list ;
+      ol.getOption(vname,list) ;
+      int size = list.size() ;
+      for(int i=0;i<size;++i) {
+        if(list[i].type_of() != Loci::REAL &&
+           list[i].type_of() != Loci::UNIT_VALUE) {
+          cerr << "improper list for " << vname << endl ;
+          Loci::Abort() ;
+        }
+        double val = 0 ;
+        if(list[i].type_of() == Loci::UNIT_VALUE) {
+          Loci::UNIT_type vu ;
+          list[i].get_value(vu) ;
+          if(!vu.is_compatible(units)) {
+            cerr << "units not compatible with " << units << " for "
+                 << vname  << endl ;
+            Loci::Abort() ;
+          }
+          val = vu.get_value_in(units) ;
+        } else
+          list[i].get_value(val) ;
+        valuelist.push_back(val) ;
+      }
+    }
+  }
+
+
+  $rule pointwise(particleType_BC<-BC_options,particleBinEoS), 
+    constraint(particleType_BCoption) {
+    int bins = $particleBinEoS.size() ;
+    Loci::option_value_type ovt= $BC_options.getOptionValueType("particleType") ;
+    if(ovt == Loci::NAME || ovt == Loci::STRING) {
+      string name ;
+      $BC_options.getOption("particleType",name) ;
+      int id = -1 ;
+      for(int i=0;i<bins;++i)
+	if($particleBinEoS[i].name == name)
+	      id = i ;
+      if(id < 0) {
+	cerr << "unable to find particle type " << name << " in particle model" << endl ;
+	Loci::Abort() ;
+      }
+      $particleType_BC.push_back(id) ;
+    } else if(ovt == Loci::LIST) {
+      Loci::options_list::arg_list value_list ;
+      $BC_options.getOption("particleType",value_list) ;
+      int sz = value_list.size() ;
+      for(int i=0;i<sz;++i) {
+        if(value_list[i].type_of() == Loci::NAME ||
+           value_list[i].type_of() == Loci::STRING) {
+          string name ;
+          value_list[i].get_value(name) ;
+          int id = -1 ;
+          for(int i=0;i<bins;++i)
+            if($particleBinEoS[i].name == name)
+	      id = i ;
+          if(id < 0) {
+            cerr << "unable to find particle type " << name << " in particle model" << endl ;
+            Loci::Abort() ;
+          }
+          $particleType_BC.push_back(id) ;
+        } else {
+          cerr << "particleType must be assigned bin names" << endl ;
+          Loci::Abort() ;
+        }
+      }
+    } else {
+      cerr << "particleType argument should list particle bin names" << endl ;
+      Loci::Abort() ;
+    }
+  }
+
+  $rule pointwise(particleSizes_BC<-BC_options),constraint(particleSizes_BCoption) {
+    $particleSizes_BC.clear() ;
+    if($BC_options.optionExists("particleSizes")) {
+      getList($BC_options,"particleSizes","m",$particleSizes_BC) ;
+    }      
+  }
+
+  $rule pointwise(particleSpeed_BC<-BC_options),constraint(particleSpeed_BCoption) {
+    $particleSpeed_BC.clear() ;
+    if($BC_options.optionExists("particleSpeed")) {
+      getList($BC_options,"particleSpeed","m/s",$particleSpeed_BC) ;
+    }      
+  }
+
+  $rule pointwise(particleVelocityRatio_BC<-BC_options),constraint(particleVelocityRatio_BCoption) {
+    $particleVelocityRatio_BC.clear() ;
+    if($BC_options.optionExists("particleVelocityRatio")) {
+      getList($BC_options,"particleVelocityRatio","",$particleVelocityRatio_BC) ;
+    }
+  }
+  
+  $rule pointwise(particleDistribution_BC<-BC_options) {
+    $particleDistribution_BC.clear() ;
+    if($BC_options.optionExists("particleDistribution")) {
+      getList($BC_options,"particleDistribution","",$particleDistribution_BC) ;
+    }
+    if($particleDistribution_BC.size()==0)
+      $particleDistribution_BC.push_back(1.0) ;
+  }
+  
+  $rule pointwise(particleBinSigma_BC<-BC_options) {
+    $particleBinSigma_BC.clear() ;
+    if($BC_options.optionExists("particleBinSigma")) {
+      getList($BC_options,"particleBinSigma","",$particleBinSigma_BC) ;
+    }
+  }
+  
+  $rule pointwise(particleMassLoading_BC<-BC_options),constraint(particleMassLoading_BCoption) {
+    $particleMassLoading_BC = 0 ;
+    $BC_options.getOption("particleMassLoading",$particleMassLoading_BC) ;
+  } 
+  
+  $type particleMaxBins param<int> ;
+
+  $rule unit(particleMaxBins),constraint(UNIVERSE) {
+    $particleMaxBins = 1 ;
+  }
+  
+  $rule apply(particleMaxBins<-particleSizes_BC)[Loci::Maximum] {
+    int sz = $particleSizes_BC.size() ;
+    join($particleMaxBins,sz) ;
+  }
+  $rule apply(particleMaxBins<-particleDistribution_BC)[Loci::Maximum] {
+    int sz = $particleDistribution_BC.size() ;
+    join($particleMaxBins,sz) ;
+  }
+  $rule apply(particleMaxBins<-particleType_BC)[Loci::Maximum] {
+    int sz = $particleType_BC.size() ;
+    join($particleMaxBins,sz) ;
+  }
+
+  $rule apply(particleMaxBins<-particleSpeed_BC)[Loci::Maximum] {
+    int sz = $particleSpeed_BC.size() ;
+    join($particleMaxBins,sz) ;
+  }
+  $rule apply(particleMaxBins<-particleVelocityRatio_BC)[Loci::Maximum] {
+    int sz = $particleVelocityRatio_BC.size() ;
+    join($particleMaxBins,sz) ;
+  }
+  $type particleDistSize_f store<int> ;
+  $type particleType_f storeVec<int> ;
+  $type particleSize_f storeVec<float> ;
+  $type particleVelocity_f storeVec<vector3d<float> > ;
+  $type particleMixture_f storeVec<float> ;
+  $type particleDistribution_f storeVec<float> ;
+  $type particleBinSigma_f storeVec<float> ;
+  $type particleMassFlux_f store<float> ;
+  
+  $rule pointwise(particleDistSize_f<-ref->particleDistribution_BC, 
+		  ref->particleSizes_BC) {
+    $particleDistSize_f = max($ref->$particleDistribution_BC.size(),
+			      $ref->$particleSizes_BC.size()) ;
+    $particleDistSize_f = max($particleDistSize_f,1) ;
+  }
+  
+  $rule pointwise(particleMassFlux_f<-ref->particleMassFlux_BC) {
+    $particleMassFlux_f = $ref->$particleMassFlux_BC ;
+  }
+
+  $rule pointwise(particleMassFlux_f<-ref->particleMassLoading_BC,mdotfluidBC
+		  ,area) {
+    $particleMassFlux_f = 
+      max(-($ref->$particleMassLoading_BC*$mdotfluidBC),0.0)/$area.sada ;
+  }
+  
+  $rule pointwise(particleType_f<-ref->particleType_BC,particleDistSize_f, 
+		  particleMaxBins),prelude {
+    $particleType_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    
+    int pmax = $ref->$particleType_BC.size()-1 ;
+     for(int i=0;i<$particleDistSize_f;++i) {
+      $particleType_f[i] = 
+	$ref->$particleType_BC[min(i,pmax)] ;
+    }
+  }
+  
+  $rule pointwise(particleDistribution_f<-ref->particleDistribution_BC,
+                  particleDistSize_f, particleMaxBins),prelude {
+    $particleDistribution_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    
+    int pmax = $ref->$particleDistribution_BC.size() ;
+    
+    for(int i=0;i<pmax;++i) {
+      $particleDistribution_f[i] = $ref->$particleDistribution_BC[i] ;
+    }
+    for(int i=pmax;i<$particleDistSize_f;++i)
+      $particleDistribution_f[i] = 0.0 ;
+    double sum = 0.0 ;
+    for(int i=0;i<$particleDistSize_f;++i)
+      sum += $particleDistribution_f[i] ;
+    if(sum < 1e-12) {
+      cerr << "problem with particleDistribution setting = 0" << endl ;
+      Loci::Abort() ;
+    }
+    double rsum = 1./sum ;
+    for(int i=0;i<$particleDistSize_f;++i)
+      $particleDistribution_f[i] *= rsum ;
+  }
+  
+  $rule pointwise(particleBinSigma_f<-ref->particleBinSigma_BC,
+                  particleDistSize_f, particleMaxBins),prelude {
+    $particleBinSigma_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    int pmax = $ref->$particleBinSigma_BC.size() ;
+    for(int i=0;i<$particleMaxBins;++i)
+      $particleBinSigma_f[i] = 0.0 ;
+    for(int i=0;i<pmax;++i) {
+      $particleBinSigma_f[i] = $ref->$particleBinSigma_BC[i] ;
+    }
+    if(pmax > 1) {
+      for(int i=pmax;i<$particleDistSize_f;++i) {
+        $particleBinSigma_f[i] = 0.0 ;
+      }
+    } else if(pmax == 1) {
+      for(int i=pmax;i<$particleDistSize_f;++i) {
+        $particleBinSigma_f[i] = $ref->$particleBinSigma_BC[0] ;
+      }
+    }
+  }
+  
+  $rule pointwise(particleVelocity_f<-ref->particleSpeed_BC,
+		 particleDistSize_f, area,particleMaxBins),prelude {
+    $particleVelocity_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    int pmax = $ref->$particleSpeed_BC.size()-1 ;
+    vector3d<float> n(-$area.n.x,-$area.n.y,-$area.n.z) ;
+    for(int i=0;i<$particleDistSize_f;++i) {
+      $particleVelocity_f[i] = 
+	$ref->$particleSpeed_BC[min(i,pmax)]*n ;
+    }
+  }
+  $rule pointwise(particleVelocity_f<-ref->particleVelocityRatio_BC,
+		  particleDistSize_f, area,particleMaxBins,ufluidBC),prelude {
+    $particleVelocity_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    int pmax = $ref->$particleVelocityRatio_BC.size()-1 ;
+    for(int i=0;i<$particleDistSize_f;++i) {
+      $particleVelocity_f[i] = 
+	$ref->$particleVelocityRatio_BC[min(i,pmax)]*$ufluidBC ;
+    }
+  }
+
+  
+  $rule pointwise(particleSize_f<-ref->particleSizes_BC,
+		  particleDistSize_f,particleMaxBins), prelude {
+    $particleSize_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    int pmax = $ref->$particleSizes_BC.size()-1  ;
+    for(int i=0;i<$particleDistSize_f;++i)
+      $particleSize_f[i] =
+	$ref->$particleSizes_BC[min(i,pmax)] ;
+  }
+
+
+  struct triangle_info {
+    vect3d p ;
+    vect3d v1,v2 ;
+    double weight ;
+    triangle_info() {}
+    triangle_info(vect3d p1, vect3d p2, vect3d p3) {
+      p = p1 ;
+      v1 = p2-p ;
+      v2 = p3-p ;
+      weight = norm(cross(v1,v2)) ;
+    }
+  } ;
+
+  $type injectedParticles_f store<list<Particle> > ;
+  
+
+  vect3d random_face_point(vector<triangle_info> &tlist) {
+    double r1 = Loci::random() ;
+    int tlsz = tlist.size() ;
+    int t = 0  ;
+    // Select triangle
+    double sum = tlist[t].weight ;
+    for(;t<tlsz-1;++t) {
+      if(r1 <= sum)
+        break ;
+      sum += tlist[t+1].weight ;
+    }
+    double test  = 0 ;
+    const vect3d &v1 = tlist[t].v1 ;
+    const vect3d &v2 = tlist[t].v2 ;
+    vect3d pt = v1 ;
+    vect3d cv1v2 = cross(v1,v2) ;
+    do {
+      double t1 = Loci::random() ;
+      double t2 = Loci::random() ;
+      pt = t1*v1 + t2*v2 ;
+      vect3d cv1pt = cross(v2-v1,pt-v1) ;
+      test = dot(cv1v2, cv1pt) ;
+    } while (test < 0.) ;
+    return pt + tlist[t].p ;
+  }
+  
+  $type  parcelNumLowerLimit param<double> ;
+
+  $rule default(parcelNumLowerLimit) {
+    // One parcel could represent 1/1000 of a particle.
+    // Lower than one is useful if the particles will later breakup
+    $parcelNumLowerLimit = 1e-3 ; 
+  }
+ 
+
+  $rule pointwise(injectedParticles_f<-particleDistSize_f,particleSize_f,
+                  particleMassFlux_f,particleVelocity_f,
+                  particleType_f, particleBinSigma_f,
+                  face2node->pos,parcelNumLowerLimit,
+                  particleDistribution_f,$n,p_dtmax,particleBinEoS,
+                  facecenter,area,
+                  ref->particleInjectDensity_BC) {
+    $injectedParticles_f.clear() ;
+    if($particleMassFlux_f > 1e-30) { // Only inject if there is mass flowing
+      vector<triangle_info> tlist ;
+      int fsz = $face2node.size() ;
+      if(fsz == 3) {
+        triangle_info ti($face2node[0]->$pos,
+                         $face2node[1]->$pos,
+                         $face2node[2]->$pos) ;
+        tlist.push_back(ti) ;
+      } else {
+        triangle_info ti($facecenter,
+                         $face2node[fsz-1]->$pos,
+                         $face2node[0]->$pos) ;
+        tlist.push_back(ti) ;
+        for(int i=1;i<fsz;++i) {
+          triangle_info ti($facecenter,
+                           $face2node[i-1]->$pos,
+                           $face2node[i]->$pos) ;
+          tlist.push_back(ti) ;
+        }
+      }
+      int tlsz = tlist.size() ;
+      double sum = 0;
+      for(int i=0;i<tlsz;++i)
+        sum += tlist[i].weight ;
+      double rsum = 1./sum ;
+      for(int i=0;i<tlsz;++i)
+        tlist[i].weight *= rsum ;
+      double injectDensity = $ref->$particleInjectDensity_BC ;
+      int nbins = $particleDistSize_f ;
+      double npntsf = injectDensity*$area.sada/double(nbins) ;
+      int npnts = int(floor(npntsf)) ;
+      double residue = npntsf - double(npnts) ;
+
+      
+      real mass_per_injection = $particleMassFlux_f*$p_dtmax*$area.sada/npntsf ;
+      
+      tmp_array<float> binw(nbins) ; // Compute mass flux weights
+      vector3d<float> n(-$area.n.x,-$area.n.y,-$area.n.z) ;
+      double bsum = 0 ;
+      for(int b=0;b<nbins;++b) {
+        //      binw[b] = max($particleDistribution_f[b]*dot($particleVelocity_f[b],n),
+        //                    float(0.0)) ;
+        binw[b] = max($particleDistribution_f[b],float(0.0)) ;
+        bsum += binw[b] ;
+      }
+      double rbsum = 1./(bsum+1e-30) ;
+      for(int b=0;b<nbins;++b) {
+        binw[b] *= rbsum ;
+      }
+    
+      for(int b=0;b<nbins;++b) {
+        int r = 0 ;
+        if(Loci::random() <= residue)
+          r = 1 ;
+        double eff_mass = mass_per_injection ;
+        // If we inject a particle every step, then we can perfectly satisfy
+        // the mass flux every step, otherwise it has to average over several
+        // steps
+        if(npnts >= 1) 
+          eff_mass = mass_per_injection*npntsf/double(npnts+r) ;
+        for(int i=0;i<npnts+r;++i) {
+          // Get random injection point on face
+          vect3d pt = random_face_point(tlist) ;
+          int bin = $particleType_f[b] ;
+          vect3d vel = vect3d($particleVelocity_f[b].x,$particleVelocity_f[b].y,
+                              $particleVelocity_f[b].z) ;
+          real diameter = $particleSize_f[b] ;
+          if($particleBinSigma_f[b] > 1e-10)
+            diameter = LND(diameter,$particleBinSigma_f[b]) ;
+          
+          Particle p(diameter,pt,vel,1.0,bin,
+                     $particleBinEoS) ;
+          
+          real w = binw[b] ;
+          real number_in_parcel = eff_mass*w/p.mass ;
+
+	  // If below number threshold, then stochastically emit particle
+	  // with number_in_parcel at limit
+          if(number_in_parcel < $parcelNumLowerLimit) { 
+	    double np_rescale = number_in_parcel/$parcelNumLowerLimit ;
+            if(Loci::random() <= np_rescale) { 
+	      // stochastically inject 1 parcel
+              p.number_in_parcel = $parcelNumLowerLimit ;
+              $injectedParticles_f.push_back(p) ;
+            }
+          } else { // Else inject a parcel
+            p.number_in_parcel = number_in_parcel ;
+            $injectedParticles_f.push_back(p) ;
+          }
+        }
+      }
+    }
+  }
+                  
+  
+  $type particleMassFlux_BC store<real> ;
+    
+  int check_list_size(const options_list &o, std::string option) {
+    if(o.getOptionValueType(option) == Loci::LIST) {
+      string vname = option ;
+      Loci::options_list::arg_list value_list ;
+      o.getOption(vname,value_list) ;
+      int size = value_list.size() ;
+      return size ;
+    }
+    return 1 ;
+  }
+  
+  bool check_list_units(const options_list &o, std::string option, std::string unit) {
+    if(o.getOptionValueType(option) == Loci::REAL)
+      return true ;
+    if(o.getOptionValueType(option) == Loci::UNIT_VALUE) {
+      Loci::UNIT_type Tu ;
+      o.getOption(option,Tu) ;
+      if(Tu.is_compatible(unit)) {
+	return true ;
+      }
+      return false ;
+    }
+    if(o.getOptionValueType(option) == Loci::LIST) {
+      string vname = option ;
+      Loci::options_list::arg_list value_list ;
+      o.getOption(vname,value_list) ;
+      int size = value_list.size() ;
+      for(int i=0;i<size;++i) {
+        if(value_list[i].type_of() != Loci::REAL &&
+           value_list[i].type_of() != Loci::UNIT_VALUE) {
+          return false ;
+        }
+      }
+      for(int i=0;i<size;++i) {
+        if(value_list[i].type_of() == Loci::UNIT_VALUE) {
+          Loci::UNIT_type vu ;
+          value_list[i].get_value(vu) ;
+          if(!vu.is_compatible(unit)) {
+            return false ;
+          }
+        }
+      }
+      return true ;
+    }
+    return false ;
+  }    
+
+
+  $rule pointwise(particleMassFlux_BC<-BC_options),constraint(particleMassFlux_BCoption) {
+    $BC_options.getOptionUnits("particleMassFlux","kg/m/m/s",$particleMassFlux_BC) ;
+  }
+
+  $rule pointwise(particleInjectDensity_BC<-BC_options),constraint(particleInjectDensity_BCoption) {
+    $BC_options.getOptionUnits("particleInjectDensity","m/m/m/m",$particleInjectDensity_BC) ;
+  }
+  
+  $type parcelInjectionRate_BC store<real> ;
+  $rule pointwise(parcelInjectionRate_BC<-BC_options), constraint(parcelInjectionRate_BCoption) {
+    $BC_options.getOptionUnits("parcelInjectionRate","s/s/s",$parcelInjectionRate_BC) ;
+  }
+  
+  $type boundary_area store<real> ;
+
+  $rule pointwise(particleInjectDensity_BC<-parcelInjectionRate_BC,p_dtmax,boundary_area) {
+    $particleInjectDensity_BC = $parcelInjectionRate_BC*$p_dtmax/$boundary_area ;
+  }
+
+
+  // Setup history variables so that we know what the boundary fluid mass
+  // flux and fluid velocity from last timestep so that we can use them in
+  // lagrangian boundary conditions.
+  
+  $type mdotfluidBCIC store<float> ;
+  $rule pointwise(mdotfluidBCIC),constraint(no_symmetry_BC,ci) {
+    $mdotfluidBCIC = 0 ;
+  }
+
+  $rule pointwise(mdotfluidBC{n}<-timeHistoryScalar(mdotfluidBC,mdotfluidBCIC,mdotfluidBCIC){n}) {
+    $mdotfluidBC{n}=$timeHistoryScalar(mdotfluidBC,mdotfluidBCIC,mdotfluidBCIC){n}  ;
+  }
+  
+  $rule pointwise(ufluidBC{n}<-timeHistoryVect3d(u_f,ufluidBCIC,ufluidBCIC){n}) {
+    $ufluidBC{n}=$timeHistoryVect3d(u_f,ufluidBCIC,ufluidBCIC){n}  ;
+  }
+
+  
+  $type totalMassInjected param<double> ;
+  $rule unit(totalMassInjected),constraint(UNIVERSE) {
+    $totalMassInjected = 0 ;
+  }
+
+  $rule apply(totalMassInjected<-injectedParticles_f)[Loci::Summation] {
+    list<Particle>::const_iterator li ;
+    for(li=$injectedParticles_f.begin();li!=$injectedParticles_f.end();++li) {
+      join($totalMassInjected,
+           li->mass*li->number_in_parcel) ;
+    }
+  }
+  
+  $rule pointwise(OUTPUT{n}<-totalMassInjected{n},p_dtmax{n}),prelude {
+    $[Once] {
+      cout << "total particle mdot is "
+           << (*$totalMassInjected{n})/(*$p_dtmax{n}) << endl ;
+    }
+  } ;
+  
+
+  // class init_inject: public unit_rule {
+  //   store<list<Particle> > injected_particles ;
+  // public:
+  //   init_inject() {
+  //     name_store("injected_particles{n}", injected_particles) ;
+  //     output("injected_particles{n}") ;
+  //     constraint("geom_cells{n}") ;
+  //   }
+  //   void calculate(Entity cc) {
+  //     injected_particles[cc].clear() ;
+  //   }
+  //   void compute(const sequence& seq) {
+  //     do_loop(seq,this) ;
+  //   }
+  // } ;
+  // register_rule<init_inject> register_init_inject ;
+  $type injected_particles store<list<Particle> >;
+  $rule unit(injected_particles{n}),constraint(geom_cells{n}) {
+    $injected_particles{n}.clear();
+  }
+
+  $type injected_particles store<list<Particle> > ;
+  $rule apply(ci->injected_particles<-injectedParticles_f)[summation_list] {
+    list<Particle>::const_iterator li ;
+    for(li = $injectedParticles_f.begin();li!=$injectedParticles_f.end();++li) {
+      Particle p(*li) ;
+      p.cell = $ci ;
+      $ci->$injected_particles.push_back(p) ;
+    }
+  }
+  
+  $type particle_wall_bc store<int> ;
+
+// construct the particle_wall_bc for particle wall interaction boundary conditions.
+
+  $rule pointwise(particle_wall_bc),constraint(ci) {
+    $particle_wall_bc = 1 ; 
+  }
+  $rule pointwise(default::particle_wall_bc),constraint(ci,symmetry_BC) {
+    $particle_wall_bc = 3 ; 
+  }
+  $rule pointwise(default::particle_wall_bc),constraint(ci,reflecting_BC) {
+    $particle_wall_bc = 3 ; 
+  }
+  // for crossing boundaries
+  $rule pointwise(default::particle_wall_bc),constraint(turboInterface_BC) {
+    $particle_wall_bc = 6 ; 
+  }
+  // for crossing boundaries
+  $rule pointwise(default::particle_wall_bc),constraint(interface_BC) {
+    $particle_wall_bc = 6 ; 
+  }
+  
+  
+  $rule pointwise(input::default::particle_wall_bc),constraint(ref->stickwall_BCoption) {
+    $particle_wall_bc = 1 ; 
+  }
+
+  $rule pointwise(input::default::particle_wall_bc),constraint(ref->bouncewall_BCoption) {
+    $particle_wall_bc = 2 ;
+  }
+
+  $rule pointwise(input::default::particle_wall_bc),constraint(ref->poolwall_BCoption) {
+    $particle_wall_bc = 4 ;
+  }
+  
+  $rule pointwise(input::default::particle_wall_bc),constraint(ref->erodewall_BCoption) {
+    $particle_wall_bc = 5 ;
+  }
+
+  // interpolated boundary condtion
+  
+  class BC_prescribedParticle_compute : public pointwise_rule {
+    const_store<Loci::options_list> BC_options ;
+    store<std::string> prescribedParticle_BC ;
+  public:
+    BC_prescribedParticle_compute() {
+      name_store("BC_options",BC_options) ;
+      name_store("prescribedParticle_BC",prescribedParticle_BC) ;
+      input("BC_options") ;
+      output("prescribedParticle_BC") ;
+      constraint("prescribedParticle_BCoption") ;
+    }
+    void calculate(Entity e) {
+      prescribedParticle_BC[e] = "bc.dat" ;
+      BC_options[e].getOption("prescribedParticle",prescribedParticle_BC[e]) ;
+      if(prescribedParticle_BC[e]== "")
+        prescribedParticle_BC[e] = "bc.dat" ;
+    }
+
+    void compute(const sequence &seq) {
+      do_loop(seq,this) ;
+    }
+  } ;
+
+  register_rule<BC_prescribedParticle_compute> register_BC_prescribedParticle_compute ;
+  
+  void read_pp_file_serial(std::string filename,
+                           store<vect3d> &loc,
+                           storeVec<real> &rvf,
+                           storeVec<vect3d> &pu,
+                           storeVec<real> &pt) {
+    ifstream bf(filename.c_str(),ios::in) ;
+    if(bf.fail()) {
+      cerr << "open faild on '" << filename << "'" << endl ;
+      Loci::Abort() ;
+    }
+    Loci::parse::kill_white_space(bf) ;
+    int nbins = 0 ;
+    bf >> nbins ;
+    Loci::parse::kill_white_space(bf) ;
+    int npnts = 0 ;
+    bf >> npnts ;
+    Loci::parse::kill_white_space(bf) ;
+
+    entitySet dom = interval(0,npnts-1) ;
+    loc.allocate(dom) ;
+    rvf.allocate(dom) ;
+    pu.allocate(dom) ;
+    pt.allocate(dom) ;
+    rvf.setVecSize(nbins) ;
+    pu.setVecSize(nbins) ;
+    pt.setVecSize(nbins) ;
+
+    for(int i=0;i<npnts;++i) {
+      bf >> loc[i] ; // read in postion of data
+      for(int b=0;b<nbins;++b) { // read in bins
+        bf >> rvf[i][b] ; // read in particle mass concentration
+        bf >> pu[i][b] ;  // read in particle velocity
+        bf >> pt[i][b] ;  // read in particle temperature
+      }
+    }
+  }
+
+  $type prescribedP_rvf storeVec<float> ;
+  $type prescribedP_u   storeVec<vect3d> ;
+  $type prescribedP_T   storeVec<float> ;
+
+  class getP_prescribe_bc : public pointwise_rule {
+    const_store<vect3d> facecenter ;
+    const_store<std::string> prescribedParticle_BC ;
+    const_Map ref ;
+    storeVec<float> prescribedP_rvf ;
+    storeVec<vect3d> prescribedP_u ;
+    storeVec<float>   prescribedP_T ;
+  public:
+    getP_prescribe_bc() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  getP_prescribe_bc::getP_prescribe_bc() {
+    name_store("prescribedParticle_BC",prescribedParticle_BC) ;
+    name_store("ref",ref) ;
+    name_store("facecenter",facecenter) ;
+    name_store("prescribedP_rvf",prescribedP_rvf) ;
+    name_store("prescribedP_u",prescribedP_u) ;
+    name_store("prescribedP_T",prescribedP_T) ;
+    input("facecenter") ;
+    input("ref->prescribedParticle_BC") ;
+    constraint("ref->prescribedParticle_BCoption") ;
+    output("prescribedP_rvf,prescribedP_u,prescribedP_T") ;
+    disable_threading() ;
+  }
+  
+  void getP_prescribe_bc::compute(const sequence &seq) {
+    if(Loci::GLOBAL_OR((seq != EMPTY))) {
+
+      std::map<int, Loci::entitySet> bcmap ;
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        bcmap[ref[*si]] += *si ;
+      }
+
+      bool error_found = false ;
+      std::map<int,Loci::entitySet>::iterator bci ;
+      for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
+        store<vect3d> loc ;
+        storeVec<real> p_rvf,p_T ;
+        storeVec<vect3d> p_u ;
+        string filename = prescribedParticle_BC[bci->first] ;
+        Loci::debugout << "reading " << filename << endl ;
+        read_pp_file_serial(filename,loc,p_rvf,p_u,p_T) ;
+
+        int ibin = p_rvf.vecSize() ;
+        prescribedP_T.setVecSize(ibin) ;
+        prescribedP_u.setVecSize(ibin) ;
+        prescribedP_rvf.setVecSize(ibin) ;
+        
+        int npnts = loc.domain().Max()+1 ;
+        vector<Loci::kdTree::coord3d> pnts(npnts) ;
+        vector<int> pnt_id (npnts) ;
+        for(int i=0;i<npnts;++i) {
+          pnts[i][0] = loc[i].x ;
+          pnts[i][1] = loc[i].y ;
+          pnts[i][2] = loc[i].z ;
+          pnt_id[i] = i ;
+        }
+
+        Loci::kdTree::kd_tree kd(pnts,pnt_id) ;
+
+        sequence sgroup = sequence(bci->second) ; 
+        
+        double dist =1e30 ;
+        for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
+          vect3d fcenter = facecenter[*si] ;
+          vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
+          vector<double> w ;
+          stencil_weights(w,neighbors,loc,fcenter) ;
+
+          for(int b=0;b<ibin;++b) {
+            
+            vect3d ur(0,0,0) ;
+            real rr = 0, Tr = 0 ;
+            for(unsigned int i=0;i<neighbors.size();++i) {
+              int pt = neighbors[i] ;
+            
+              ur += w[i]*p_u[pt][b] ;
+              rr += w[i]*p_rvf[pt][b] ;
+              Tr += w[i]*p_T[pt][b] ;
+              
+            }
+            prescribedP_rvf[*si][b] = rr ;
+            prescribedP_T[*si][b] = Tr ;
+            prescribedP_u[*si][b] = ur ;
+          }
+        }
+      }
+      if(error_found)
+        Loci::Abort() ;
+    }
+  }
+  
+  register_rule<getP_prescribe_bc> register_getP_prescribe_bc ;
+  
+  $rule pointwise(prescribed::particleMassFlux_f,
+                  prescribed::particleDistribution_f,
+                  prescribed::particleVelocity_f<-
+                  prescribedP_rvf,prescribedP_T,prescribedP_u,
+                  particleSize_f,particleDistSize_f,
+                  particleType_f,
+                  particleBinEoS,particleMaxBins,area),prelude {
+    $particleDistribution_f.setVecSize(*$particleMaxBins) ;
+    $particleVelocity_f.setVecSize(*$particleMaxBins) ;
+  } compute {
+    int nbins = $particleDistSize_f ;
+    double totMassFlux = 0 ;
+    double rvf_tot = 0 ;
+    for(int b=0;b<nbins;++b) {
+      totMassFlux -= $prescribedP_rvf[b]*dot($prescribedP_u[b],$area.n) ;
+      rvf_tot += $prescribedP_rvf[b] ;
+    }
+    $particleMassFlux_f = totMassFlux ;
+    for(int b=0;b<nbins;++b) {
+      $particleDistribution_f[b] = $prescribedP_rvf[b]/rvf_tot ;
+      $particleVelocity_f[b].x = $prescribedP_u[b].x ;
+      $particleVelocity_f[b].y = $prescribedP_u[b].y ;
+      $particleVelocity_f[b].z = $prescribedP_u[b].z ;
+    }
+  }
+  
+}

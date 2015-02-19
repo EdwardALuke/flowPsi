@@ -1,0 +1,1601 @@
+#include <Loci.h>
+// include the Loci finite-volume module
+$include "FVM.lh"
+#include "particle_config.h"
+#include "particle.h"
+#include "util.h"
+#include "par_util.h"
+#include "store_traverser.h"
+
+$include "particle.lh"
+
+
+#include <iostream>
+using std::cout ;
+using std::cerr ;
+using std::endl ;
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list ;
+#include <map>
+using std::map ;
+#include <string>
+using std::string ;
+#include <sstream>
+using std::stringstream ;
+#include <fstream>
+using std::ifstream ;
+using std::ofstream ;
+#include <utility>
+using std::pair ;
+
+using Loci::StringError ;
+
+#include <algorithm>
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+
+namespace lagrangianP {
+  
+  using std::ostringstream ;
+  using std::istringstream ;
+#ifdef TIMING
+  extern basic_timer timer_computation ;
+  extern basic_timer timer_redistribute_reduce ;
+#endif
+
+  void dump_scalar(const sequence &seq,const_store<float> &c2n,
+                   string plot_postfix,
+                   string modelName,
+                   string type,
+                   string sname) {
+
+    ostringstream oss ;
+    oss << "output/" << sname << "_" << type << "." << plot_postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+#ifdef VERBOSE
+    $[Once] {
+      cout << "writing file " << filename << endl ;
+    }
+#endif
+
+
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+
+    Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+    Loci::hdf5CloseFile(file_id) ;
+  }
+  
+  void dump_vector(const sequence &seq,const_store<vector3d<float> > &c2n,
+		   string postfix,
+		   string modelName,
+		   string type,
+		   string sname) {
+    
+    ostringstream oss ;
+    
+    oss << "output/" << sname << "_" << type << "." << postfix
+        << "_" << modelName ;
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    $[Once] {
+      cout << "writing file " << filename << endl ;
+    }
+#endif
+
+
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+
+    Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+    Loci::hdf5CloseFile(file_id) ;
+  }
+  
+  $type ic_avg_density store<real> ;
+  $type ic_avg_momentum store<vect3d> ;
+  $type ic_avg_density_bin storeVec<real> ;
+  $type ic_avg_momentum_bin storeVec<vect3d> ;
+
+  $type icf_avg_time param<real> ;
+  $type icf_avg_density store<real> ;
+  $type icf_avg_momentum store<vect3d> ;
+  $type icf_avg_density_bin storeVec<real> ;
+  $type icf_avg_momentum_bin storeVec<vect3d> ;
+  
+  $type avg_time param<real> ;
+  $type avg_density store<real> ;
+  $type avg_momentum store<vect3d> ;
+  $type particle_histogram_bins param<vector<real> > ;
+  $type avg_density_bin storeVec<real> ;
+  $type avg_momentum_bin storeVec<vect3d> ;
+
+
+  $type ic_avg_time param<pair<int,real> > ;
+  $rule unit(ic_avg_time),constraint(UNIVERSE) {
+    $ic_avg_time = std::pair<int,real>(0,0) ;
+  }
+
+  // Used to do a priority join using pairs
+  template <class T> struct priority_joiner {
+    void operator()(T &r, const T &s) {
+      if(r.first < s.first)
+        r = s ;
+    }
+  } ;
+
+  $rule apply(ic_avg_time<-p_dtmax)[priority_joiner],prelude {
+  } ;
+
+  $rule pointwise(ic_avg_density<-p_dtmax),constraint(geom_cells) {
+    $ic_avg_density = 0.0 ;
+  }
+  $rule pointwise(ic_avg_momentum<-p_dtmax),constraint(geom_cells) {
+    $ic_avg_momentum = vect3d(0,0,0) ;
+  }
+
+  
+  $rule pointwise(ic_avg_density_bin<-particle_histogram_bins),constraint(geom_cells,particle_histogram_bins), prelude {
+    const int vs = ($particle_histogram_bins)->size()+1 ;
+    $ic_avg_density_bin.setVecSize(vs) ;
+  } compute {
+    $ic_avg_density_bin = mk_Scalar(0) ;
+  }
+
+  $rule pointwise(ic_avg_momentum_bin<-particle_histogram_bins),constraint(geom_cells,particle_histogram_bins), prelude {
+    const int vs = ($particle_histogram_bins)->size()+1 ;
+    $ic_avg_momentum_bin.setVecSize(vs) ;
+  } compute {
+    $ic_avg_momentum_bin = mk_Scalar(vect3d(0,0,0)) ;
+  }
+
+  $rule apply(ic_avg_time<- icf_avg_time)[priority_joiner], prelude {
+    $[Once] {
+      *$ic_avg_time = std::pair<int,real>(1,*$icf_avg_time) ;
+    } 
+  } ;
+
+  $rule pointwise(priority::ic_file::ic_avg_density<- icf_avg_density) {
+    $ic_avg_density = $icf_avg_density ;
+  }
+
+  $rule pointwise(priority::ic_file::ic_avg_momentum<- icf_avg_momentum) {
+    $ic_avg_momentum = $icf_avg_momentum ;
+  }
+
+  $rule pointwise(priority::ic_file::ic_avg_density_bin,
+                  priority::ic_file::ic_avg_momentum_bin <-
+                  particle_histogram_bins,
+                  icf_avg_density_bin, icf_avg_momentum_bin),
+    prelude {
+    $ic_avg_density_bin.setVecSize($particle_histogram_bins->size()+1) ;
+    $ic_avg_momentum_bin.setVecSize($particle_histogram_bins->size()+1) ;
+  } compute {
+    $ic_avg_density_bin = $icf_avg_density_bin ;
+    $ic_avg_momentum_bin = $icf_avg_momentum_bin ;
+  }
+
+  
+
+  $rule singleton(avg_time{n=0}<-ic_avg_time) {
+    $avg_time{n=0} = $ic_avg_time.second ;
+  }
+  $rule pointwise(avg_density{n=0}<-ic_avg_density) {
+    $avg_density{n=0} = $ic_avg_density ;
+  }
+  $rule pointwise(avg_momentum{n=0}<-ic_avg_momentum) {
+    $avg_momentum{n=0} = $ic_avg_momentum ;
+  }
+
+  $rule pointwise(avg_density_bin{n=0},avg_momentum_bin{n=0} <-
+                  particle_histogram_bins,
+                  ic_avg_density_bin, ic_avg_momentum_bin),
+    prelude {
+    $avg_density_bin{n=0}.setVecSize($particle_histogram_bins->size()+1) ;
+    $avg_momentum_bin{n=0}.setVecSize($particle_histogram_bins->size()+1) ; 
+  } compute {
+    $avg_density_bin{n=0} = $ic_avg_density_bin ;
+    $avg_momentum_bin{n=0} = $ic_avg_momentum_bin ;
+  }
+  
+  $rule pointwise(icf_avg_density,icf_avg_momentum<-
+                  icfile,modelName),constraint(geom_cells),
+      option(disable_threading),prelude {
+    // get the particle restart file name first
+    string filename = *$icfile + "particleAvg_" + *$modelName ;
+
+    // check if the file exists
+    int file_exists = 1 ;
+    $[Once] {
+      struct stat buf ;
+      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+        file_exists = 0 ;
+    }
+    MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      
+    if(file_exists == 1) {
+      $[Once] {
+        cout << "reading particles avg info from: " << filename << endl ;
+      }
+        
+      // create a hdf5 handle
+      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+                                         H5F_ACC_RDONLY, H5P_DEFAULT) ;
+      if(file_id < 0) {
+        cerr << "...file reading failed..., Aborting" << endl ;
+        Loci::Abort() ;
+      }
+        
+      // read
+      entitySet dom = entitySet(seq) ;
+      Loci::readContainer(file_id, "avg_density",
+                          $icf_avg_density.Rep(), dom) ;
+      Loci::readContainer(file_id, "avg_momentum",
+                          $icf_avg_momentum.Rep(), dom) ;
+        
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      // if avg restart file does not exist, then we set
+      // default value
+      $[Once] {
+        cout << "particle avg restart file not found, "
+             << "setting default values..." << endl ;
+      }
+      entitySet dom = entitySet(seq) ;
+      FORALL(dom,cc) {
+        $icf_avg_density[cc] = 0.0 ;
+        $icf_avg_momentum[cc] = vect3d(0,0,0) ;
+      } ENDFORALL ;
+    }
+    
+  } ;
+  $rule singleton(icf_avg_time<-
+                  icfile,modelName),constraint(geom_cells),
+    option(disable_threading) {
+    // get the particle restart file name first
+    string filename = $icfile + "particleAvg_" + $modelName ;
+
+    // check if the file exists
+    int file_exists = 1 ;
+    $[Once] {
+      struct stat buf ;
+      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+        file_exists = 0 ;
+    }
+    MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      
+    if(file_exists == 1) {
+        
+      // create a hdf5 handle
+      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+                                         H5F_ACC_RDONLY, H5P_DEFAULT) ;
+      if(file_id < 0) {
+        cerr << "...file reading failed..., Aborting" << endl ;
+        Loci::Abort() ;
+      }
+        
+      // read
+      entitySet dom = entitySet(seq) ;
+      Loci::readContainer(file_id, "avg_time", $*icf_avg_time.Rep(), dom) ;
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      // if avg restart file does not exist, then we set
+      // default value
+      $icf_avg_time = 0.0 ;
+    }
+    
+  } ;
+                       
+  
+  $rule pointwise(icf_avg_density_bin,icf_avg_momentum_bin<-
+                  icfile,modelName,particle_histogram_bins),
+    constraint(geom_cells),
+    option(disable_threading),prelude {
+    const int vs = (*$particle_histogram_bins).size()+1 ;
+    $icf_avg_density_bin.setVecSize(vs) ;
+    $icf_avg_momentum_bin.setVecSize(vs) ;
+
+    // get the particle restart file name first
+    string filename = *$icfile + "particleAvgbin_" + *$modelName ;
+
+    // check if the file exists
+    int file_exists = 1 ;
+    $[Once] {
+      struct stat buf ;
+      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+        file_exists = 0 ;
+    }
+    MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      
+    if(file_exists == 1) {
+      $[Once] {
+        cout << "reading particles avg bin info from: " << filename << endl ;
+      }
+        
+      // create a hdf5 handle
+      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+                                         H5F_ACC_RDONLY, H5P_DEFAULT) ;
+      if(file_id < 0) {
+        cerr << "...file reading failed..., Aborting" << endl ;
+        Loci::Abort() ;
+      }
+        
+      // read
+      entitySet dom = entitySet(seq) ;
+      store<real> avg_density ;
+      store<vec3d> avg_momentum ;
+      avg_density.allocate(dom) ;
+      avg_momentum.allocate(dom) ;
+      for(int i=0;i<vs;++i) {
+        ostringstream oss ;
+        oss << i ;
+        Loci::readContainer(file_id, "avg_density_bin"+oss.str(),
+                            avg_density.Rep(), dom) ;
+        Loci::readContainer(file_id, "avg_momentum_bin"+oss.str(),
+                            avg_momentum.Rep(), dom) ;
+        FORALL(dom,ii) {
+          $icf_avg_density_bin[ii][i] = avg_density[ii] ;
+          $icf_avg_momentum_bin[ii][i] = avg_momentum[ii] ;
+        } ENDFORALL ;
+      }
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      // if avg restart file does not exist, then we set
+      // default value
+      $[Once] {
+        cout << "particle avg bin restart file not found, "
+             << "setting default values..." << endl ;
+      }
+      entitySet dom = entitySet(seq) ;
+      FORALL(dom,e) {
+        $icf_avg_density_bin[e] = mk_Scalar(0.0) ;
+        $icf_avg_momentum_bin[e] = mk_Scalar(vect3d(0,0,0)) ;
+      } ENDFORALL ;
+
+    }
+  } ;
+
+  $type pt_density store<real>;
+  $type pt_momentum store<vect3d> ;
+  
+  $type pt_density_bin storeVec<real>;
+  $type pt_momentum_bin storeVec<vect3d> ;
+  
+  $rule pointwise(pt_density{n},pt_momentum{n}<-
+                  particleBinEoS{n},ncycle{n},vol{n},
+                  particle_bag{n},refresh_cell_space{n}),
+    constraint(geom_cells,particle_bag{n}),
+    option(disable_threading),prelude {
+
+    // get the needed communicator from particle space
+    // since we are doing reduction, it should be a push comm
+    const ParticleSpace::Communicator& comm =
+      ParticleSpace::instance().get_push_comm() ;
+
+    // define temp stores for local reduction
+    store<real> local_density ;
+    store<real> local_temp ;
+    store<vect3d> local_velocity ;
+    local_density.allocate(comm.send_alloc) ;
+    local_temp.allocate(comm.send_alloc) ;
+    local_velocity.allocate(comm.send_alloc) ;
+    // set unit value
+    entitySet dom = entitySet(seq) ;
+    for(entitySet::const_iterator ei=dom.begin();
+	ei!=dom.end();++ei) {
+      $pt_density{n}[*ei] = 0.0 ;
+      $pt_momentum{n}[*ei] = vect3d(0,0,0) ;
+    }
+      
+    dom = local_density.domain() ;
+    for(entitySet::const_iterator ei=dom.begin();
+	ei!=dom.end();++ei) {
+      local_density[*ei] = 0.0 ;
+      local_velocity[*ei] = vect3d(0,0,0) ;
+    }
+
+    for(list<Particle>::const_iterator li=(*$particle_bag{n}).begin();
+	li!=(*$particle_bag{n}).end();++li) {
+      Entity cell = li->cell ;
+      // contribute source terms to its containing cell
+      // particle mass
+      double pmass = li->get_mass() * (li->number_in_parcel) ;
+      local_density[cell] += pmass ;
+      local_velocity[cell] += pmass*li->get_velocity() ;
+    }
+ 
+    // perform global reduction for "local_density"
+    vector<Loci::storeRepP> in(2), out(2) ;
+    in[0] = local_density.Rep() ;
+    in[1] = local_velocity.Rep() ;
+      
+    vector<store_traverserP> unit_op(2) ;
+    unit_op[0] =
+      create_store_transformer<store<real>,
+      set_default_value<real> >() ;
+    unit_op[1] =
+      create_store_transformer<store<vect3d>,
+      set_default_value<vect3d> >() ;
+
+  vector<loci_joinerP> join_op(2) ;
+  join_op[0] =
+    create_loci_joiner<store<real>,Loci::Summation<real> >() ;
+  join_op[1] =
+    create_loci_joiner<store<vect3d>,Loci::Summation<vect3d> >() ;
+      
+  reduce_remote_stores(in,unit_op,join_op,out,comm) ;
+
+  store<real> global_density ;
+  store<vect3d> global_velocity ;
+  
+  global_density.setRep(out[0]) ;
+  global_velocity.setRep(out[1]) ;
+      
+  // combining global_reduce to "pt_density"
+  dom = global_density.domain() ;
+  for(entitySet::const_iterator ei=dom.begin();
+      ei!=dom.end();++ei) {
+    $pt_density{n}[*ei] += global_density[*ei] ;
+    $pt_momentum{n}[*ei] += global_velocity[*ei] ;
+  }
+      
+  dom = entitySet(seq) ;
+  // call the calculate function
+  FORALL(dom,cc) {
+    double rvol = 1./$vol{n}[cc] ;
+    $pt_momentum{n}[cc] *= rvol ;
+    $pt_density{n}[cc] *= rvol ;
+  } ENDFORALL ;
+  
+  } ;
+  
+  $rule pointwise(pt_density_bin{n},pt_momentum_bin{n}<-
+                  particleBinEoS{n},ncycle{n},vol{n},particle_histogram_bins,
+                  particle_bag{n},refresh_cell_space{n}),
+    constraint(geom_cells,particle_bag{n},PARTICLE_HISTOGRAM_OUTPUT),
+    option(disable_threading),prelude {
+    const lagrangianP::particleEoSList& pm = *$particleBinEoS{n} ;
+    vector<real> bins = *$particle_histogram_bins ;
+    const int vs = bins.size()+1 ;
+    $pt_density_bin{n}.setVecSize(vs) ;
+    $pt_momentum_bin{n}.setVecSize(vs) ;
+
+    vector<pair<real,real> > bin_intervals(vs) ;
+    bin_intervals[0] = make_pair(0.0,bins[0]) ;
+    for(int i=1;i<vs-1;++i)
+      bin_intervals[i] = make_pair(bins[i-1],bins[i]) ; 
+    bin_intervals[vs-1] = make_pair(bins.back(),1.0/(1e-20)) ;
+
+    // get the needed communicator from particle space
+    // since we are doing reduction, it should be a push comm
+    const ParticleSpace::Communicator& comm =
+      ParticleSpace::instance().get_push_comm() ;
+
+    // define temp stores for local reduction
+    store<real> local_density ;
+    store<real> local_temp ;
+    store<vect3d> local_velocity ;
+    local_density.allocate(comm.send_alloc) ;
+    local_temp.allocate(comm.send_alloc) ;
+    local_velocity.allocate(comm.send_alloc) ;
+    // set unit value
+    
+    entitySet dom = entitySet(seq) ;
+
+    for(int i=0;i<vs;++i) {
+      for(entitySet::const_iterator ei=dom.begin();
+          ei!=dom.end();++ei) {
+        $pt_density_bin{n}[*ei][i] = 0.0 ;
+        $pt_momentum_bin{n}[*ei][i] = vect3d(0,0,0) ;
+      }
+      
+      entitySet ldom = local_density.domain() ;
+      for(entitySet::const_iterator ei=ldom.begin();
+          ei!=ldom.end();++ei) {
+        local_density[*ei] = 0.0 ;
+        local_velocity[*ei] = vect3d(0,0,0) ;
+      }
+
+      for(list<Particle>::const_iterator li=(*$particle_bag{n}).begin();
+          li!=(*$particle_bag{n}).end();++li) {
+        Entity cell = li->cell ;
+        // contribute source terms to its containing cell
+	const int bin = li->bin ;
+	const real dia = li->get_diameter(pm[bin].rhop) ;
+        if(dia >= bin_intervals[i].first &&
+           dia < bin_intervals[i].second) {
+          double pmass = li->get_mass() * (li->number_in_parcel) ;
+          local_density[cell] += pmass ;
+          local_velocity[cell] += pmass *(li->get_velocity()) ; 
+        }  
+      }
+ 
+      // perform global reduction for "local_density"
+      vector<Loci::storeRepP> in(2), out(2) ;
+      in[0] = local_density.Rep() ;
+      in[1] = local_velocity.Rep() ;
+      
+      vector<store_traverserP> unit_op(2) ;
+      unit_op[0] =
+        create_store_transformer<store<real>,
+				 set_default_value<real> >() ;
+      unit_op[1] =
+        create_store_transformer<store<vect3d>, set_default_value<vect3d> >() ;
+
+      vector<loci_joinerP> join_op(2) ;
+      join_op[0] =
+        create_loci_joiner<store<real>,Loci::Summation<real> >() ;
+      join_op[1] =
+        create_loci_joiner<store<vect3d>,Loci::Summation<vect3d> >() ;
+      
+      reduce_remote_stores(in,unit_op,join_op,out,comm) ;
+  
+      store<real> global_density ;
+      store<vect3d> global_velocity ;
+      
+      global_density.setRep(out[0]) ;
+      global_velocity.setRep(out[1]) ;
+      
+      // combining global_reduce to "pt_density"
+      entitySet gdom = global_density.domain() ;
+      for(entitySet::const_iterator ei=gdom.begin();
+          ei!=gdom.end();++ei) {
+        $pt_density_bin{n}[*ei][i] += global_density[*ei] ;
+        $pt_momentum_bin{n}[*ei][i] += global_velocity[*ei] ;
+      }
+  }
+    
+    FORALL(dom,cc) {
+      double rvol = 1./$vol{n}[cc] ;
+      for(int i=0;i<vs;++i) {
+        $pt_momentum_bin{n}[cc][i] *= rvol ;
+        $pt_density_bin{n}[cc][i] *= rvol ;
+      }
+    } ENDFORALL ;
+    
+} ;
+  
+$type resetParticleAveraging param<bool> ;
+$type dtmax param<TimeValue> ;
+$type plot_freq param<int> ;
+
+$rule singleton(resetParticleAveraging<-ncycle,plot_freq) {
+  $resetParticleAveraging= (($ncycle)%($plot_freq) == 0 ) ;
+}
+  
+$rule singleton(avg_time{n+1}<-avg_time{n},p_dtmax{n},resetParticleAveraging{n}) {
+  if($resetParticleAveraging{n}) {
+    $avg_time{n+1} = $p_dtmax{n} ;
+  } else {
+    $avg_time{n+1} += $p_dtmax{n} ;
+  }
+}
+$type timeWeight param<double> ;
+  
+$rule singleton(timeWeight{n}<-
+		avg_time{n},resetParticleAveraging{n},p_dtmax{n}) {
+  if($resetParticleAveraging{n})
+    $timeWeight{n} = 1.0 ;
+  else
+    $timeWeight{n} = $p_dtmax{n}/($avg_time{n}+$p_dtmax{n}) ;
+}
+    
+$rule pointwise(avg_density{n+1}<-timeWeight{n},avg_density{n},pt_density{n}),
+  inplace(avg_density{n+1}|avg_density{n}) {
+  double f = $timeWeight{n} ;
+  $avg_density{n+1} = (1.-f)*$avg_density{n} + f*$pt_density{n} ;
+}
+  
+$rule pointwise(avg_momentum{n+1}<-timeWeight{n},avg_momentum{n},
+		pt_momentum{n}),
+  inplace(avg_momentum{n+1}|avg_momentum{n}) {
+  double f = $timeWeight{n} ;
+  $avg_momentum{n+1} = (1.-f)*$avg_momentum{n} + f*$pt_momentum{n} ;
+}
+  
+class advance_time_avg_bin: public pointwise_rule {
+  const_param<int> ncycle,plot_freq ;
+  const_param<double> timeWeight ;
+  const_storeVec<real> pt_density_bin ;
+  const_storeVec<vect3d> pt_momentum_bin ;
+  storeVec<real> avg_density_bin ;
+  storeVec<vect3d> avg_momentum_bin ;
+  int vs ;
+public:
+  advance_time_avg_bin() {
+    name_store("timeWeight{n}",timeWeight);
+    name_store("pt_density_bin{n}",pt_density_bin);
+    name_store("pt_momentum_bin{n}",pt_momentum_bin);
+    name_store("avg_density_bin{n}",avg_density_bin);
+    name_store("avg_momentum_bin{n}",avg_momentum_bin);
+    input("timeWeight{n}") ;
+    input("pt_density_bin{n}") ;
+    input("pt_momentum_bin{n}") ;
+    input("avg_density_bin{n}") ;
+    input("avg_momentum_bin{n}") ;
+    output("avg_density_bin{n+1}=avg_density_bin{n}") ;
+    output("avg_momentum_bin{n+1}=avg_momentum_bin{n}") ;
+  }
+  void calculate(Entity cc) {
+    double f = *timeWeight ;
+    double fm1 = 1.-f ;
+    for(int i=0;i<vs;++i) {
+      avg_density_bin[cc][i] =
+	fm1*avg_density_bin[cc][i]+f*pt_density_bin[cc][i] ;
+        
+      avg_momentum_bin[cc][i] =
+	fm1*avg_momentum_bin[cc][i] + f*pt_momentum_bin[cc][i] ;
+    }
+  }
+
+  virtual void compute(const sequence &seq) {
+    vs = pt_density_bin.vecSize() ;
+    do_loop(seq,this) ;
+  }
+} ;
+
+register_rule<advance_time_avg_bin> register_advance_time_avg_bin ;
+  
+$type avg_density_f store<real> ;
+$type avg_momentum_f store<vect3d> ;
+  
+$rule pointwise(avg_density_f<-ci->avg_density) {
+  $avg_density_f = $ci->$avg_density ;
+}
+
+$rule pointwise(avg_momentum_f<-ci->avg_momentum) {
+  $avg_momentum_f = $ci->$avg_momentum ;
+}
+
+$type avg_velocity store<vector3d<float> > ;
+
+$rule pointwise(avg_velocity<-cell2node(avg_density),cell2node_v3d(avg_momentum)) {
+  float ratio = 1./max($cell2node(avg_density),1e-30f) ;
+  $avg_velocity = ratio * $cell2node_v3d(avg_momentum) ;
+}
+  
+
+
+
+$type avg_density_bin_f storeVec<real> ;
+$type avg_momentum_bin_f storeVec<vect3d> ;
+  
+$rule pointwise(avg_density_bin_f<-ci->avg_density_bin),prelude  {
+  $avg_density_bin_f.setVecSize($avg_density_bin.vecSize()) ;
+} compute {
+  $avg_density_bin_f = $ci->$avg_density_bin ;
+  }
+  
+$rule pointwise(avg_momentum_bin_f{n}<-ci->avg_momentum_bin{n}),prelude {
+  $avg_momentum_bin_f{n}.setVecSize($avg_momentum_bin{n}.vecSize()) ;
+} compute {
+  $avg_momentum_bin_f{n} = $ci->$avg_momentum_bin{n} ;
+  }
+
+// Now compute boundary flux totals
+$type time_accum param<double> ;
+$rule singleton(time_accum{n=0}<-p_dtmax) {
+  $time_accum{n=0} = 0 ;
+}
+  
+$type ncycle param<int> ;
+$type plot_freq param<int> ;
+$rule singleton(time_accum{n+1}<-time_accum{n},ncycle{n},plot_freq,p_dtmax) {
+  $time_accum{n+1} = $time_accum{n}+$p_dtmax ;
+  if(($ncycle{n}%$plot_freq) == 0)
+    $time_accum{n+1} = 0 ;
+}
+  
+$type particleBoundaryFluxes_accum store<Loci::Array<float,8> > ;
+  
+$rule pointwise(particleBoundaryFluxes_accum{n=0}<-p_dtmax),
+  constraint(ci->geom_cells) {
+  for(int i=0;i<8;++i)
+    $particleBoundaryFluxes_accum{n=0}[i] = 0 ;
+}
+$rule pointwise(particleBoundaryFluxes_accum{n+1}<-particleBoundaryFluxes_accum{n},particleBoundaryFluxes{n},ncycle{n},plot_freq),constraint(ci->geom_cells),
+  inplace(particleBoundaryFluxes_accum{n+1}|particleBoundaryFluxes_accum{n}) {
+  if(($ncycle{n}%$plot_freq) == 0)
+    for(int i=0;i<8;++i)
+      $particleBoundaryFluxes_accum{n+1}[i] = 0 ;
+  else
+    $particleBoundaryFluxes_accum{n+1} += $particleBoundaryFluxes{n} ;
+}
+
+$type particleMassFlux store<real> ;
+  
+$rule pointwise(particleMassFlux<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleMassFlux = $particleBoundaryFluxes_accum[0] + 
+    $particleBoundaryFluxes[0] ;
+  $particleMassFlux *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+  
+$type particleMomFlux store<vect3d> ;
+  
+$rule pointwise(particleMomFlux<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleMomFlux.x = 
+    $particleBoundaryFluxes_accum[1] + $particleBoundaryFluxes[1] ;
+  $particleMomFlux.y = 
+    $particleBoundaryFluxes_accum[2] + $particleBoundaryFluxes[2] ;
+  $particleMomFlux.z = 
+    $particleBoundaryFluxes_accum[3] + $particleBoundaryFluxes[3] ;
+
+  $particleMomFlux *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+
+$type particleHeatFlux store<real> ;
+$rule pointwise(particleHeatFlux<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleHeatFlux = $particleBoundaryFluxes_accum[4] + 
+    $particleBoundaryFluxes[4] ;
+  $particleHeatFlux *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+$type particleNumberFlux store<real> ;
+$rule pointwise(particleNumberFlux<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleNumberFlux = $particleBoundaryFluxes_accum[5] + 
+    $particleBoundaryFluxes[5] ;
+  $particleNumberFlux *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+$type particleBounceFlux store<real> ;
+
+$rule pointwise(particleBounceFlux<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleBounceFlux = $particleBoundaryFluxes_accum[6] + 
+    $particleBoundaryFluxes[6] ;
+  $particleBounceFlux *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+  
+$type particleErosionRate store<real> ;
+$rule pointwise(particleErosionRate<-particleBoundaryFluxes_accum,
+		particleBoundaryFluxes,time_accum,p_dtmax,area),
+  constraint(ci->geom_cells) {
+  $particleErosionRate = $particleBoundaryFluxes_accum[7] + 
+    $particleBoundaryFluxes[7] ;
+  $particleErosionRate *= 1./max(($area.sada*($time_accum+$p_dtmax)),1e-30) ;
+}
+
+class do_plot_nn : public singleton_rule {
+  const_param<int> ncyc ;
+  const_param<int> plot_freq ;
+  param<bool> dsno;
+public:
+  do_plot_nn() {
+    name_store("ncycle{n}",ncyc) ;
+    name_store("plot_freq{n}",plot_freq) ;
+    name_store("do_plot_nn{n}",dsno) ;
+    input("ncycle{n},plot_freq{n}") ;
+    output("do_plot_nn{n}") ;
+    constraint("plot_freq{n}") ;
+  }
+  virtual void compute(const sequence &seq) ;
+} ;
+
+void do_plot_nn::compute(const sequence &seq) {
+  dsno = ((*ncyc)%(*plot_freq) == 0 ) ;
+}
+
+register_rule<do_plot_nn> register_do_plot_nn ;
+ 
+class pt_scalar_node_output : public pointwise_rule {
+  string var_name ;
+  string value_name ;
+  const_store<float> c2n ; 
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<bool> OUTPUT ;
+public:
+  pt_scalar_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const sequence &seq) ;
+} ; 
+
+pt_scalar_node_output::pt_scalar_node_output(const char *vname,
+					     const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name + string("{n}") ;
+  string constraint_name = string("scalarOutput_") + value_name ;
+  name_store(var_name_time, c2n) ;
+  name_store("plot_postfix{n}",plot_postfix) ;
+  name_store("modelName{n}",modelName) ;
+  name_store("OUTPUT{n}",OUTPUT) ;
+
+  conditional("do_plot_nn{n}") ;
+  constraint("pos{n}") ;
+  input("modelName{n}") ;
+  input("plot_postfix{n}") ;
+  input(var_name_time);
+  //    constraint(constraint_name) ;
+  output("OUTPUT{n}") ;
+}
+void pt_scalar_node_output::compute(const sequence &seq) {
+  dump_scalar(seq,c2n,*plot_postfix,*modelName,"sca",value_name) ;
+}
+
+#define OUTPUT_SCALAR_PT(X,Y) class OUT_##Y : public pt_scalar_node_output { \
+  public:								\
+  OUT_##Y() : pt_scalar_node_output(X,#Y){}				\
+  }; register_rule<OUT_##Y> register_OUT_##Y
+  
+OUTPUT_SCALAR_PT("cell2node(avg_density)",avg_density) ;
+
+class pt_scalarvec_node_output : public pointwise_rule {
+  string var_name ;
+  string value_name ;
+  const_storeVec<float> c2n ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<bool> OUTPUT ;
+public:
+  pt_scalarvec_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const sequence &seq) ;
+} ;
+
+pt_scalarvec_node_output::pt_scalarvec_node_output(const char *vname,
+						   const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name + string("{n}") ;
+  string constraint_name = string("scalarOutput_") + value_name ;
+  name_store(var_name_time, c2n) ;
+  name_store("plot_postfix{n}",plot_postfix) ;
+  name_store("modelName{n}",modelName) ;
+  name_store("OUTPUT{n}",OUTPUT) ;
+
+  conditional("do_plot_nn{n}") ;
+  constraint("pos{n}") ;
+  input("modelName{n}") ;
+  input("plot_postfix{n}") ;
+  input(var_name_time);
+  constraint("PARTICLE_HISTOGRAM_OUTPUT") ;
+  output("OUTPUT{n}") ;
+}
+void pt_scalarvec_node_output::compute(const sequence &seq) {
+  int vs = c2n.vecSize() ;
+  entitySet dom = c2n.domain() ;
+  store<float> val ;
+  val.allocate(dom) ;
+  for(int i=0;i<vs;++i) {
+    FORALL(dom,ii) {
+      val[ii] = c2n[ii][i] ;
+    } ENDFORALL ; 
+    const_store<float> var ;
+    var.setRep(val.Rep()) ;
+    ostringstream oss ;
+    oss << "output/" + value_name << i << "_sca." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    ostringstream oss1 ;
+    oss1 << value_name << i ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    Loci::writeContainer(file_id,(oss1.str()).c_str(),var.Rep()) ;
+    Loci::hdf5CloseFile(file_id) ;
+  }
+}
+
+  $type avg_vel_bin storeVec<vector3d<float> > ;
+  $type cell2node_v_v3d(X) storeVec<vector3d<float> > ;
+  $rule pointwise(avg_vel_bin<-cell2node_v(avg_density_bin),cell2node_v_v3d(avg_momentum_bin)),prelude {
+    $avg_vel_bin.setVecSize($cell2node_v(avg_density_bin).vecSize()) ;
+} compute {
+  const int vs = $*cell2node_v(avg_density_bin).vecSize() ;
+  for(int i=0;i<vs;++i) {
+    const float coef = 1./max($cell2node_v(avg_density_bin)[i],1e-30f) ;
+    $avg_vel_bin[i] = coef*$cell2node_v_v3d(avg_momentum_bin)[i] ;
+  }
+}
+
+
+#define OUTPUT_SCALARVEC_PT(X,Y) class OUT_##Y : public pt_scalarvec_node_output { \
+  public:								\
+  OUT_##Y() : pt_scalarvec_node_output(X,#Y){}				\
+  }; register_rule<OUT_##Y> register_OUT_##Y
+
+OUTPUT_SCALARVEC_PT("cell2node_v(avg_density_bin)",avg_density_bin) ;
+
+
+class pt_vector_node_output : public pointwise_rule {
+  string var_name ;
+  string value_name ;
+  const_store<vector3d<float> > c2n ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<bool> OUTPUT ;
+public:
+  pt_vector_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const sequence &seq) ;
+} ;
+                                                                                
+pt_vector_node_output::pt_vector_node_output(const char *vname,
+					     const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name + string("{n}") ;
+  string constraint_name = string("scalarOutput_") + value_name ;
+  name_store(var_name_time, c2n) ;
+  name_store("modelName{n}",modelName) ;
+  input("modelName{n}") ;
+  name_store("plot_postfix{n}",plot_postfix) ;
+  name_store("OUTPUT{n}",OUTPUT) ;
+                                                                                
+  conditional("do_plot_nn{n}") ;
+  constraint("pos{n}") ;
+  input("plot_postfix{n}") ;
+  input(var_name_time);
+  constraint(var_name_time) ;
+  //  constraint("PARTICLE_HISTOGRAM_OUTPUT") ;
+  output("OUTPUT{n}") ;
+}
+void pt_vector_node_output::compute(const sequence &seq) {
+  dump_vector(seq,c2n,*plot_postfix,*modelName,"vec",value_name) ;
+}
+                                                                                
+#define OUTPUT_VECTOR_PT(X,Y) class VECOUT_##Y : public pt_vector_node_output {	\
+  public:								\
+  VECOUT_##Y() : pt_vector_node_output(X,#Y){}				\
+  }; register_rule<VECOUT_##Y> register_VECOUT_##Y
+                                                                                
+OUTPUT_VECTOR_PT("avg_velocity",avg_velocity) ;
+
+class pt_bin_vector_node_output : public pointwise_rule {
+  string var_name ;
+  string value_name ;
+  const_storeVec<vector3d<float> > c2n ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<bool> OUTPUT ;
+public:
+  pt_bin_vector_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const sequence &seq) ;
+} ;
+
+pt_bin_vector_node_output::pt_bin_vector_node_output(const char *vname,
+						     const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name + string("{n}") ;
+  string constraint_name = string("scalarOutput_") + value_name ;
+  name_store(var_name_time, c2n) ;
+  name_store("modelName{n}",modelName) ;
+  input("modelName{n}") ;
+  name_store("plot_postfix{n}",plot_postfix) ;
+  name_store("OUTPUT{n}",OUTPUT) ;
+
+  conditional("do_plot_nn{n}") ;
+  constraint("pos{n}") ;
+  input("plot_postfix{n}") ;
+  input(var_name_time);
+  constraint("PARTICLE_HISTOGRAM_OUTPUT") ;
+  output("OUTPUT{n}") ;
+}
+void pt_bin_vector_node_output::compute(const sequence &seq) {
+  int vs = c2n.vecSize() ;
+  entitySet dom = c2n.domain() ;
+  store<vector3d<float> > val ;
+  val.allocate(dom) ;
+  for(int i=0;i<vs;++i) {
+    FORALL(dom,ii) {
+      val[ii] = c2n[ii][i] ;
+    } ENDFORALL ;
+    const_store<vector3d<float> > var ;
+    var.setRep(val.Rep()) ;
+    ostringstream oss ;
+    oss << "output/" + value_name << i << "_vec." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    ostringstream oss1 ;
+    oss1 << value_name << i ;
+    Loci::writeContainer(file_id,(oss1.str()).c_str(),var.Rep()) ;
+
+    Loci::hdf5CloseFile(file_id) ;
+  }
+}
+
+#define OUTPUT_VECTOR_PT_BIN(X,Y) class VECOUT_##Y : public pt_bin_vector_node_output {	\
+  public:								\
+  VECOUT_##Y() : pt_bin_vector_node_output(X,#Y){}			\
+  }; register_rule<VECOUT_##Y> register_VECOUT_##Y
+
+
+// Implement cell2nodev for vectors of vect3d
+  $type vecSizev3d(X) param<int> ;
+  $type X storeVec<vector3d<double> > ;
+
+  $rule unit(vecSizev3d(X)), constraint(UNIVERSE) {
+    $vecSizev3d(X) = 0 ;
+  }
+
+
+  $rule apply(vecSizev3d(X)<-X)[Loci::Maximum], prelude {
+    join(*$vecSizev3d(X),$X.vecSize()) ;
+  } ;
+
+  namespace {
+
+    class nodal_unit : public unit_rule {
+      const_param<int > vecSizeX ;
+      storeVec<vector3d<float> > nodal_sum ;
+    public:
+      nodal_unit() {
+	name_store("vecSizev3d(X)",vecSizeX) ;
+	name_store("nodal_sum_v3d(X)",nodal_sum) ;
+	constraint("pos") ;
+	input("vecSizev3d(X)") ;
+	output("nodal_sum_v3d(X)") ;
+      }
+      void calculate(Entity nd) {
+	nodal_sum[nd] = mk_Scalar(vector3d<float>(0,0,0)) ;
+      }
+      virtual void compute(const sequence &seq) {
+	nodal_sum.setVecSize(*vecSizeX) ;
+	do_loop(seq,this) ;
+      }
+    } ;
+    register_rule<nodal_unit> register_nodal_unit ;
+
+    class cell2node :
+      public apply_rule<storeVec<vector3d<float> >, Loci::Summation<Vect<vector3d<float> > > > {
+      const_multiMap upper, lower,boundary_map ;
+      const_store<vect3d> cellcenter ;
+      const_storeVec<vector3d<real> > X ;
+
+      const_multiMap face2node ;
+      const_store<vect3d> pos ;
+      storeVec<vector3d<float> > nodal_sum ;
+      vector<int> node_list ;
+    public:
+      cell2node() ;
+      void calculate(Entity cc) ;
+      virtual void compute(const sequence &seq) ;
+    } ;
+
+    cell2node::cell2node() {
+      name_store("nodal_sum_v3d(X)",nodal_sum) ;
+      name_store("face2node",face2node) ;
+      name_store("pos",pos) ;
+      name_store("upper",upper) ;
+      name_store("lower",lower) ;
+      name_store("boundary_map",boundary_map) ;
+      name_store("cellcenter",cellcenter) ;
+      name_store("X",X) ;
+
+      constraint("geom_cells") ;
+      input("cellcenter,X") ;
+      input("(upper,lower,boundary_map)->face2node->pos") ;
+      input("(upper,lower,boundary_map)->face2node->nodal_sum_v3d(X)") ;
+      output("(upper,lower,boundary_map)->face2node->nodal_sum_v3d(X)") ;
+    }
+
+    void cell2node::calculate(Entity cc) {
+
+      node_list.clear() ;
+      for(const Entity *fi=upper.begin(cc);fi!=upper.end(cc);++fi)
+	for(const Entity *ni=face2node.begin(*fi);ni!=face2node.end(*fi);++ni)
+	  node_list.push_back(*ni) ;
+      for(const Entity *fi=lower.begin(cc);fi!=lower.end(cc);++fi) 
+	for(const Entity *ni=face2node.begin(*fi);ni!=face2node.end(*fi);++ni)
+	  node_list.push_back(*ni) ;
+      for(const Entity *fi=boundary_map.begin(cc);fi!=boundary_map.end(cc);++fi) 
+	for(const Entity *ni=face2node.begin(*fi);ni!=face2node.end(*fi);++ni)
+	  node_list.push_back(*ni) ;
+      sort(node_list.begin(),node_list.end()) ;
+      vector<int>::iterator ns = node_list.begin() ;
+      vector<int>::iterator ne = unique(node_list.begin(),node_list.end()) ;
+
+      const int vs = X.vecSize() ;
+    
+      for(vector<int>::iterator vi = ns;vi!=ne;++vi) {
+	int nd = *vi ;
+	const float weight = 1./norm(pos[nd]-cellcenter[cc]) ;
+	for(int i=0;i<vs;++i)
+	  nodal_sum[nd][i] += weight*vector3d<float>(X[cc][i]) ;
+      }  
+
+    }
+
+    void cell2node::compute(const sequence &seq) {
+      do_loop(seq,this) ;
+    }
+
+    register_rule<cell2node> register_cell2node ;
+  
+
+    class compute_nodal : public pointwise_rule {
+      const_storeVec<vector3d<float> > nodal_sum ;
+      const_store<float> nodalw_sum ;
+      storeVec<vector3d<float> > nodal ;
+    public:
+      compute_nodal() {
+	name_store("nodal_sum_v3d(X)",nodal_sum) ;
+	name_store("nodalw_sum",nodalw_sum) ;
+	name_store("cell2node_v_v3d(X)",nodal) ;
+	input("nodal_sum_v3d(X),nodalw_sum") ;
+	constraint("pos") ;
+	output("cell2node_v_v3d(X)") ;
+      }
+      void calculate(Entity nd) {
+	real rsum = 1./(real(nodalw_sum[nd])+1e-20) ;
+	for(int i=0;i<nodal_sum.vecSize();++i) {
+	  nodal[nd][i] = nodal_sum[nd][i]*rsum ;
+	}
+      } ;
+      virtual void compute(const sequence &seq) {
+	nodal.setVecSize(nodal_sum.vecSize()) ;
+	do_loop(seq,this) ;
+      }
+    } ;
+
+    register_rule<compute_nodal>  register_compute_nodal ;
+    class boundary_nodal_unit : public unit_rule {
+      const_param<int> vecSizeX ;
+      storeVec<vector3d<float> > boundary_nodal_sum ;
+
+    public:
+      boundary_nodal_unit() {
+	name_store("vecSizev3d(X)",vecSizeX) ;
+	name_store("boundary_nodal_sum_v3d(X)",boundary_nodal_sum) ;
+	input("vecSizev3d(X)") ;
+	output("boundary_nodal_sum_v3d(X)") ;
+      }
+      void calculate(Entity nd) {
+	boundary_nodal_sum[nd] = mk_Scalar(vector3d<float>(0,0,0)) ;
+      }
+      virtual void compute(const sequence &seq) {
+	boundary_nodal_sum.setVecSize(*vecSizeX) ;
+	do_loop(seq,this) ;
+      }
+    } ;
+
+    class boundary_nodal_apply :
+      public apply_rule<storeVec<vector3d<float> >, Loci::Summation<Vect<vector3d<float> > > > {
+
+      storeVec<vector3d<float> > boundary_nodal_sum ;
+      const_storeVec<vector3d<real> > X_f ;
+      const_store<vect3d> pos ;
+      const_store<vect3d> facecenter ;
+
+      const_multiMap face2node ;
+    public:
+      boundary_nodal_apply() {
+	name_store("boundary_nodal_sum_v3d(X)",boundary_nodal_sum) ;
+	name_store("X_f",X_f) ;
+	name_store("pos",pos) ;
+	name_store("facecenter",facecenter) ;
+	name_store("face2node",face2node) ;
+	input("face2node->(pos,boundary_nodal_sum_v3d(X)),X_f,facecenter") ;
+	constraint("ci,no_symmetry_BC") ;
+	output("face2node->boundary_nodal_sum_v3d(X)") ;
+      }
+      void calculate(Entity fc) {
+	for(const Entity * ni=face2node.begin(fc);ni!=face2node.end(fc);++ni) {
+	  int nd = *ni ;
+	  const float weight = 1./norm(pos[nd]-facecenter[fc]) ;
+	  for(int j=0;j<boundary_nodal_sum.vecSize();++j)
+	    boundary_nodal_sum[nd][j] += vector3d<float>(X_f[fc][j])*weight ;
+	}
+      }
+
+      virtual void compute(const sequence &seq) {
+	do_loop(seq,this) ;
+      }
+    } ;
+
+    class boundary_compute_nodal : public pointwise_rule {
+      const_storeVec<vector3d<float> > boundary_nodal_sum ;
+      const_store<float> boundary_nodalw_sum ;
+      storeVec<vector3d<float> > nodal ;
+    public:
+      boundary_compute_nodal() {
+	name_store("boundary_nodal_sum_v3d(X)",boundary_nodal_sum) ;
+	name_store("boundary_nodalw_sum",boundary_nodalw_sum) ;
+	name_store("boundary::cell2node_v_v3d(X)",nodal) ;
+	constraint("boundary_node") ;
+	input("boundary_nodal_sum_v3d(X)") ;
+	input("boundary_nodalw_sum") ;
+	output("boundary::cell2node_v_v3d(X)") ;
+      }
+      void calculate(Entity nd) {
+	float rsum = 1./(real(boundary_nodalw_sum[nd])+1e-20) ;
+	for(int i=0;i<boundary_nodal_sum.vecSize();++i) {
+	  nodal[nd][i] = boundary_nodal_sum[nd][i]*rsum ;
+	}
+      } ;
+      virtual void compute(const sequence &seq) ;
+    } ;
+
+    void boundary_compute_nodal::compute(const sequence &seq) {
+      nodal.setVecSize(boundary_nodal_sum.vecSize()) ;
+      do_loop(seq,this) ;
+    }
+
+    register_rule<boundary_nodal_unit> register_boundary_nodal_unit ;
+    register_rule<boundary_nodal_apply> register_boundary_nodal_apply ;
+  }
+
+  OUTPUT_VECTOR_PT_BIN("avg_vel_bin",avg_velocity_bin) ;
+
+  // here is a rule that saves the avg info to a restart file
+  // named particle_avg_restart.n_casename
+  class output_avg_restart: public pointwise_rule {
+    const_param<real> avg_time;
+    const_store<real> avg_density;
+    const_store<vect3d> avg_momentum;
+    const_param<std::string> modelName ;
+    const_param<bool> do_restart ;
+    const_param<int> restart_modulo ;
+    const_param<int> ncycle ;
+    const_param<std::string> restart_directory ;
+    param<bool> OUTPUT ;
+  public:
+    output_avg_restart() {
+      name_store("avg_time{n}",avg_time);
+      name_store("avg_density{n}",avg_density);
+      name_store("avg_momentum{n}",avg_momentum);
+      name_store("modelName{n}", modelName) ;
+      name_store("restart_directory{n}",restart_directory) ;
+      name_store("do_restart{n}",do_restart) ;
+      name_store("restart_modulo{n}", restart_modulo) ;
+      name_store("ncycle{n}", ncycle) ;
+      name_store("OUTPUT{n}", OUTPUT) ;
+
+      input("avg_time{n},avg_density{n},avg_momentum{n}") ;
+      input("modelName{n},restart_modulo{n},ncycle{n},restart_directory{n}") ;
+      
+      output("OUTPUT{n}") ;
+
+      conditional("do_restart{n}") ;
+      constraint("geom_cells{n}") ;
+
+      disable_threading() ;
+    }
+    
+    virtual void
+    compute(const sequence& seq) {
+      if(*ncycle == 0)
+	return ;
+
+      string filename = *restart_directory+string("particleAvg_")+
+	*modelName ;
+
+      $[Once] {
+	cout << "writing particle avg restart file " << filename << endl ;
+      }
+
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),
+					   H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      if(file_id < 0) {
+	$[Once] {
+	  cerr << "...failed to create file: " << filename
+	       << ", Aborting..." << endl ;
+	}
+	Loci::Abort() ;
+      }
+      // write containers
+      Loci::writeContainer(file_id,"avg_time",avg_time.Rep()) ;
+      Loci::writeContainer(file_id,"avg_density",avg_density.Rep()) ;
+      Loci::writeContainer(file_id,"avg_momentum",avg_momentum.Rep()) ;
+
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+  register_rule<output_avg_restart> register_output_avg_restart ;
+
+  // here is a rule that saves the avg bin info to a restart file
+  // named particle_avgbin_restart.n_casename
+  class output_avg_bin_restart: public pointwise_rule {
+    const_storeVec<real> avg_density_bin;
+    const_storeVec<vect3d> avg_momentum_bin;
+    const_param<std::string> modelName ;
+    const_param<bool> do_restart ;
+    const_param<int> restart_modulo ;
+    const_param<int> ncycle ;
+    const_param<std::string> restart_directory ;
+    param<bool> OUTPUT ;
+  public:
+    output_avg_bin_restart() {
+      name_store("avg_density_bin{n}",avg_density_bin);
+      name_store("avg_momentum_bin{n}",avg_momentum_bin);
+      name_store("modelName{n}", modelName) ;
+      name_store("restart_directory{n}",restart_directory) ;
+      name_store("do_restart{n}",do_restart) ;
+      name_store("restart_modulo{n}", restart_modulo) ;
+      name_store("ncycle{n}", ncycle) ;
+      name_store("OUTPUT{n}", OUTPUT) ;
+
+      input("avg_density_bin{n},avg_momentum_bin{n}") ;
+      input("modelName{n},restart_modulo{n},ncycle{n},restart_directory{n}") ;
+
+      output("OUTPUT{n}") ;
+
+      conditional("do_restart{n}") ;
+      constraint("geom_cells{n}") ;
+      constraint("PARTICLE_HISTOGRAM_OUTPUT{n}") ;
+
+      disable_threading() ;
+    }
+
+    virtual void
+    compute(const sequence& seq) {
+      if(*ncycle == 0)
+	return ;
+
+      string filename = *restart_directory+string("particleAvgbin_")+
+	*modelName ;
+
+      $[Once] {
+	cout << "writing particle avg bin restart file " << filename << endl ;
+      }
+
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),
+					   H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      if(file_id < 0) {
+	$[Once] {
+	  cerr << "...failed to create file: " << filename
+	       << ", Aborting..." << endl ;
+	}
+	Loci::Abort() ;
+      }
+      // write containers
+      int vs = avg_density_bin.vecSize() ;
+      store<real> avg_density ;
+      store<vec3d> avg_momentum ;
+      entitySet dom = avg_density_bin.domain() ;
+      avg_density.allocate(dom) ;
+      avg_momentum.allocate(dom) ;
+      for(int i=0;i<vs;++i) {
+	FORALL(dom,ii) {
+	  avg_density[ii] = avg_density_bin[ii][i] ;
+	  avg_momentum[ii] = avg_momentum_bin[ii][i] ;
+	} ENDFORALL ; 
+
+	ostringstream oss ;
+	oss << i ;
+	Loci::writeContainer(file_id,"avg_density_bin"+oss.str(),avg_density.Rep()) ;
+	Loci::writeContainer(file_id,"avg_momentum_bin"+oss.str(),avg_momentum.Rep()) ;
+      }
+
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+  register_rule<output_avg_bin_restart> register_output_avg_bin_restart ;
+
+
+  class dump_boundary_scalar_pt : public pointwise_rule {
+    string var_name ;
+    string value_name ;
+    const_store<real> var ;
+    const_param<string> plot_postfix ;
+    const_param<string> modelName ;
+    param<bool> OUTPUT ;
+  public:
+    dump_boundary_scalar_pt(const char *vname, const char *valname) ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  dump_boundary_scalar_pt::dump_boundary_scalar_pt(const char *vname,
+						   const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    name_store(var_name,var) ;
+    name_store("plot_postfix{n}",plot_postfix) ;
+    name_store("OUTPUT{n}",OUTPUT) ;
+    name_store("modelName{n}",modelName) ;
+    conditional("do_plot_nn{n}") ;
+    input(var_name) ;
+    input("modelName{n}") ;
+    input("plot_postfix{n}") ;
+    constraint("ci{n}->vol{n}") ;
+    output("OUTPUT{n}") ;
+  }
+
+  void dump_boundary_scalar_pt::compute(const sequence &seq) {
+    ostringstream oss ;
+    oss << "output/" + value_name + "_bnd." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    //    cout << "opening file " << filename << endl ;
+    entitySet set(seq) ;
+    hid_t file_id = createUnorderedFile(filename.c_str(),set) ;
+    writeUnorderedStore(file_id,var,set,value_name.c_str()) ;
+    Loci::closeUnorderedFile(file_id) ;
+  }
+
+  class dump_boundary_v3d_pt : public pointwise_rule {
+    string var_name ;
+    string value_name ;
+    const_store<vect3d> var ;
+    const_param<string> plot_postfix ;
+    const_param<string> modelName ;
+    param<bool> OUTPUT ;
+  public:
+    dump_boundary_v3d_pt(const char *vname, const char *valname) ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  dump_boundary_v3d_pt::dump_boundary_v3d_pt(const char *vname,
+					     const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    name_store(var_name,var) ;
+    name_store("plot_postfix{n}",plot_postfix) ;
+    name_store("OUTPUT{n}",OUTPUT) ;
+    name_store("modelName{n}",modelName) ;
+    conditional("do_plot_nn{n}") ;
+    input(var_name) ;
+    input("modelName{n}") ;
+    input("plot_postfix{n}") ;
+    constraint("ci{n}->vol{n}") ;
+    output("OUTPUT{n}") ;
+  }
+
+  void dump_boundary_v3d_pt::compute(const sequence &seq) {
+    ostringstream oss ;
+    oss << "output/" + value_name + "_bndvec." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    //    cout << "opening file " << filename << endl ;
+    entitySet set(seq) ;
+    hid_t file_id = createUnorderedFile(filename.c_str(),set) ;
+    writeUnorderedStore(file_id,var,set,value_name.c_str()) ;
+    Loci::closeUnorderedFile(file_id) ;
+  }
+
+#define OUTPUT_BNDRY_SCALAR_PT(X,Y,Z) class OUTB_##Y : public dump_boundary_scalar_pt { \
+  public:								\
+  OUTB_##Y() : dump_boundary_scalar_pt(X,#Y){				\
+    constraint(Z);constraint(X);}					\
+  }; register_rule<OUTB_##Y> register_OUTB_##Y 
+
+#define OUTPUT_BNDRY_V3D_PT(X,Y,Z) class OUTB_##Y : public dump_boundary_v3d_pt { \
+  public:								\
+  OUTB_##Y() : dump_boundary_v3d_pt(X,#Y){				\
+    constraint(Z);constraint(X);}					\
+  }; register_rule<OUTB_##Y> register_OUTB_##Y 
+
+  OUTPUT_BNDRY_SCALAR_PT("particleMassFlux{n}",pMassFlux,"ci") ;
+  OUTPUT_BNDRY_SCALAR_PT("particleHeatFlux{n}",pHeatFlux,"ci") ;
+  OUTPUT_BNDRY_SCALAR_PT("particleNumberFlux{n}",pNumFlux,"ci") ;
+  OUTPUT_BNDRY_SCALAR_PT("particleBounceFlux{n}",pNumBounceFlux,"ci") ;
+  OUTPUT_BNDRY_SCALAR_PT("particleErosionRate{n}",pErosionRate,"ci") ;
+  OUTPUT_BNDRY_V3D_PT("particleMomFlux{n}",pMomFlux,"ci") ;
+
+
+  // Note, in future fix this to support units. (Maybe add infratructure to Loci
+  // to make this more natural).
+  $type particle_histogram_input param<string> ;
+
+  $rule optional(particle_histogram_input),
+									  comments("The user specifies a list of bin sizes in the form of [d1,d2,... ] and the solver produces output files related to each bin size") {
+    $particle_histogram_input = "[]" ;
+  }
+
+  class get_particle_bin : public singleton_rule {
+    const_param<string> bin_input ;
+    param<std::vector<real> > bins ;
+  public:
+    get_particle_bin() {
+      name_store("particle_histogram_input",bin_input) ;
+      name_store("particle_histogram_bins",bins) ;
+      input("particle_histogram_input") ;
+      output("particle_histogram_bins") ;
+    }
+  
+    void compute(const sequence& seq) {
+      istringstream s(*bin_input) ;
+      (*bins).clear() ;
+      Loci::parse::kill_white_space(s) ;
+      if(s.peek() != '[')
+	throw StringError("expecting '[' when setting particle_histogram_input in vars file") ;
+      s.get() ;
+      Loci::parse::kill_white_space(s) ;
+      while(s.peek() != ']') {
+	if(s.eof())
+	  throw StringError("unexpected EOF while reading particle_histogram_input") ;
+	double val ;
+	s >> val ;
+	if(!(*bins).empty()) {
+	  if((*bins).back()>=val) 
+	    throw StringError("particle_histogram_input values must be in strict increasing order") ;
+	}
+	(*bins).push_back(val) ;
+	Loci::parse::kill_white_space(s) ;
+	if(s.peek() == ',')
+	  s.get() ;
+	Loci::parse::kill_white_space(s) ;
+      }
+      s.get() ;
+    }
+  } ;
+
+  register_rule<get_particle_bin> register_get_particle_bin ;
+
+  $type PARTICLE_HISTOGRAM_OUTPUT Constraint ;
+  $type NO_PARTICLE_HISTOGRAM_OUTPUT Constraint ;
+
+  $rule constraint(PARTICLE_HISTOGRAM_OUTPUT,
+		   NO_PARTICLE_HISTOGRAM_OUTPUT<-particle_histogram_bins) {
+    if($particle_histogram_bins.size()>0) {
+      $PARTICLE_HISTOGRAM_OUTPUT = ~EMPTY ;
+      $NO_PARTICLE_HISTOGRAM_OUTPUT = EMPTY ;
+    } else {
+      $PARTICLE_HISTOGRAM_OUTPUT = EMPTY ;
+      $NO_PARTICLE_HISTOGRAM_OUTPUT = ~EMPTY ;
+    }
+  }
+
+  class dump_boundary_scalarvec_pt : public pointwise_rule {
+    string var_name ;
+    string value_name ;
+    const_storeVec<real> var ;
+    const_param<string> plot_postfix ;
+    const_param<string> modelName ;
+    param<bool> OUTPUT ;
+  public:
+    dump_boundary_scalarvec_pt(const char *vname, const char *valname) ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  dump_boundary_scalarvec_pt::dump_boundary_scalarvec_pt(const char *vname,
+							 const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    name_store(var_name,var) ;
+    name_store("plot_postfix{n}",plot_postfix) ;
+    name_store("OUTPUT{n}",OUTPUT) ;
+    name_store("modelName{n}",modelName) ;
+    conditional("do_plot_nn{n}") ;
+    input(var_name) ;
+    input("modelName{n}") ;
+    input("plot_postfix{n}") ;
+    constraint("ci{n}->vol{n}") ;
+    output("OUTPUT{n}") ;
+  }
+
+  void dump_boundary_scalarvec_pt::compute(const sequence &seq) {
+    int vs = var.vecSize() ;
+    entitySet dom = var.domain() ;
+    std::vector<real> varbin(dom.size()) ;
+
+    for(int i=0;i<vs;++i) {
+      int c = 0 ;
+      FORALL(dom,ii) {
+	varbin[c++] = var[ii][i] ;
+      } ENDFORALL ;
+
+      ostringstream oss ;
+      oss << "output/" + value_name << i << "_bnd." << *plot_postfix << "_" << *modelName ;
+      string filename = oss.str() ;
+
+      entitySet set(seq) ;
+      hid_t file_id = createUnorderedFile(filename.c_str(),set) ;
+      Loci::writeUnorderedVector(file_id,value_name.c_str(),varbin) ;
+      Loci::closeUnorderedFile(file_id) ;
+    }
+  }
+
+#define OUTPUT_BNDRY_SCALARVEC_PT(X,Y,Z) class OUTBB_##Y : public dump_boundary_scalarvec_pt { \
+  public:								\
+  OUTBB_##Y() : dump_boundary_scalarvec_pt(X,#Y){			\
+    constraint(Z);constraint(X);}					\
+  }; register_rule<OUTBB_##Y> register_OUTBB_##Y
+}
