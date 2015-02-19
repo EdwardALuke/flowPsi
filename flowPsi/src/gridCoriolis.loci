@@ -1,0 +1,152 @@
+#include <Loci.h>
+
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  class coriolis_options : public options_list {
+  public:
+    coriolis_options() :
+      options_list("frameRotAxis:frameRotCenter:frameRotSpeed:axis:center:speed") {} ;
+  } ;
+}
+
+namespace Loci {
+  template<> struct data_schema_traits<flowPsi::coriolis_options> {
+    typedef USER_DEFINED_CONVERTER Schema_Converter ;
+
+    typedef char Converter_Base_Type ;
+    typedef StringStreamConverter<flowPsi::coriolis_options> Converter_Type ;
+  } ;
+}
+
+namespace flowPsi {
+  $type coriolis param<coriolis_options> ;
+  $rule optional(coriolis), comments("Set to enable coriolis terms due to a rotating frame of reference.  Example, set to <axis=[1,0,0],center=[0,0,0],speed=3000rpm> to specify a rotation about the x axis at 3000 revolutions per minute") {}
+
+  $type frameRotAxis   param<vect3d> ;
+  $type frameRotCenter param<vect3d> ;
+  $type frameRotSpeed param<real> ;
+  $rule singleton(frameRotAxis,frameRotCenter,frameRotSpeed<-coriolis) {
+    vect3d vec(1,0,0) ;
+    if($coriolis.optionExists("frameRotAxis")) {
+      get_vect3dOption($coriolis,"frameRotAxis","",vec) ;
+      vec = vec/(norm(vec)+1e-30) ;
+    }
+    if($coriolis.optionExists("axis")) {
+      get_vect3dOption($coriolis,"axis","",vec) ;
+      vec = vec/(norm(vec)+1e-30) ;
+    }
+    $frameRotAxis = vec ;
+
+    $frameRotCenter = vect3d(0,0,0) ;
+    if($coriolis.optionExists("frameRotCenter")) {
+      get_vect3dOption($coriolis,"frameRotCenter","m",$frameRotCenter) ;
+    }
+    if($coriolis.optionExists("center")) {
+      get_vect3dOption($coriolis,"center","m",$frameRotCenter) ;
+    }
+
+    $frameRotSpeed = 0.0 ;
+    if($coriolis.optionExists("frameRotSpeed")) {
+      $coriolis.getOptionUnits("frameRotSpeed","rpm",$frameRotSpeed) ;
+      $frameRotSpeed *= 0.104720 ;  //changes rpm to rad/s
+    }
+    if($coriolis.optionExists("speed")) {
+      $coriolis.getOptionUnits("speed","rpm",$frameRotSpeed) ;
+      $frameRotSpeed *= 0.104720 ;  //changes rpm to rad/s
+    }
+  }
+
+
+  //add coriolis and centrifugal terms to src[cc].
+  $rule apply(src<-frameRotAxis,frameRotSpeed,
+              rho,vol,cellcenter,u)[Loci::Summation],
+    constraint(coriolis,geom_cells) {
+    const vect3d omega = ($frameRotSpeed)*($frameRotAxis) ;
+    const vect3d cor = 2.*cross(omega,$u) ;
+    const int mi = 1 ;
+    const real rhovol = $rho*$vol ;
+    $src[mi+0] -= cor.x*rhovol ;
+    $src[mi+1] -= cor.y*rhovol ;
+    $src[mi+2] -= cor.z*rhovol ;
+  }
+
+  $rule apply(src<-frameRotAxis,frameRotCenter,frameRotSpeed,
+              rho,u,vol,cellcenter)[Loci::Summation],
+    constraint(coriolis,geom_cells) {
+    const vect3d omega = ($frameRotSpeed)*($frameRotAxis) ;
+    const vect3d rcell = ($cellcenter-$frameRotCenter) ;
+    const vect3d r = rcell - dot(rcell,$frameRotAxis)*($frameRotAxis) ;
+    const vect3d wr = cross(omega,r) ;
+    const vect3d wwr = cross(omega,wr) ;
+    const int mi = 1 ;
+    const int ei = 4 ;
+    const real rhovol = $rho*$vol ;
+    $src[mi+0] -= wwr.x*rhovol ;
+    $src[mi+1] -= wwr.y*rhovol ;
+    $src[mi+2] -= wwr.z*rhovol ;
+    $src[ei] -= dot(wwr,$u)*rhovol ;
+  }
+
+  //add coriolis Jacobian terms to srcJ[cc] (w.r.t. primitive variables).
+  $rule apply(srcJ<-frameRotAxis,frameRotSpeed,vol,
+	      u,rho,temperature,gagePressure,Pambient)[Loci::Summation],
+    constraint(coriolis,geom_cells) {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const vect3d omega = ($frameRotSpeed)*($frameRotAxis) ;
+    const vect3d cor = 2.*cross(omega,$u) ;
+    const real volc = $vol ;
+    $srcJ[mi][mj] -= -2.*omega.z*volc ;
+    $srcJ[mi][mk] -=  2.*omega.y*volc ;
+    $srcJ[mj][mi] -=  2.*omega.z*volc ;
+    $srcJ[mj][mk] -= -2.*omega.x*volc ;
+    $srcJ[mk][mi] -= -2.*omega.y*volc ;
+    $srcJ[mk][mj] -=  2.*omega.x*volc ;
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    real coefP = drdp*$vol ;
+    $srcJ[mi][4] -= cor.x*coefP ;
+    $srcJ[mj][4] -= cor.y*coefP ;
+    $srcJ[mk][4] -= cor.z*coefP ;
+    real coefT = drdt*$vol ;
+    $srcJ[mi][0] -= cor.x*coefT ;
+    $srcJ[mj][0] -= cor.y*coefT ;
+    $srcJ[mk][0] -= cor.z*coefT ;
+  }
+
+  //add centrifugal Jacobian terms to srcJ[cc] (w.r.t. primitive variables).
+  $rule apply(srcJ<-frameRotAxis,frameRotCenter,frameRotSpeed,
+	      u,rho,temperature,gagePressure,Pambient,
+              vol,cellcenter)[Loci::Summation],
+    constraint(coriolis,geom_cells) {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4;
+    const vect3d omega = ($frameRotSpeed)*($frameRotAxis) ;
+    const vect3d rcell = ($cellcenter-($frameRotCenter)) ;
+    const vect3d r = rcell - dot(rcell,($frameRotAxis))*($frameRotAxis) ;
+    const vect3d wr = cross(omega,r) ;
+    const vect3d wwr = cross(omega,wr) ;
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    const real esrc = dot(wwr,$u) ;
+    real coefP = drdp*$vol ;
+    $srcJ[mi][4] -= wwr.x*coefP ;
+    $srcJ[mj][4] -= wwr.y*coefP ;
+    $srcJ[mk][4] -= wwr.z*coefP ;
+    $srcJ[ei][4] -= esrc*coefP ;
+    real coefT = drdt*$vol ;
+    $srcJ[mi][0] -= wwr.x*coefT ;
+    $srcJ[mj][0] -= wwr.y*coefT ;
+    $srcJ[mk][0] -= wwr.z*coefT ;
+    $srcJ[ei][0] -= esrc*coefT ;
+    const real rhovol = $rho*$vol ;
+    $srcJ[ei][mi] -= wwr.x*rhovol ;
+    $srcJ[ei][mj] -= wwr.y*rhovol ;
+    $srcJ[ei][mk] -= wwr.z*rhovol ;
+  }
+}
