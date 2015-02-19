@@ -1,0 +1,120 @@
+#include <Loci.h>
+
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+using std::cerr ;
+using std::cout ;
+using std::endl ;
+
+namespace flowPsi {
+  class gravity_options : public options_list {
+  public:
+    gravity_options() :
+      options_list("rhoref:g") {} ;
+  } ;
+}
+
+namespace Loci {
+  template<> struct data_schema_traits<flowPsi::gravity_options> {
+    typedef USER_DEFINED_CONVERTER Schema_Converter ;
+
+    typedef char Converter_Base_Type ;
+    typedef StringStreamConverter<flowPsi::gravity_options> Converter_Type ;
+  } ;
+}
+
+namespace flowPsi {
+  $type gravity param<gravity_options> ;
+  $rule optional(gravity) {
+  }
+
+  $type gravity_rhoref param<real> ;
+
+
+  $rule unit(gravityAccel),constraint(UNIVERSE) {
+    $gravityAccel = vect3d(0.0,0.0,0.0) ;
+  }
+
+  // Rule to prevent unneeded diagnostics
+  $rule apply(gravityAccel)[Loci::Summation],constraint(UNIVERSE),prelude {
+    
+  } ;
+  
+  $rule apply(gravityAccel<-gravity)[Loci::Summation], prelude {
+    if(Loci::MPI_rank==0) {
+      if((*$gravity).optionExists("g")) { 
+	vect3d grav = vect3d(0.0,0.0,0.0) ;
+	get_vect3dOption(*$gravity,"g","m/s/s",grav) ;
+	join(*$gravityAccel,grav) ;
+      }
+    }
+  } ;
+  
+  $rule singleton(gravity_rhoref<-gravity) {
+    $gravity_rhoref = 0.0 ;
+    if($gravity.optionExists("rhoref")) {
+      if($gravity.getOptionValueType("rhoref") == Loci::UNIT_VALUE) {
+        Loci::UNIT_type vu ;
+        $gravity.getOption("rhoref",vu) ;
+        if(!vu.is_compatible("kg/m/m/m")) {
+          std::cerr << "wrong type of units for rhoref in gravity " << std::endl ;
+          Loci::Abort() ;
+        }
+        real rhoref ;
+        $gravity.getOptionUnits("rhoref","kg/m/m/m",rhoref) ;
+        $gravity_rhoref = rhoref ;
+      } else if($gravity.getOptionValueType("rhoref") == Loci::REAL) {
+        real rhoref ;
+        $gravity.getOption("rhoref",rhoref) ;
+        $gravity_rhoref = rhoref ;
+      } else {
+	cerr << "unable to understand 'rhoref' setting in gravity." << endl ;
+        Loci::Abort() ;
+      }
+    }
+  }
+
+  //add gravity terms to src[cc].
+  $rule apply(src<-gravityAccel,rho,u,vol,gravity_rhoref,cellcenter,gravity)[Loci::Summation] {
+    int mi,mj,mk ;
+    mi = 1 ;
+    mj = mi + 1 ;
+    mk = mi + 2 ;
+    const int ei = 4;
+    real rho_vol = ($rho-$gravity_rhoref)*$vol ;
+    $src[mi] += $gravityAccel.x*rho_vol ;
+    $src[mj] += $gravityAccel.y*rho_vol ;
+    $src[mk] += $gravityAccel.z*rho_vol ;
+    $src[ei] += dot($gravityAccel,$u)*rho_vol ;
+  }
+
+
+  $rule apply(srcJ<-rho,gagePressure,temperature,Pambient,
+	      gravityAccel,gravity_rhoref,u,vol,gravity)[Loci::Summation],
+    constraint(vol,gravity) {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4 ;
+
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    real coefP = drdp*$vol ;
+    $srcJ[mi][4] += $gravityAccel.x*coefP ;
+    $srcJ[mj][4] += $gravityAccel.y*coefP ;
+    $srcJ[mk][4] += $gravityAccel.z*coefP ;
+    $srcJ[ei][4] += dot($gravityAccel,$u)*coefP ;
+    real coefT = drdt*$vol ;
+    $srcJ[mi][0] += $gravityAccel.x*coefT ;
+    $srcJ[mj][0] += $gravityAccel.y*coefT ;
+    $srcJ[mk][0] += $gravityAccel.z*coefT ;
+    $srcJ[ei][0] += dot($gravityAccel,$u)*coefT ;
+
+    real rho_vol = ($rho-$gravity_rhoref)*$vol ;
+    $srcJ[ei][mi] += $gravityAccel.x*rho_vol ;
+    $srcJ[ei][mj] += $gravityAccel.y*rho_vol ;
+    $srcJ[ei][mk] += $gravityAccel.z*rho_vol ;
+  }
+
+}

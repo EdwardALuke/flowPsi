@@ -6,7 +6,7 @@ $include "FVM.lh"
 $type plot_output param<flowPsi::list_input> ;
 $type plot_output_exclusive param<flowPsi::list_input> ;
 
-$type modelName param<string> ;
+$type modelName param<std::string> ;
 // Transform for periodic bc's (should this be in FVM.lh?)
 $type periodicTransform store<Loci::rigid_transform> ;
 
@@ -187,8 +187,8 @@ $type plot_postfix param<std::string> ;
 $type plot_status       param<int> ;
 $type restart_freq      param<int> ;
 $type restart_modulo    param<int> ;
-$type restart_directory param<string> ;
-$type restart_postfix   param<string> ;
+$type restart_directory param<std::string> ;
+$type restart_postfix   param<std::string> ;
 $type do_restart        param<bool> ;
 $type icfile            param<std::string> ;
 
@@ -201,3 +201,5 @@ $type integratedOutputFileManager blackbox<flowPsi::integratedFileDBManager> ;
 $type localPBias store<float> ;
 $type localPBias_next store<float> ;
 $type timeSteppingMode param<int> ;
+
+$type gravityAccel param<flowPsi::vect3d> ;
