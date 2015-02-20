@@ -1,4 +1,16 @@
 #include <Loci.h>
+
+#include <iostream>
+#include <string>
+using std::string ;
+using std::endl ;
+using std::cout ;
+  
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+$include "FVM.lh"
 $include "flowPsi.lh"
 
 namespace flowPsi {
@@ -7,10 +19,213 @@ namespace flowPsi {
     $iblank = 0 ;
   }
 
+  $type movingMesh store<bool> ;
+  
+  // Moving Mesh because of moving components
+  $rule pointwise(movingMesh),constraint(componentMotion) {
+    $movingMesh = true ;
+  }
+  
+  $type hasMeshMotion param<int> ;
+  $rule unit(hasMeshMotion),constraint(UNIVERSE) {
+    $hasMeshMotion = 0 ;
+  }
+
+  $rule apply(hasMeshMotion)[Loci::Maximum],constraint(pos), prelude {
+  } ;
+
+  $rule apply(hasMeshMotion)[Loci::Maximum],constraint(movingMesh),prelude {
+    join(*$hasMeshMotion,1) ;
+  } ;
+    
   $rule pointwise(us_n),constraint(area) {
     $us_n = 0 ;
   }
-  $rule pointwise(us), constraint(area) {
+  
+  $rule pointwise(moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
+    constraint(movingMesh,area) {
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos{n} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n} ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = $face2node[nd1]->$pos{n,it} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n,it} ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+
+    // Integrate grid velocities over each triangle
+    real us_n_int = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      // Edge points at {n-1}
+      const vect3d p1m = $face2node[nd1]->$pos{n} ;
+      const vect3d p2m = $face2node[nd2]->$pos{n} ;
+      // Edge points at {n}
+      const vect3d p1p = $face2node[nd1]->$pos{n,it} ;
+      const vect3d p2p = $face2node[nd2]->$pos{n,it} ;
+      // 2*area at {n-1} 
+      const vect3d am = cross(p1m-wc_prev,p2m-wc_prev) ;
+      // 2*area at {n}
+      const vect3d ap = cross(p1p-wc_next,p2p-wc_next) ;
+      // triangle centroid ant {n-1} (factor of 1/3 added at end of loop)
+      const vect3d xm = (wc_prev+p1m+p2m) ;
+      const vect3d xp = (wc_next+p1p+p2p) ;
+      // area at {n-1/2} (factor of .5 added at end of loop)
+      const vect3d ah = (am+ap) ;
+      // Numerical grid velocity dot(us,area) for this triangle
+      // (delta t divided at end of loop)
+      us_n_int += dot(ah,xp-xm);
+    }
+    // Get grid velocity at face by dividing by face area
+    $us_n{n,it} = .25*us_n_int/(3.*$area{n,it}.sada*$dtmax) ;
+  }
+  // Compute absolute grid velocity for viscous walls
+
+  $rule pointwise(us),constraint(area) {
     $us = vect3d(0,0,0) ;
   }
+  
+  $rule pointwise(moving::us{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),
+                  us_n{n,it},area{n,it}),
+    constraint(movingMesh,area) {
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos{n} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n} ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = $face2node[nd1]->$pos{n,it} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n,it} ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+
+    // Adjust velocity to match current normal
+    // grid velocity at half step
+    vect3d ug = (wc_next-wc_prev)/$dtmax ;
+    // present normal
+    vect3d n = $area{n,it}.n ;
+    // tangential component of half step grid velocity
+    vect3d utt = ug - dot(ug,n)*n ;
+    vect3d utn = utt/(norm(utt)+1e-30) ;
+    // Tangential component if normal component equals half step normal velocity
+    double ut = sqrt(max(dot(ug,ug)-$us_n{n,it}*$us_n{n,it},0.0)) ;
+
+    // reassemble vector so that half step normal velocity is aligned with
+    // current normal, remainder of grid velocity goes in current tangetial
+    // direction.
+    $us{n,it} = $us_n{n,it}*n + ut*utn ;
+  }
+
+  // Pos initial conditions
+
+  $type pos_ic store<vect3d> ;
+  $type pos_icb store<vect3d> ;
+
+  $rule pointwise(pos{n=0}<-pos_ic),inplace(pos{n=0}|pos_ic),
+    constraint(movingMesh,pos), prelude {
+  } ;
+  
+  // We need to collapse the converged positions to the next time level
+  //  $rule pointwise(pos{n+1}<-pos{n,it}),constraint(movingMesh,pos{n,it}),
+  //    conditional(newton_finished{n,it}),
+  //      inplace(pos{n+1}|pos{n,it}), prelude {} ;
+  $rule pointwise(pos{n+1}<-pos{n,it}),constraint(movingMesh,pos{n,it}),
+    conditional(newton_finished{n,it}) {
+    $pos{n+1} = $pos{n,it} ;
+  }
+  
+
+  $rule pointwise(pos_ic<-pos) {
+    $pos_ic = $pos ;
+  }
+
+  class restart_pos : public pointwise_rule {
+    const_store<vect3d> pos ;
+    const_param<string> icfile ;
+    const_param<string> modelName ;
+    store<vect3d> pos_ic ;
+  public:
+    restart_pos() {
+      name_store("pos",pos) ;
+      name_store("restart::pos_ic",pos_ic) ;
+      name_store("icfile",icfile) ;
+      name_store("modelName",modelName) ;
+      input("pos,icfile") ;
+      input("modelName") ;
+      output("restart::pos_ic") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      if(Loci::GLOBAL_AND(seq==EMPTY))
+        return ;
+
+      string filename = *icfile + string("posRestart_") + *modelName ;
+
+      int file_exists = 1 ;
+      if(Loci::MPI_rank) {
+        struct stat buf ;
+        if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+          file_exists = 0 ;
+      }
+      MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
+    
+
+      if(file_exists == 1) {
+    
+	if(Loci::MPI_rank) {
+          cout << "reading initial pos from " << filename << endl ;
+	}
+
+      
+        hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+                                           H5F_ACC_RDONLY, H5P_DEFAULT);
+        entitySet read_set = entitySet(seq) ;
+        Loci::readContainer(file_id,"pos",pos_ic.Rep(),read_set) ;
+      
+        Loci::hdf5CloseFile(file_id) ;
+      } else {
+        if(Loci::MPI_rank) {
+          cout << "pos file '" << filename << "' does not exist." << endl ;
+          cout << "using mesh for initial position instead" << endl ;
+        }
+        for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+          Entity nd = *si ;
+          pos_ic[nd] = pos[nd] ;
+        }
+      }
+    }
+  } ;
+  register_rule<restart_pos> register_restart_pos ;
+
 }

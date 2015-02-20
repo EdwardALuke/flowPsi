@@ -1,0 +1,626 @@
+#include <Loci.h>
+#include <Tools/tools.h>
+#include "gridComponent.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+using std::string ;
+using std::endl ;
+using std::cout ;
+using std::cerr ;
+using std::ifstream ;
+using std::ios ;
+#include <vector>
+using std::vector ;
+#include <map>
+using std::map ;
+#include <set>
+using std::set ;
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+$include "FVM.lh"
+$include "flowpsi.lh"
+
+namespace flowPsi {
+
+  $type min_cell2face Map ;
+  
+  $type componentMotion param<options_list> ;
+  $type componentHierarchy param<options_list> ;
+
+  $rule optional(componentMotion),
+    comments("Specify motions of individual mesh components") {
+  }
+
+  $rule default(componentHierarchy),
+    comments("Specifies the parent/child relationships between components") {
+  }
+
+  $type componentMotionTypes blackbox<std::set<std::string> > ;
+
+  $rule unit(componentMotionTypes<-componentMotion),prelude {
+    *$componentMotionTypes = std::set<std::string>() ;
+  } ;
+
+  $rule apply(componentMotionTypes)[Loci::NullOp],
+    constraint(UNIVERSE),prelude {
+    $componentMotionTypes->insert(string("rotation")) ;
+    $componentMotionTypes->insert(string("servo")) ;
+    $componentMotionTypes->insert(string("prescribed")) ;
+    $componentMotionTypes->insert(string("stationary")) ;
+  } ;
+    
+  
+  $type componentRotation_X Constraint ;
+  $type componentServo_X Constraint ;
+  $type componentPrescribed_X Constraint ;
+  $type componentStationary_X Constraint ;
+  $type volumeTag(X) param<string> ;
+  
+  $rule constraint(componentServo_X,componentRotation_X,componentPrescribed_X,componentStationary_X<-volumeTag(X),componentMotion,componentMotionTypes),
+    parametric(volumeTag(X)) {
+    string tag = $volumeTag(X) ;
+    $componentRotation_X = EMPTY ;
+    $componentPrescribed_X = EMPTY ;
+    $componentStationary_X = EMPTY ;
+    $componentServo_X = EMPTY ;
+    if($componentMotion.optionExists(tag)) {
+      string name ;
+      Loci::options_list::arg_list value_list ;
+      $componentMotion.getOption(tag,name,value_list) ;
+      if($componentMotionTypes.find(name) == $componentMotionTypes.end()) {
+        cerr << "unknown component motion directive '" << name << "' for component '"
+             << tag << "'" << endl ;
+        Loci::Abort() ;
+      }
+        
+      if(name == "rotation") {
+        $componentRotation_X = ~EMPTY ;
+      } else if(name == "servo") {
+        $componentServo_X = ~EMPTY ;
+      } else if(name == "prescribed") {
+        $componentPrescribed_X = ~EMPTY ;
+      } else if(name == "stationary") {
+        $componentStationary_X = ~EMPTY ;
+      }
+    } else {
+      cerr << "No componentMotion information for component '" << tag << "'" << endl ;
+      Loci::Abort() ;
+    }
+  }
+
+  $type componentName_X blackbox<string> ;
+  $rule blackbox(componentName_X<-volumeTag(X)),parametric(volumeTag(X)),
+    prelude {
+    *$componentName_X = *$volumeTag(X) ;
+  } ;
+
+  $type componentNameList blackbox<vector<string> > ;
+
+  $rule unit(componentNameList),constraint(UNIVERSE) {
+  }
+
+  $rule apply(componentNameList<-componentName_X)[Loci::NullOp],
+    parametric(volumeTag(X)), prelude {
+    (*$componentNameList).push_back(*$componentName_X) ;
+    std::sort((*$componentNameList).begin(),(*$componentNameList).end()) ;
+  } ;
+
+  
+  $type componentID_X param<int> ;
+  $rule singleton(componentID_X<-componentName_X,componentNameList),parametric(volumeTag(X)) {
+    $componentID_X = -1 ;
+    
+    for(size_t i=0;i<$componentNameList.size();++i)
+      if($componentNameList[i] == $componentName_X)
+        $componentID_X = i ;
+  }
+
+  $type componentID store<int> ;
+
+  $rule pointwise(componentID<-cellcenter,componentID_X),
+    constraint(volumeTag(X)),parametric(volumeTag(X)) {
+    $componentID = $componentID_X ;
+  }
+
+  $type componentID_node store<int> ;
+
+
+  $rule unit(componentID_node),constraint(pos) {
+    $componentID_node = -1 ;
+  }
+  $rule apply(face2node->componentID_node<-cl->componentID)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    int cid = $cl->$componentID ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$componentID_node,cid) ;
+  }
+
+  $rule apply(face2node->componentID_node<-cr->componentID)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    int cid = $cr->$componentID ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$componentID_node,cid) ;
+  }
+  
+
+  $type componentTransformMap blackbox<map<string,vector<componentXform> > > ;
+
+
+  
+  $type componentMotionData blackbox<map<string,componentXform> > ;
+
+  $rule unit(componentMotionData<-componentMotion), prelude {
+    *$componentMotionData = map<string,componentXform>() ;
+  } ;
+
+  
+  $type componentRotationAxis_X param<vect3d> ;
+  $type componentRotationCenter_X param<vect3d> ;
+  $type componentRotationSpeed_X param<real> ;
+
+  $rule singleton(componentRotationAxis_X,componentRotationCenter_X,
+                  componentRotationSpeed_X<-componentMotion,componentName_X),
+    constraint(componentRotation_X), parametric(volumeTag(X)) {
+    $componentRotationAxis_X = vect3d(1,0,0) ;
+    $componentRotationCenter_X= vect3d(0,0,0) ;
+    $componentRotationSpeed_X = 0 ;
+    string tag = $componentName_X ;
+    string name ;
+    Loci::options_list::arg_list value_list ;
+    $componentMotion.getOption(tag,name,value_list) ;
+    options_list ol ; 
+    ol.Input(value_list) ; // Convert to an options list
+
+
+    vect3d vec(1,0,0) ;
+    if(ol.optionExists("axis")) { 
+      get_vect3dOption(ol,"axis","",vec) ;
+      vec = vec/(norm(vec)+1e-30) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to x-axis in component rotation!" << endl ;
+      }
+    }
+    $componentRotationAxis_X = vec ;
+
+    if(ol.optionExists("center")) { 
+      get_vect3dOption(ol,"center","m",$componentRotationCenter_X) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to origin for center of component rotation!" << endl ;
+      }
+    }
+
+    if(ol.optionExists("speed")) {
+      ol.getOptionUnits("speed","rpm",$componentRotationSpeed_X) ;
+      $componentRotationSpeed_X *= 2.*M_PI/60.;  //changes rpm to rad/s
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "FATAL:  No speed specified in componentMotion rotation specification!" << endl ;
+        Loci::Abort() ;
+      }
+    }
+  }
+  
+  $type componentServoAxis_X param<vect3d> ;
+  $type componentServoCenter_X param<vect3d> ;
+  $type componentServoName_X param<string> ;
+  
+  $rule singleton(componentServoAxis_X,componentServoCenter_X,
+                  componentServoName_X<-componentMotion,componentName_X),
+    constraint(componentServo_X), parametric(volumeTag(X)) {
+    $componentServoAxis_X = vect3d(1,0,0) ;
+    $componentServoCenter_X= vect3d(0,0,0) ;
+    $componentServoName_X = "default" ;
+    string tag = $componentName_X ;
+    string name ;
+    Loci::options_list::arg_list value_list ;
+    $componentMotion.getOption(tag,name,value_list) ;
+    options_list ol ; 
+    ol.Input(value_list) ; // Convert to an options list
+
+
+    vect3d vec(1,0,0) ;
+    if(ol.optionExists("axis")) { 
+      get_vect3dOption(ol,"axis","",vec) ;
+      vec = vec/(norm(vec)+1e-30) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to x-axis in component servo axis!" << endl ;
+      }
+    }
+    $componentServoAxis_X = vec ;
+
+    if(ol.optionExists("center")) { 
+      get_vect3dOption(ol,"center","m",$componentServoCenter_X) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to origin for center of component servo!" << endl ;
+      }
+    }
+
+    if(ol.optionExists("name")) {
+      ol.getOption("name",$componentServoName_X) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "FATAL:  No name specified in componentMotion servo specification!" << endl ;
+        Loci::Abort() ;
+      }
+    }
+  }
+  
+  
+  $type componentNodes_X store<bool> ;
+
+  $rule pointwise(face2node->componentNodes_X),constraint(cl->volumeTag(X)),parametric(volumeTag(X)) {} 
+  $rule pointwise(face2node->right::componentNodes_X),constraint(cr->volumeTag(X)),parametric(volumeTag(X)) {} 
+  
+
+ 
+  $rule apply(componentMotionData<-componentRotationAxis_X,componentRotationCenter_X,componentRotationSpeed_X,componentName_X,dtmax,stime)[Loci::NullOp],
+    constraint(componentRotation_X),parametric(volumeTag(X)), prelude {
+    double t = *$stime + *$dtmax ;
+    
+    const real angle = *$componentRotationSpeed_X*t ;
+    Quaternion rotation(*$componentRotationAxis_X,angle) ;
+    const vect3d cg = *$componentRotationCenter_X ;
+    componentXform xform ;
+    xform.cg = cg ;
+    xform.new_cg = cg ;
+    xform.q = rotation ;
+    string name = *$componentName_X ;
+    (*$componentMotionData)[name] = xform ;
+  } ;
+
+  $rule apply(componentMotionData<-componentName_X)[Loci::NullOp],
+    constraint(componentStationary_X),parametric(volumeTag(X)), prelude {
+    const vect3d cg = vect3d(0,0,0) ;
+    const real angle = 0 ;
+    Quaternion rotation(vect3d(1,0,0),angle) ;
+    componentXform xform ;
+    xform.cg = cg ;
+    xform.new_cg = cg ;
+    xform.q = rotation ;
+    string name = *$componentName_X ;
+    (*$componentMotionData)[name] = xform ;
+  } ;
+
+  $type ServoPositionInfo blackbox<map<string,double> > ;
+
+  $rule unit(ServoPositionInfo),constraint(UNIVERSE) {
+    map<string,double> tmp ;
+    $ServoPositionInfo = tmp ;
+  }
+
+  $rule apply(componentMotionData<-componentServoAxis_X,componentServoCenter_X,componentServoName_X,componentName_X,ServoPositionInfo)[Loci::NullOp],
+    constraint(componentServo_X),parametric(volumeTag(X)), prelude {
+    
+    //    const real angle = *$componentRotationSpeed_X*t ;
+    real angle = 0 ;
+    map<string,double>::const_iterator mi = 
+      (*$ServoPositionInfo).find(*$componentServoName_X) ;
+    if(mi == (*$ServoPositionInfo).end()) {
+      cerr << "could not find position info for servo " << *$componentServoName_X << endl ;
+      Loci::Abort() ;
+    }
+    angle = mi->second * M_PI/ 180.0 ; // Convert angle from degrees to radians
+
+    
+    Quaternion rotation(*$componentServoAxis_X,angle) ;
+    const vect3d cg = *$componentServoCenter_X ;
+    componentXform xform ;
+    xform.cg = cg ;
+    xform.new_cg = cg ;
+    xform.q = rotation ;
+    string name = *$componentName_X ;
+    (*$componentMotionData)[name] = xform ;
+  } ;
+
+  
+  $type componentTransforms_X param<vector<componentXform> > ;
+  $type componentTransformsn_X param<vector<componentXform> > ;
+
+  
+  $type componentRelationships_X blackbox<vector<string> > ;
+
+  $rule blackbox(componentRelationships_X<-componentName_X,componentHierarchy),
+    parametric(volumeTag(X)), prelude {
+    vector<string> tmp ;
+    string tag = *$componentName_X ;
+    while((*$componentHierarchy).optionExists(tag)) {
+      string name ;
+      Loci::options_list::arg_list value_list ;
+      (*$componentHierarchy).getOption(tag,name,value_list) ;
+      if(name != "parent") {
+        cerr << "unknown keyword, '" << name << "', in componentHierarchy!" << endl;
+        Loci::Abort() ;
+      }
+      if(value_list.size() != 1 ||
+         value_list[0].type_of() != Loci::NAME) {
+        cerr << "parent takes single named argument in componentHierarchy!" << endl ;
+        Loci::Abort() ;
+      }
+      value_list[0].get_value(tag) ;
+      for(size_t i=0;i<tmp.size();++i)
+        if(tmp[i] == tag) {
+          cerr << "cycle in componentHierarchy!" << endl ;
+          Loci::Abort() ;
+        }
+      tmp.push_back(tag) ;
+    }
+
+    *$componentRelationships_X = tmp ;
+  } ;
+
+  $type componentParents blackbox< vector<int> > ;
+  $type componentChildren blackbox< vector<vector<int> > > ;
+
+  $rule unit(componentParents<-componentNameList), prelude {
+    int sz = ($componentNameList)->size() ;
+    vector<int> vtmp(sz,-1) ;
+    (*$componentParents).swap(vtmp) ;
+  } ;
+
+  $rule apply(componentParents<-componentRelationships_X,componentID_X,componentNameList)[Loci::NullOp],parametric(volumeTag(X)), prelude {
+    int rsz = ($componentRelationships_X)->size() ;
+    if(rsz > 1) {
+      cerr << "only one parent allowed" << endl ;
+    }
+    int cid = *$componentID_X ;
+    int csz = ($componentNameList)->size() ;
+    for(int i=0;i<rsz;++i) {
+      int id = -1 ;
+      string name =(*$componentRelationships_X)[i] ;
+      for(int j=0;j<csz;++j) {
+        if(name == (*$componentNameList)[j])
+          id = j ;
+      }
+      (*$componentParents)[cid] = id ;
+    }
+  } ;
+
+  $rule singleton(componentChildren<-componentParents) {
+    int sz = $componentParents.size() ;
+    // transpose structure to convert parent relationship to child
+    vector<vector<int> > children(sz) ;
+    for(int i=0;i<sz;++i) {
+      if($componentParents[i] >=0)
+        children[$componentParents[i]].push_back(i) ;
+    }
+    $componentChildren.swap(children) ;
+  }
+    
+  
+  $rule singleton(componentTransforms_X<-componentMotionData,componentName_X,
+                  componentRelationships_X),
+    parametric(volumeTag(X)) {
+    $componentTransforms_X.clear() ;
+    componentXform xform ;
+    map<string,componentXform>::const_iterator mi ;
+    mi = $componentMotionData.find($componentName_X) ;
+    if(mi != $componentMotionData.end())
+      xform = mi->second ;
+    else {
+      cerr << "problem finding component " << $componentName_X << endl ;
+    }
+    $componentTransforms_X.push_back(xform) ;
+    for(size_t i=0;i<$componentRelationships_X.size();++i) {
+      mi = $componentMotionData.find($componentRelationships_X[i]) ;
+      if(mi != $componentMotionData.end()) {
+        $componentTransforms_X.push_back(mi->second) ;
+      } else {
+        cerr << "component '" << $componentName_X << "' unable to find parent '"
+             << $componentRelationships_X[i] << "'!" << endl ;
+        Loci::Abort() ;
+      }
+    }
+  }
+
+
+  $rule unit(componentTransformMap),constraint(componentMotionData), prelude {
+  } ;
+
+  $rule apply(componentTransformMap<-componentTransformsn_X,componentName_X)[Loci::NullOp],parametric(volumeTag(X)),option(disable_threading), prelude {
+    (*$componentTransformMap)[(*$componentName_X)] = (*$componentTransformsn_X) ;
+  } ;
+  
+  // Prescribed motion starts here... First we implement a cubic spline
+
+  // Compute spline derivatives
+  void splineD(vector<double> &xp, const vector<double> &x,
+               const vector<double> &t) {
+    int n = x.size() ;
+    vector<double> tmp(n) ;
+    xp.swap(tmp) ;
+    for(int i=1;i<n-1;++i) {
+      const double dt1 = t[i+1]-t[i] ;
+      const double dt2 = t[i]-t[i-1] ;
+      const double dx1 = x[i+1]-x[i] ;
+      const double dx2 = x[i]-x[i-1] ;
+      if(dt1 < 1e-33)
+        xp[i] = dx2/dt2 ;
+      else if(dt2 < 1e-33)
+        xp[i] = dx1/dt1 ;
+      else 
+        xp[i] = .5*(dx1/dt1+dx2/dt2) ;
+    }
+    double x1l = x[1]-x[0] ;
+    double t1l = t[1]-t[0] ;
+    xp[0] = x1l/t1l ;
+    if(n>2) {
+      double x2l = x[2]-x[0] ;
+      double t2l = t[2]-t[0] ;
+      if(t[2]-t[1] > 1e-33)
+        xp[0] = (t2l*t2l*x1l-t1l*t1l*x2l)/(t1l*t2l*t2l-t2l*t1l*t1l) ;
+    }
+    int N = n-1 ;
+    x1l = x[N-1]-x[N] ;
+    t1l = t[N-1]-t[N] ;
+    xp[N] = x1l/t1l ;
+    if(n>2) {
+      double t2l = t[N-2]-t[N] ;
+      double x2l = x[N-2]-x[N] ;
+      if(t[N-1]-t[N-2] > 1e-33)
+        xp[N] = (t2l*t2l*x1l-t1l*t1l*x2l)/(t1l*t2l*t2l-t2l*t1l*t1l) ;
+    }
+  }
+
+  // Find the time interval that we are splining
+  int findt(const vector<double> &t, double tval) {
+    int n = t.size() ;
+    double tmin = t[0] ;
+    double tmax = t[n-1] ;
+    int nmin = 0 ;
+    int nmax = n-1 ;
+    if(tval < tmin)
+      return 0 ;
+    if(tval > tmax)
+      return n-1 ;
+    int pt = int(floor((tval-tmin)/(tmax-tmin))) ;
+    while(t[pt+1]<tval || t[pt] > tval) {
+      if(t[pt] < tval)
+        nmin = pt+1 ;
+      if(t[pt+1] > tval)
+        nmax = pt-1 ;
+      pt = (nmin+nmax)/2 ;
+    }
+    return pt ;
+  }
+
+  double spline(int ind,double tval,const vector<double> &t,
+                const vector<double> &x,
+                const vector<double> &xp) {
+    const double dt = max((t[ind+1]-t[ind]),1e-33) ;
+    const double T = max(0.0,min(1.0,(tval-t[ind])/dt)) ;
+    const double p0 = x[ind] ;
+    const double p1 = x[ind+1] ;
+    const double m0 = xp[ind]*dt ;
+    const double m1 = xp[ind+1]*dt ;
+    const double T2 = T*T ;
+    const double T3 = T*T2 ;
+    double xi = ((2.*T3-3.*T2+1.)*p0 + (T3-2.*T2+T)*m0 +
+                 (-2.*T3+3.*T2  )*p1 + (T3-T2     )*m1 ) ;
+    return xi ;
+  }
+
+  $type prescribedMotion_X blackbox<motionSplines> ;
+  
+  $rule blackbox(prescribedMotion_X<-volumeTag(X)),
+    constraint(componentPrescribed_X),parametric(volumeTag(X)),
+    prelude {
+
+    if(Loci::MPI_rank) {
+      string filename = "motion_" + *$volumeTag(X) + ".dat" ;
+      ifstream infile(filename.c_str(),ios::in) ;
+      if(infile.fail()) {
+        cerr << "open failed on '" << filename <<"'"<< endl ;
+        Loci::Abort() ;
+      }
+
+      int npnts = 0 ;
+      infile >> npnts ;
+      if(npnts <= 1 || npnts > 10000000) {
+        cerr << "unreasonable number of points, " << npnts << ", in file '" << filename << "'." << endl ;
+        cerr << "check file for validity"<< endl ;
+        Loci::Abort() ;
+      }
+      vector<double> t(npnts),x(npnts),y(npnts),z(npnts) ;
+      vector<double> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
+      for(int i=0;i<npnts;++i) {
+        infile >> t[i] >> x[i] >> y[i] >> z[i]
+               >> q0[i] >> q1[i] >> q2[i] >> q3[i] ;
+        if(infile.fail()) {
+          cerr << "problem reading data from file '" << filename << endl ;
+          Loci::Abort() ;
+        }
+        if(i>0 && t[i-1] > t[i]) {
+          cerr << "time series should be in order of increasing time in file '" << filename << endl ;
+          Loci::Abort() ;
+        }
+      }
+      MPI_Bcast(&npnts,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&t[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&x[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&y[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&z[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q0[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q1[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q2[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q3[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      $prescribedMotion_X->initialize(t,x,y,z,q0,q1,q2,q3) ;
+    } else {
+      int npnts ;
+      MPI_Bcast(&npnts,1,MPI_INT,0,MPI_COMM_WORLD) ;
+      vector<double> t(npnts),x(npnts),y(npnts),z(npnts) ;
+      vector<double> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
+      MPI_Bcast(&t[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&x[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&y[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&z[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q0[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q1[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q2[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      MPI_Bcast(&q3[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+      $prescribedMotion_X->initialize(t,x,y,z,q0,q1,q2,q3) ;
+    }
+  } ;
+
+  $type prescribedCG_X param<vect3d> ;
+  $rule singleton(prescribedCG_X<-prescribedMotion_X),
+    parametric(volumeTag(X)) {
+    vect3d cg ;
+    Quaternion q ;
+    $prescribedMotion_X.getMotion(cg,q,0.0) ;
+    $prescribedCG_X = cg ;
+  }
+
+  $rule apply(componentMotionData<-prescribedMotion_X,prescribedCG_X,componentName_X,dtmax,stime)[Loci::NullOp],
+    constraint(componentPrescribed_X),parametric(volumeTag(X)), prelude {
+    double t = *$stime + *$dtmax ;
+    vect3d cg_new ;
+    Quaternion q ;
+    $prescribedMotion_X->getMotion(cg_new,q,t) ;
+    componentXform xform ;
+    xform.cg = *$prescribedCG_X ;
+    xform.new_cg = cg_new ;
+    xform.q = q ;
+    string name = *$componentName_X ;
+    (*$componentMotionData)[name] = xform ;
+  } ;
+
+  $rule pointwise(pos{n,it}<-pos{n},pos,componentTransformsn_X{n,it}),
+    constraint(componentNodes_X{n},componentMotion),
+    parametric(volumeTag(X)) {
+    vect3d xpos = $pos ;
+    for(size_t i=0;i<$componentTransformsn_X{n,it}.size();++i)
+      xpos = $componentTransformsn_X{n,it}[i].applyXform(xpos) ;
+    $pos{n,it} = xpos ;
+  }    
+
+  $rule singleton(componentTransformsn_X{n}<-componentTransforms_X{n}),
+    parametric(volumeTag(X)) {
+    $componentTransformsn_X{n} = $componentTransforms_X{n} ;
+  }
+  
+  $type componentVectorRotation_X param<tens3d> ;
+
+  $rule singleton(componentVectorRotation_X<-componentTransformsn_X), parametric(volumeTag(X)) {
+    int sz = $componentTransformsn_X.size() ;
+    vect3d v = vect3d(1,0,0) ;
+    for(int i=0;i<sz;++i)
+      v = $componentTransformsn_X[i].applyRotation(v) ;
+    $componentVectorRotation_X.x = v ;
+    v = vect3d(0,1,0) ;
+    for(int i=0;i<sz;++i)
+      v = $componentTransformsn_X[i].applyRotation(v) ;
+    $componentVectorRotation_X.y = v ;
+    v = vect3d(0,0,1) ;
+    for(int i=0;i<sz;++i)
+      v = $componentTransformsn_X[i].applyRotation(v) ;
+    $componentVectorRotation_X.z = v ;
+  }
+}

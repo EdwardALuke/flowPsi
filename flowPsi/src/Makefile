@@ -13,7 +13,7 @@ TARGET = flowpsi
 
 OBJS =  \
 	main.o gridTools.o gridSetup.o gridReader.o gridDynamic.o \
-	gridAxisymmetry.o gridCoriolis.o \
+	gridAxisymmetry.o gridCoriolis.o gridComponents.o\
 	bcInputs.o bcImpermeable.o bcInflow.o bcOutflow.o bcTools.o\
 	bcIsentropic.o bcFixedMass.o bcViscousWall.o \
 	solverTimestep.o solverNewton.o solverEoS.o solverIC.o \
