@@ -568,7 +568,7 @@ namespace lagrangianP {
   }
   
   $rule pointwise(OUTPUT{n}<-totalMassInjected{n},p_dtmax{n}),prelude {
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "total particle mdot is "
            << (*$totalMassInjected{n})/(*$p_dtmax{n}) << endl ;
     }

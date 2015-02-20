@@ -227,7 +227,7 @@ namespace lagrangianP {
 
   $rule singleton(particleModel<-particle_model) {
     readParticleModel($particleModel,$particle_model) ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "Lagrangian particle model = " << $particleModel << endl ;
     }
   }

@@ -631,7 +631,7 @@ namespace lagrangianP {
       int ibn_global = 0;
       MPI_Reduce(&ibn, &ibn_global, 1,
           MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cerr << "registering " << ibn_global 
              << " iblanked particles" << endl;
       }
@@ -793,7 +793,7 @@ namespace lagrangianP {
 
     void
     compute(const sequence& seq) {
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cout << "Particle Tracking with Dual-decomposition Method" << endl ;
       }
 
@@ -814,14 +814,14 @@ namespace lagrangianP {
         list<Particle>& bag = *particle_bag ;
         // let the particle space object manage the
         // reconstruction of the particles
-	$[Once] {
+	if(Loci::MPI_rank==0) {
           cout << "--Reading particles from: "
                << filename << "..." ;
           cout.flush() ;
         }
         //ParticleSpace::instance().register_particles(filename, bag) ;
         ParticleSpace::instance().restart_particles(filename,bag);
-	$[Once] {
+	if(Loci::MPI_rank==0) {
           cout << "Done" << endl ;
         }
       } else {
@@ -879,13 +879,13 @@ namespace lagrangianP {
     // create the hdf5 file
     filename = string("output/particle_pos.") +
       num2str(iteration) + "_" + casename ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing file " << filename << endl ;
       file_id = H5Fcreate(filename.c_str(),
                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
     }
     Loci::writeUnorderedVector(file_id, "particle position", vec) ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       H5Fclose(file_id) ;
     }
     // then we write out the velocity
@@ -894,13 +894,13 @@ namespace lagrangianP {
       vec[idx] = li->get_velocity() ;
     filename = string("output/ptvel_ptvec.") +
       num2str(iteration) + "_" + casename ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing file " << filename << endl ;
       file_id = H5Fcreate(filename.c_str(),
                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
     }
     Loci::writeUnorderedVector(file_id, "ptvel", vec) ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       H5Fclose(file_id) ;
     }
     
@@ -913,13 +913,13 @@ namespace lagrangianP {
      }
      filename = string("output/ptdia_ptsca.") +
        num2str(iteration) + "_" + casename ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        cout << "writing file " << filename << endl ;
        file_id = H5Fcreate(filename.c_str(),
                            H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
      }
      Loci::writeUnorderedVector(file_id, "ptdia", dia) ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        H5Fclose(file_id) ;
      }
 
@@ -931,13 +931,13 @@ namespace lagrangianP {
      }
      filename = string("output/ptmass_ptsca.") +
        num2str(iteration) + "_" + casename ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        cout << "writing file " << filename << endl ;
        file_id = H5Fcreate(filename.c_str(),
                            H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
      }
      Loci::writeUnorderedVector(file_id, "ptmass", mass) ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        H5Fclose(file_id) ;
      }
      
@@ -949,13 +949,13 @@ namespace lagrangianP {
      }
      filename = string("output/ptnump_ptsca.") +
        num2str(iteration) + "_" + casename ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        cout << "writing file " << filename << endl ;
        file_id = H5Fcreate(filename.c_str(),
                            H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
      }
      Loci::writeUnorderedVector(file_id, "ptnump", nump) ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        H5Fclose(file_id) ;
      }
      
@@ -969,14 +969,14 @@ namespace lagrangianP {
      }
      filename = string("output/ptinfo.") +
        num2str(iteration) + "_" + casename ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        cout << "writing file " << filename << endl ;
        file_id = H5Fcreate(filename.c_str(),
                            H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
      }
      Loci::writeUnorderedVector(file_id, "id", pid) ;
      Loci::writeUnorderedVector(file_id, "bin", bin) ;
-     $[Once] {
+     if(Loci::MPI_rank==0) {
        H5Fclose(file_id) ;
      }
   }
@@ -1092,13 +1092,13 @@ namespace lagrangianP {
 
     // create the hdf5 file for particle restart file
     string filename = directory_name + string("particleRestart_") + casename ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing particle restart file " << filename << endl ;
       file_id = H5Fcreate(filename.c_str(),
                           H5F_ACC_TRUNC, H5P_DEFAULT, H5P_DEFAULT) ;
     }
     Loci::writeUnorderedVector(file_id, "particle restart", vec) ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       H5Fclose(file_id) ;
     }
 
@@ -1109,14 +1109,14 @@ namespace lagrangianP {
 
     filename = directory_name + "cellWeight_" + casename ;
 
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing cell weight file " << filename << endl ;
     }
     file_id = Loci::hdf5CreateFile(filename.c_str(),
                                    H5F_ACC_TRUNC,
                                    H5P_DEFAULT, H5P_DEFAULT) ;
     if(file_id < 0) {
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cerr << "...failed to create file: " << filename
              << ", Aborting..." << endl ;
       }
@@ -1153,7 +1153,7 @@ namespace lagrangianP {
     MPI_Allreduce(&psize, &min_size, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD) ;
     MPI_Allreduce(&psize, &max_size, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD) ;
 
-    $[Once] {
+    if(Loci::MPI_rank==0) {
 #ifdef TIMING
       cout << "Particle: " << *$ncycle{n}
       << ", pnum=" << total_size << ", dist=["

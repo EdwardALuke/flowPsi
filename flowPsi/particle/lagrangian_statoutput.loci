@@ -59,7 +59,7 @@ namespace lagrangianP {
         << "_" << modelName ;
     string filename = oss.str() ;
 #ifdef VERBOSE
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing file " << filename << endl ;
     }
 #endif
@@ -86,7 +86,7 @@ namespace lagrangianP {
     string filename = oss.str() ;
 
 #ifdef VERBOSE
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       cout << "writing file " << filename << endl ;
     }
 #endif
@@ -158,7 +158,7 @@ namespace lagrangianP {
   }
 
   $rule apply(ic_avg_time<- icf_avg_time)[priority_joiner], prelude {
-    $[Once] {
+    if(Loci::MPI_rank == 0) {
       *$ic_avg_time = std::pair<int,real>(1,*$icf_avg_time) ;
     } 
   } ;
@@ -214,7 +214,7 @@ namespace lagrangianP {
 
     // check if the file exists
     int file_exists = 1 ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       struct stat buf ;
       if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
         file_exists = 0 ;
@@ -222,7 +222,7 @@ namespace lagrangianP {
     MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
       
     if(file_exists == 1) {
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cout << "reading particles avg info from: " << filename << endl ;
       }
         
@@ -245,7 +245,7 @@ namespace lagrangianP {
     } else {
       // if avg restart file does not exist, then we set
       // default value
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cout << "particle avg restart file not found, "
              << "setting default values..." << endl ;
       }
@@ -265,7 +265,7 @@ namespace lagrangianP {
 
     // check if the file exists
     int file_exists = 1 ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       struct stat buf ;
       if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
         file_exists = 0 ;
@@ -308,7 +308,7 @@ namespace lagrangianP {
 
     // check if the file exists
     int file_exists = 1 ;
-    $[Once] {
+    if(Loci::MPI_rank==0) {
       struct stat buf ;
       if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
         file_exists = 0 ;
@@ -316,7 +316,7 @@ namespace lagrangianP {
     MPI_Bcast(&file_exists,1,MPI_INT,0,MPI_COMM_WORLD) ;
       
     if(file_exists == 1) {
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cout << "reading particles avg bin info from: " << filename << endl ;
       }
         
@@ -350,7 +350,7 @@ namespace lagrangianP {
     } else {
       // if avg restart file does not exist, then we set
       // default value
-      $[Once] {
+      if(Loci::MPI_rank==0) {
         cout << "particle avg bin restart file not found, "
              << "setting default values..." << endl ;
       }
@@ -1275,7 +1275,7 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
       string filename = *restart_directory+string("particleAvg_")+
 	*modelName ;
 
-      $[Once] {
+      if(Loci::MPI_rank==0) {
 	cout << "writing particle avg restart file " << filename << endl ;
       }
 
@@ -1283,7 +1283,7 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
 					   H5F_ACC_TRUNC,
 					   H5P_DEFAULT, H5P_DEFAULT) ;
       if(file_id < 0) {
-	$[Once] {
+	if(Loci::MPI_rank==0) {
 	  cerr << "...failed to create file: " << filename
 	       << ", Aborting..." << endl ;
 	}
@@ -1341,7 +1341,7 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
       string filename = *restart_directory+string("particleAvgbin_")+
 	*modelName ;
 
-      $[Once] {
+      if(Loci::MPI_rank==0) {
 	cout << "writing particle avg bin restart file " << filename << endl ;
       }
 
@@ -1349,7 +1349,7 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
 					   H5F_ACC_TRUNC,
 					   H5P_DEFAULT, H5P_DEFAULT) ;
       if(file_id < 0) {
-	$[Once] {
+	if(Loci::MPI_rank==0) {
 	  cerr << "...failed to create file: " << filename
 	       << ", Aborting..." << endl ;
 	}
