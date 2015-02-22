@@ -472,6 +472,44 @@ namespace flowPsi {
     $initialConditionsU.swap(u_list) ;
   }
 
+  $type initialConditionsAngVel param<vector<vect3d> > ;
+  $type initialConditionsRotAxis param<vector<vect3d> > ;
+  $type initialConditionsRotCenter param<vector<vect3d> > ;
+
+  $rule singleton(initialConditionsAngVel,initialConditionsRotAxis,
+		  initialConditionsRotCenter<-icRegionInfo) {
+    const int sz = $icRegionInfo.size() ;
+    vector<vect3d> angvel_list ;
+    vector<vect3d> rotaxis_list ;
+    vector<vect3d> rotctr_list ;
+
+    for(int i=0;i<sz;++i) {
+      vect3d avel(0,0,0) ;
+      vect3d raxi(0,0,1) ;
+      vect3d rctr(0,0,0) ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("rotAxis")) {
+	get_vect3dOption(finput,"rotAxis","",raxi) ;
+	raxi = raxi/max(norm(raxi),1e-30) ;
+      }
+      if(finput.optionExists("rotSpeed")) {
+	real rpm = 0 ;
+	finput.getOptionUnits("rotSpeed","rpm",rpm) ;
+	avel = (0.104720*rpm)*raxi ;
+      }
+      if(finput.optionExists("rotCenter")) {
+	get_vect3dOption(finput,"rotCenter","m",rctr,1) ;
+      }
+      angvel_list.push_back(avel) ;
+      rotaxis_list.push_back(raxi) ;
+      rotctr_list.push_back(rctr) ;
+    }
+    $initialConditionsAngVel.swap(angvel_list) ;
+    $initialConditionsRotAxis.swap(rotaxis_list) ;
+    $initialConditionsRotCenter.swap(rotctr_list) ;
+  }
+
+
   $rule pointwise(temperature_ic<-
 		  initialConditionsTemperature,
 		  icRegionId),
@@ -486,9 +524,17 @@ namespace flowPsi {
     $gagePressure_ic = $initialConditionsGagePressure[$icRegionId] ;
   }
 
-  $rule pointwise(u_ic<-initialConditionsU,icRegionId),
+  $rule pointwise(u_ic<-initialConditionsU,icRegionId,cellcenter,
+		  initialConditionsAngVel,initialConditionsRotAxis,
+		  initialConditionsRotCenter),
     constraint(icRegionInfo,geom_cells) {
-    $u_ic = $initialConditionsU[$icRegionId] ;
+    const vect3d omega = $initialConditionsAngVel[$icRegionId] ;
+    const vect3d r = ($cellcenter-$initialConditionsRotCenter[$icRegionId]) ;
+    const vect3d raxis = $initialConditionsRotAxis[$icRegionId] ;
+    const vect3d dr = r - dot(r,raxis)*raxis ;
+    const vect3d urot = cross(omega,dr) ;
+
+    $u_ic = $initialConditionsU[$icRegionId]+urot ;
   }
   
   $rule pointwise(icfile::temperature_ic,icfile::gagePressure_ic,
