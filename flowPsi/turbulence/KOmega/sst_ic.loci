@@ -2,6 +2,10 @@
 #include <Tools/stream.h>
 #include "flowTypes.h"
 #include "flowPsiIO.h"
+#include "initialConditions.h"
+
+#include <vector>
+using std::vector ;
 
 $include "flowPsi.lh"
 $include "kOmega.lh"
@@ -9,41 +13,41 @@ $include "kOmega.lh"
 
 namespace flowPsi {
 
-  $rule pointwise(k_ic<-vol),constraint(geom_cells,TurbulentSimulation) {
-    $k_ic = 1e-3 ;
+  $type initialConditionsTurbK param<vector<real> > ;
+  $type initialConditionsTurbW param<vector<real> > ;
+
+  $rule singleton(initialConditionsTurbK,initialConditionsTurbW<-
+		  icRegionInfo) {
+    const int sz = $icRegionInfo.size() ;
+    vector<real> k_list ;
+    vector<real> w_list ;
+    for(int i=0;i<sz;++i) {
+      real k = 1e-3 ;
+      real w = 100 ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("k")) {
+	finput.getOption("k",k) ;
+      }
+      if(finput.optionExists("w")) {
+	finput.getOption("w",w) ;
+      }
+      if(finput.optionExists("omega")) {
+	finput.getOption("omega",w) ;
+      }
+      k_list.push_back(k) ;
+      w_list.push_back(w) ;
+    }
+    $initialConditionsTurbK.swap(k_list) ;
+    $initialConditionsTurbW.swap(w_list) ;
   }
 
-  $rule pointwise(w_ic<-vol),constraint(geom_cells,TurbulentSimulation) {
-    $w_ic = 100 ;
+  $rule pointwise(k_ic<-initialConditionsTurbK,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $k_ic = $initialConditionsTurbK[$icRegionId] ;
   }
-  // // Initial conditions for general cells
-  // $type k_ic store<real > ;
-  // $type w_ic store<real > ;
-
-  // $type icRegionInfo blackbox<ICparsedInitRegion> ;
-
-  // $rule pointwise(w_ic,k_ic<-icRegionInfo,cellcenter,qvi),
-  //   constraint(geom_cells,SST_BSL_KW) {
-  //   double k,w ;
-  //   $icRegionInfo.defaultState.get_k_omega(k,w) ;
-  //   for(size_t j=0;j<$icRegionInfo.fluidRegions.size();++j) {
-  //     if($icRegionInfo.fluidRegions[j].geomTestFunc->inGeomPt($cellcenter)) {
-  //       $icRegionInfo.fluidRegions[j].regionState.get_k_omega(k,w) ;
-  //     }
-  //   }
-    
-  //   $k_ic = k ;
-  //   $w_ic = w ;
-  // }
-
-  // $type k_ic store<real> ;
-  // $type rho_ic store<real> ;
-  // $type tmuu_ic store<real> ;
-
-  // $rule pointwise(ic_file::w_ic<-k_ic,rho_ic,tmuu_ic),
-  //   constraint(geom_cells,k_ic,tmuu_ic,SST_BSL_KW) {
-  //   const real wic = ($tmuu_ic <= 0.0)?1.0:($rho_ic*$k_ic/$tmuu_ic) ;
-  //   $w_ic =  wic ;
-  // }
+  $rule pointwise(w_ic<-initialConditionsTurbW,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $w_ic = $initialConditionsTurbW[$icRegionId] ;
+  }
 
 }

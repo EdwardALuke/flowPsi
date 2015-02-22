@@ -2,36 +2,44 @@
 #include <Tools/stream.h>
 #include "flowTypes.h"
 #include "flowPsiIO.h"
+#include "initialConditions.h"
+
+#include <vector>
+using std::vector ;
+
 
 $include "flowPsi.lh"
 
 
 namespace flowPsi {
 
-  // Initial conditions for general cells
+  $type initialConditionsTurbnuTilde param<vector<real> > ;
   $type nuTilde_ic store<real> ;
-  $type icRegionInfo blackbox<ICparsedInitRegion> ;
 
-//  $rule pointwise(nuTilde_ic<-icRegionInfo,cellcenter),
-//    constraint(geom_cells) {
-//    double nu_t ;
-//    
-//    $icRegionInfo.defaultState.get_nu_t(nu_t) ;
-//
-//    $nuTilde_ic = nu_t ;
-//  }
+  $rule singleton(initialConditionsTurbnuTilde<-
+		  icRegionInfo) {
+    const int sz = $icRegionInfo.size() ;
+    vector<real> nut_list ;
+    for(int i=0;i<sz;++i) {
+      real nut = 1e-6 ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("nu_t")) {
+	finput.getOption("nu_t",nut) ;
+      }
+      if(finput.optionExists("nuTilde")) {
+	finput.getOption("nuTilde",nut) ;
+      }
+      nut_list.push_back(nut) ;
 
-  $rule pointwise(nuTilde_ic<-cellcenter) {
-    $nuTilde_ic = 1e-6 ;
+    }
+    $initialConditionsTurbnuTilde.swap(nut_list) ;
   }
 
-  $type rho_ic store<real> ;
-  $type tmuu_ic store<real> ;
-
-  $rule pointwise(ic_file::nuTilde_ic<-rho_ic,tmuu_ic),
-    constraint(geom_cells,rho_ic,tmuu_ic) {
-    $nuTilde_ic = $tmuu_ic/$rho_ic ; // rho*nu_t
+  $rule pointwise(nuTilde_ic<-initialConditionsTurbnuTilde,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $nuTilde_ic = $initialConditionsTurbnuTilde[$icRegionId] ;
   }
+
 
 }
 
