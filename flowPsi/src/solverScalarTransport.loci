@@ -224,11 +224,6 @@ namespace flowPsi {
     $X_ico = $X_ic ;
   }
     
-//   $rule pointwise(X{n=-1}<-X_ico),constraint(X_ic,backward_scheme,time_accurate,C),
-//   parametric(scalarTransportP(X,C)) {
-//     $X{n=-1} = $X_ico ;
-//   }
-  
   $rule pointwise(X{n=0}<-X_ic),constraint(geom_cells,C),
   parametric(scalarTransportP(X,C)) {
     $X{n=0} = $X_ic ;
@@ -255,27 +250,6 @@ namespace flowPsi {
      cout << *$scalarTransportName_X << " ncyc = " << *$ncycle{n} << endl ;
   } ;
 
-//   $rule pointwise(OUTPUT{n}<-X{n-1},ncycle{n},stime{n},restart_modulo{n},
-//                   restart_directory{n},restart_postfix{n},modelName{n},
-// 		  scalarTransportName_X),
-//     conditional(do_restart{n}),
-//     constraint(geom_cells{n},C{n}), 
-//     parametric(scalarTransportP(X,C)),  prelude {
-//     if(*$ncycle{n} == 0)
-//       return ;
-    
-//     string filename = *$restart_directory{n} + *($scalarTransportName_X)+ string("Prev_") + *$modelName{n} ;
-
-//    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
-//                                         H5P_DEFAULT, H5P_DEFAULT) ;
-
-//    Loci::writeContainer(file_id,*$scalarTransportName_X,$X{n-1}.Rep()) ;
-//    Loci::hdf5CloseFile(file_id) ;
-
-//    if(Loci::MPI_rank == 0)
-//      cout << *$scalarTransportName_X << " ncyc = " << *$ncycle{n} << endl ;
-//   } ;
-
   $rule pointwise(X_n{n,it=0}<-X{n}),constraint(geom_cells{n},C),
     parametric(scalarTransportP(X,C)) {
     $X_n{n,it=0} = $X{n} ;
@@ -286,7 +260,7 @@ namespace flowPsi {
 
   $rule pointwise(X{n+1}<-X_n{n,it}),
      conditional(newtonFinished{n,it}),
-     constraint(geom_cells{n,it},C),
+    constraint(geom_cells{n,it},timeStepSteadyState,C),
      inplace(X{n+1}|X_n{n,it}),
      parametric(scalarTransportP(X,C)), prelude {} ;
 
@@ -298,23 +272,23 @@ namespace flowPsi {
     $X{n,plot} = $X{n} ;
   }
 
-//   $rule pointwise(X{n+1}<-X_n{n,it},X{n},newton_iter{n,it}),
-//     conditional(newton_finished{n,it}),
-//     constraint(geom_cells{n,it},implicit_scheme{n,it},kinetic_energy_consistent{n,it},C),
-//     inplace(X{n+1}|X_n{n,it}),
-//     parametric(scalarTransportP(X,C)) {
-//     real Xstar = max($X_n{n,it},1e-15) ;
-//     real dXstar = max((Xstar-$X{n})/Xstar,-1.95) ;
-//     if(dXstar < 0.0)
-//       dXstar += 0.25*dXstar*dXstar ;
-//     $X{n+1} = Xstar*(1. + dXstar) ;
-//   }
+  $rule pointwise(X{n+1}<-X_n{n,it},X{n}),
+    conditional(newtonFinished{n,it}),
+    constraint(geom_cells{n,it},timeStepAccurate{n,it},C),
+    inplace(X{n+1}|X_n{n,it}),
+    parametric(scalarTransportP(X,C)) {
+    real Xstar = max($X_n{n,it},1e-15) ;
+    real dXstar = max((Xstar-$X{n})/Xstar,-1.95) ;
+    if(dXstar < 0.0)
+      dXstar += 0.25*dXstar*dXstar ;
+    $X{n+1} = Xstar*(1. + dXstar) ;
+  }
   
   $type X_dq store<real> ;
   $type X_next store<real> ;
 
   $type X_np1 store<real> ;
-  $rule pointwise(X_np1{n,it}<-X{n,it},X{n}),constraint(kinetic_energy_consistent{n,it},X{n},geom_cells,C),
+  $rule pointwise(X_np1{n,it}<-X{n,it},X{n}),constraint(timeStepAccurate{n,it},X{n},geom_cells,C),
     parametric(scalarTransportP(X,C)) {
     real Xstar = max($X{n,it},1e-15) ;
     real dXstar = max((Xstar-$X{n})/Xstar,-1.95) ;
@@ -332,17 +306,6 @@ namespace flowPsi {
     $X_next = $X + tscale*$X_dq ;
     $X_next = max($X_next,1e-15) ;
   }
-//   // advance rule for scalar transport newton iteration
-//   //(for local time-stepping, used in steady state problem)
-//   $rule pointwise(X_next<-X_dq,X),
-//     constraint(X,X_dq,time_accurate,C),
-//     parametric(scalarTransportP(X,C)) {
-//     const real relax = 0.9 ;
-//     real tscale = 1.0 ;
-//     tscale = min(tscale, relax*$X/(fabs($X_dq)+1e-15)) ;
-//     $X_next = $X + tscale*$X_dq ;
-//     $X_next = max($X_next,1e-15) ; // Keep nu positive
-//   }
   
   $rule pointwise(X_next<-X),
     constraint(X,X_dq,time_frozen,C), 
@@ -444,30 +407,30 @@ namespace flowPsi {
 
   // Add stabilizing term that comes from substracting the continuity eqn.
   $rule apply(X_src<-rho_dot,X)[Loci::Summation],
-    constraint(geom_cells,X,C),
+    constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
     $X_src -= $X*$rho_dot ;
   }
-//   $rule apply(X_src<-rho_dot,X_np1)[Loci::Summation],
-//     constraint(geom_cells,X,implicit_scheme,kinetic_energy_consistent,C),
-//     parametric(scalarTransportP(X,C)) {
-//     $X_src -= $X_np1*$rho_dot ;
-//   }
+  $rule apply(X_src<-rho_dot,X_np1)[Loci::Summation],
+    constraint(geom_cells,X,implicit_scheme,timeStepAccurate,C),
+    parametric(scalarTransportP(X,C)) {
+    $X_src -= $X_np1*$rho_dot ;
+   }
 
   // Jacobian of stabilization term
   $rule apply(X_srcJ<-rho_dot)[Loci::Summation],
-    constraint(geom_cells,X,C),
+    constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
     double factor = -$rho_dot ; 
     $X_srcJ += factor ;
   }  
 
-//   $rule apply(X_srcJ<-rho_dot)[Loci::Summation],
-//     constraint(geom_cells,kinetic_energy_consistent,X,C),
-//     parametric(scalarTransportP(X,C)) {
-//     double factor = -2.*$rho_dot ; 
-//     $X_srcJ += factor ;
-//   }
+   $rule apply(X_srcJ<-rho_dot)[Loci::Summation],
+     constraint(geom_cells,timeStepAccurate,X,C),
+     parametric(scalarTransportP(X,C)) {
+     double factor = -2.*$rho_dot ; 
+     $X_srcJ += factor ;
+   }
 
   // Jacobians of convective transport
   $rule apply(X_fjp<-scalar_mdot_f)[Loci::Summation],
@@ -578,7 +541,7 @@ namespace flowPsi {
       $X_srcJ += li->$X_fjm ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(X_srcJ{n,it},C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
 
     // compute diagonal block d from srcJ (input in d) time step
@@ -589,41 +552,16 @@ namespace flowPsi {
       $X_D{n,it} = 1 ;
   }
 
-//   $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},theta,psi,vol{n,it},iblank{n,it},q{n},q{n-1},numSpecies{n}),constraint(time_accurate{n,it},backward_scheme{n,it},X_srcJ{n,it},C),
-//     parametric(scalarTransportP(X,C)) {
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(timeStepAccurate{n,it},X_srcJ{n,it},C),
+     parametric(scalarTransportP(X,C)) {
 
-//     int ns = $numSpecies{n} ;
-//     real rn = $q{n}[0] ;
-//     real rnm1 = $q{n-1}[0] ;
-//     for(int i=1;i<ns;++i) {
-//       rn += $q{n}[i] ;
-//       rnm1 +=$q{n-1}[i] ;
-//     }
-    
-//     // compute diagonal block d from srcJ (input in d) time step
-//     const real sd = ((1.+$psi)*rn + $psi*(rn-rnm1))*($vol{n,it}/(($theta)*$dtau{n,it})) ;
+    // compute diagonal block d from srcJ (input in d) time step
+    const real sd = (2.*$rhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
 
-//     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
-//     if($iblank{n,it} > 1) 
-//       $X_D{n,it} = 1 ;
-//   }
-
-//   $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},q{n},numSpecies{n}),constraint(time_accurate{n,it},kinetic_energy_consistent{n,it},X_srcJ{n,it},C),
-//     parametric(scalarTransportP(X,C)) {
-
-//     int ns = $numSpecies{n} ;
-//     real rn = $q{n}[0] ;
-//     for(int i=1;i<ns;++i) {
-//       rn += $q{n}[i] ;
-//     }
-    
-//     // compute diagonal block d from srcJ (input in d) time step
-//     const real sd = (2.*rn )*($vol{n,it}/$dtau{n,it}) ;
-
-//     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
-//     if($iblank{n,it} > 1) 
-//       $X_D{n,it} = 1 ;
-//   }
+    $X_D{n,it} = -$X_srcJ{n,it} + sd ;
+    if($iblank{n,it} > 1) 
+      $X_D{n,it} = 1 ;
+  }
 
   // Residue Output
   $type X_residual param<double> ;
@@ -635,12 +573,7 @@ namespace flowPsi {
   $type grid_vol_iblank param<real> ;
   
   $type X_resid store<real> ;
-//   $rule pointwise(X_resid<-X_rhs,iblank),constraint(geom_cells,time_accurate,C),
-//     parametric(scalarTransportP(X,C)) {
-//     $X_resid = 0 ;
-//     if($iblank < 2)
-//       $X_resid = $X_rhs ;
-//   }
+
   $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C),
     parametric(scalarTransportP(X,C)) {
     $X_resid = 0 ;
@@ -672,38 +605,5 @@ namespace flowPsi {
     }
   } ;
 
-//#define TEST
-#ifdef TEST
-  //--------------------------------------------------------------------------
-  //
-  // Test code
-
-  $type scalarTrasportP(X,Y) param<bool> ;
-  $rule pointwise(OUTPUT<-scalarTransportP(test,testC)) {
-  }
-
-  $type testC param<bool> ;
-  $rule singleton(testC),constraint(UNIVERSE) {
-    $testC = true ;
-  }
-
-  $type test_ic store<real> ;
-  $rule pointwise(test_ic),constraint(geom_cells) {
-    $test_ic = 0 ;
-  }
-  $type test store<real> ;
-  $rule apply(src<-test)[Loci::Summation], prelude {
-  } ;
-  
-  $type test_bc store<real> ;
-  $rule pointwise(test_bc),constraint(ref) {
-    $test_bc = 0.0 ;
-  }
-  $rule pointwise(priority::test_bc),constraint(isentropicInflow_BC) {
-    $test_bc = 1.0 ;
-  }
-
-  OUTPUT_SCALAR_ALWAYS("cell2node(test)",test) ;
-#endif
 }
 
