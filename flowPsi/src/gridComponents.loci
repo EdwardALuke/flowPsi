@@ -22,7 +22,7 @@ using std::set ;
 #include <unistd.h>
 
 $include "FVM.lh"
-$include "flowpsi.lh"
+$include "flowPsi.lh"
 
 namespace flowPsi {
 
