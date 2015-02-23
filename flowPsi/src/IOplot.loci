@@ -246,6 +246,7 @@ namespace flowPsi {
   OUTPUT_SCALAR_ALWAYS("cell2node(rho)",r) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(soundSpeed)",a) ;
   OUTPUT_VECTOR_ALWAYS("cell2node_v3d(u)",v) ;
+  OUTPUT_SCALAR("cell2nodeMin(dtau)",dt) ;
 
   void solver_dump_var(const sequence &seq,
                        Loci::storeRepP var,
