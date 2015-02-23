@@ -3,6 +3,9 @@
 #include "inviscidFlux.h"
 $include "flowPsi.lh"
 
+using std::endl ;
+using std::cerr ;
+
 namespace flowPsi {
 
   class vwall_check : public BC_Check {
@@ -42,6 +45,80 @@ namespace flowPsi {
 
   register_BC<vwall_check> register_BC_vwall_check ;
 
+  class movingWall_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "viscousWall,wallLaw" ; }
+    std::string variablesChecked() { return "Uwall,angVel,rotAxis,rotCenter,rotSpeed,stationary" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      bool rotSpeed = bc_options.optionExists("rotSpeed") ;
+      bool rotCenter = bc_options.optionExists("rotCenter") ;
+      bool rotAxis = bc_options.optionExists("rotAxis") ;
+      bool Uwall = bc_options.optionExists("Uwall") ;
+      bool stationary = bc_options.optionExists("stationary") ;
+      bool angVel = bc_options.optionExists("angVel") ;
+      bool check = true ;
+
+      if((rotSpeed || rotCenter || rotAxis) && (!rotSpeed || !rotCenter || !rotAxis)) {
+        check = false ;
+        error_message += "Must set rotSpeed, rotCenter, and rotAxis simultaneously. " ;
+      }
+      if(!(rotSpeed && rotCenter && rotAxis) && (angVel || rotCenter) && (!angVel || !rotCenter)) {
+        check = false ;
+        error_message += "Must set angVel and rotCenter simultaneously. " ;
+      }
+      if((rotSpeed|rotAxis)&angVel) {
+        check = false ;
+        error_message += "'angVel' is incompatible with rotSpeed and rotAxis. " ;
+      }
+
+      if(rotSpeed) {
+        if(!check_scalar_units(bc_options,"rotSpeed","radians/second")) {
+          error_message += "wrong units for rotSpeed " ;
+          check = false ;
+        }
+      }
+      if(rotCenter) {
+        if(!check_vector_units(bc_options,"rotCenter","m")) {
+          error_message += "error in rotCenter specification " ;
+          check = false ;
+        }
+      }
+      if(rotAxis) {
+        if(!check_vector_units(bc_options,"rotAxis","m")) {
+          error_message += "error in rotAxis specification " ;
+          check = false ;
+        }
+      }
+
+      if(Uwall) {
+        if(!check_vector_units(bc_options,"Uwall","m/s")) {
+          error_message += "Uwall not specified correctly. " ;
+          check = false ;
+        }
+      }
+
+      if(angVel) {
+        if(!check_vector_units(bc_options,"angVel","radians/s")) {
+          error_message += "angVel not specified correctly. " ;
+          check = false ;
+        }
+      }
+      if((stationary && Uwall) || (stationary && rotAxis)) {
+        error_message += "Stationary wall can not have Uwall or rotation specifications. " ;
+        check = false ;
+      }
+
+      return check ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<movingWall_check> register_BC_movingWall_check ;
 
   // Identify walls that have a prescribed heat flux
   $type wallHeatFlux store<bool> ;
