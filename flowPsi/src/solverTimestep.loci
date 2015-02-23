@@ -198,17 +198,18 @@ namespace flowPsi {
 
   // Compute local pressure bias using cfl
   $rule pointwise(localPBias<-cflpdt,dtmax,timePressureBiasControl),
-    constraint(geom_cells) {
+    constraint(geom_cells,timeStepAccurate) {
     double cfl = $cflpdt*$dtmax ;
     double factor = min(1.0,max(0.0,0.1*(cfl-1.))) ;
     $localPBias = max($timePressureBiasControl,pow(factor,0.7)) ;
   }
   
-  $rule pointwise(localPBias_next{n,it=0}),constraint(geom_cells{n}) {
+  $rule pointwise(localPBias_next{n,it=0}),constraint(geom_cells{n},timeStepAccurate) {
     $localPBias_next{n,it=0} = 1.0 ;
   }
 
-  $rule pointwise(localPBias_next{n,it+1}<-localPBias{n,it}) {
+  $rule pointwise(localPBias_next{n,it+1}<-localPBias{n,it}),
+    constraint(geom_cells{n,it},timeStepAccurate) {
     $localPBias_next{n,it+1} = $localPBias{n,it} ;
   }
   
