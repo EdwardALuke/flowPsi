@@ -105,7 +105,7 @@ namespace flowPsi {
     const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
     const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
     const real_fj drdp = 1./(Rt*Tr) ;
-    const real_fj drdT = -rl/Tr ;
+    const real_fj drdT = -rr/Tr ;
 
     
     const real_fj h0l = Rt*Tl*gamma/gm1 + 0.5*dot(Ul,Ul) ;
@@ -352,6 +352,8 @@ namespace flowPsi {
 
     fj[4][4] += AM*(dabsSMdp*re0l_star - dabsSMdp*re0r_star +
     		    CR*dre0r_stardp + CL*dre0l_stardp) ;
+    
+
   }
   // jacobian with respect to left side variables (positive going information)
   void hllc_fjp(Mat<real_fj> fj,
@@ -609,6 +611,81 @@ namespace flowPsi {
 
     fj[4][4] += AM*(dabsSMdp*re0l_star - dabsSMdp*re0r_star +
     		    CR*dre0r_stardp + CL*dre0l_stardp) ;
+    
+  }
+
+  inline  void damping_fjm(Mat<real_fj> fj,
+                           real pgr, real Tr, vect3d Ur,
+                           vect3d an, real area,
+                           real pambient, real Rt,real gamma, real Us_n,
+                           real beta ) {
+    const real_fj coef = 0.5*area ;
+    const real_fj gm1 = gamma-1 ;
+    const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
+    const real_fj drdp = 1./(Rt*Tr) ;
+    const real_fj drdT = -rr/Tr ;
+    
+    const real_fj utra = dot(Ur,an) ;
+    const real_fj utr = utra-Us_n ; 
+    const real_fj ar = sqrt(gamma*Rt*Tr) ;
+
+    // Temporal damping
+    double coefd = beta*(fabs(utr)+ar)*coef ;
+    fj[0][0] -= coefd*drdT ;
+    fj[1][0] -= coefd*drdT*Ur.x ;
+    fj[2][0] -= coefd*drdT*Ur.y ;
+    fj[3][0] -= coefd*drdT*Ur.z ;
+    fj[4][0] -= coefd*drdT*0.5*dot(Ur,Ur) ;
+    fj[0][4] -= coefd*drdp ;
+    fj[1][4] -= coefd*drdp*Ur.x ;
+    fj[2][4] -= coefd*drdp*Ur.y ;
+    fj[3][4] -= coefd*drdp*Ur.z ;
+    fj[4][4] -= coefd*(1./gm1+drdp*0.5*dot(Ur,Ur)) ;
+    
+    fj[1][1] -= coefd*rr ;
+    fj[2][2] -= coefd*rr ;
+    fj[3][3] -= coefd*rr ;
+
+    fj[4][1] -= coefd*rr*Ur.x ;
+    fj[4][2] -= coefd*rr*Ur.y ;
+    fj[4][3] -= coefd*rr*Ur.z ;
+  }
+  
+  inline void damping_fjp(Mat<real_fj> fj,
+                          real pgl, real Tl, vect3d Ul,
+                          vect3d an, real area,
+                          real pambient, real Rt,real gamma, real Us_n,
+                          real beta ) {
+    const real_fj coef = 0.5*area ;
+    const real_fj gm1 = gamma-1 ;
+    const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
+    const real_fj drdp = 1./(Rt*Tl) ;
+    const real_fj drdT = -rl/Tl ;
+    
+    const real_fj utla = dot(Ul,an) ;
+    const real_fj utl = utla-Us_n ; 
+    const real_fj al = sqrt(gamma*Rt*Tl) ;
+    
+    // Temporal damping
+    double coefd = beta*(fabs(utl)+al)*coef ;
+    fj[0][0] += coefd*drdT ;
+    fj[1][0] += coefd*drdT*Ul.x ;
+    fj[2][0] += coefd*drdT*Ul.y ;
+    fj[3][0] += coefd*drdT*Ul.z ;
+    fj[4][0] += coefd*drdT*0.5*dot(Ul,Ul) ;
+    fj[0][4] += coefd*drdp ;
+    fj[1][4] += coefd*drdp*Ul.x ;
+    fj[2][4] += coefd*drdp*Ul.y ;
+    fj[3][4] += coefd*drdp*Ul.z ;
+    fj[4][4] += coefd*(1./gm1+drdp*0.5*dot(Ul,Ul)) ;
+    
+    fj[1][1] += coefd*rl ;
+    fj[2][2] += coefd*rl ;
+    fj[3][3] += coefd*rl ;
+
+    fj[4][1] += coefd*rl*Ul.x ;
+    fj[4][2] += coefd*rl*Ul.y ;
+    fj[4][3] += coefd*rl*Ul.z ;
   }
 
   $rule pointwise(iflux <- 
@@ -655,6 +732,35 @@ namespace flowPsi {
 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
   }
   
+  
+  $type temporalDamping param<real> ;
+  
+  $rule optional(temporalDamping) {
+    $temporalDamping = 0.1 ;
+  }
+  
+  $rule apply(fjp <- 
+		  leftv3d(u),leftsP(temperature,Zero),
+		  leftsP(gagePressure,minPg),
+	      area,Pambient,Rtilde,gamma,us_n,temporalDamping)[Loci::Summation],
+    constraint(temporalDamping,(cl,cr)->(u,temperature,gagePressure)) {
+    damping_fjp($fjp,
+                $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+                $leftv3d(u),
+                $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+                $temporalDamping) ;
+  }
+  $rule apply(fjm <- 
+		  rightv3d(u),rightsP(temperature,Zero),
+		  rightsP(gagePressure,minPg),
+	      area,Pambient,Rtilde,gamma,us_n,temporalDamping)[Loci::Summation],
+    constraint(temporalDamping,(cl,cr)->(u,temperature,gagePressure)) {
+    damping_fjm($fjm,
+                $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+                $rightv3d(u),
+                $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+                $temporalDamping) ;
+  }
   
   $rule unit(src),constraint(geom_cells) {
     for(int i=0;i<5;++i)
