@@ -358,9 +358,9 @@ $rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulat
     $fjp[ei][rw] += $u_f.x*coef*an.x*an.z*(1./3.) ;
     $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*(1./3.) ;
     $fjp[ei][rw] += $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
-    $fjp[ei][ru] += 0.5*$vflux[ru] ;
-    $fjp[ei][rv] += 0.5*$vflux[rv] ;
-    $fjp[ei][rw] += 0.5*$vflux[rw] ;
+    $fjp[ei][ru] += 0.5*$vflux[0] ;
+    $fjp[ei][rv] += 0.5*$vflux[1] ;
+    $fjp[ei][rw] += 0.5*$vflux[2] ;
 
      const real factor = $kconductTotal*sada/dist ;
      $fjp[ei][0] += factor ;
@@ -396,9 +396,9 @@ $rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulat
      $ci->$srcJ[ei][rw] -= $u_f.x*coef*an.x*an.z*(1./3.) ;
      $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*(1./3.) ;
      $ci->$srcJ[ei][rw] -= $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
-     $ci->$srcJ[ei][ru] -= .5*$vflux[ru] ;
-     $ci->$srcJ[ei][rv] -= .5*$vflux[rv] ;
-     $ci->$srcJ[ei][rw] -= .5*$vflux[rw] ;
+     $ci->$srcJ[ei][ru] -= .5*$vflux[0] ;
+     $ci->$srcJ[ei][rv] -= .5*$vflux[1] ;
+     $ci->$srcJ[ei][rw] -= .5*$vflux[2] ;
 
      const real factor = $kconductTotal*sada/dist ;
      $ci->$srcJ[ei][0] -= factor ;
