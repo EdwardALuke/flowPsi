@@ -126,7 +126,6 @@ namespace flowPsi {
 #else
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
 #endif
-    const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
     
     vect3d ucor = dot($gradv3d_f(u),dv) ;
     const vect3d uf = 0.5*($cl->$u+$cr->$u) ; 
@@ -150,7 +149,6 @@ namespace flowPsi {
     real dt = (dot($grads_f(temperature),dv))*
       ($cl->$limiters(temperature))*($cr->$limiters(temperature)) ;
     real tf = (0.5*($cl->$temperature+$cr->$temperature) + dt) ;
-
 
     const real rf = (pgf+$Pambient)/($Rtilde*tf) ;
     const real mdot = rf*ufn*sada ;
@@ -220,7 +218,7 @@ namespace flowPsi {
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
     const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
     
-    double CC = 0.125*$SSF_Coeff ;
+    double CC = $SSF_Coeff/6.0 ;
     vect3d ucor = dot($gradv3d_f(u),dv) ;
     ucor.x *= ($cl->$limiterv3d(u).x)*($cr->$limiterv3d(u).x) ;
     ucor.y *= ($cl->$limiterv3d(u).y)*($cr->$limiterv3d(u).y) ;
@@ -292,7 +290,6 @@ namespace flowPsi {
 	$iflux[i] = alpha*uflux[i]+(1.-alpha)*$iflux[i] ;
     }
   }
-
 
   OUTPUT_SCALAR("cell2nodeMax(alpha_diss)",alpha) ;  
 }
