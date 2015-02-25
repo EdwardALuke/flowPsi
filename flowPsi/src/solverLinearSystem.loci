@@ -185,16 +185,23 @@ namespace flowPsi {
                   temperature{n,it},gagePressure{n,it},localPBias{n,it},
                   Rtilde) {
     const real Tstar = $temperature{n,it} ;
+    const real Tn = $temperature{n} ;
+    const real Tnp1 = Tn*Tstar/(2.*Tn-Tstar) ;
+
     const real pgstar = $gagePressure{n,it} ;
-    const real Tnp1 = (2.*Tstar - $temperature{n}) ;
     const real peps = $localPBias{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
     
     $rhonp1{n,it} = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
   }
   
+  $type Tn store<real> ;
+  $rule pointwise(Tn{n,it}<-temperature{n},temperature{n,it}) {
+    $Tn{n,it} = $temperature{n} ;
+  }
+
   $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
-		  rhon,rhonp1,un,Rtilde,gamma,localPBias,iblank),
+		  Tn,rhon,rhonp1,un,Rtilde,gamma,localPBias,iblank),
     constraint(geom_cells,timeStepAccurate), inplace(fluid_D|srcJ) {
     
     for(int i=0;i<5;++i)
@@ -244,9 +251,13 @@ namespace flowPsi {
     const real srhon = sqrt($rhon) ;
     const real ucoef = 0.5*srhon/($rhonp1*srhonp1) ;
     const real ucoef2 = srhon/srhonp1 ;
-    const real drdt = -rho/$temperature ;
+    const real Ts = $temperature ;
+    const real CT = 1./(2.*$Tn-Ts) ;
+    real dTdTs = $Tn*CT*(1.+Ts*CT) ;
+    const real drdt = -dTdTs*rho/$temperature ;
     const real drdp = rho/($gagePressure+$Pambient) ;
-    dqdqstar[0][0] += 1.0 ;
+
+    dqdqstar[0][0] =  dTdTs ;
     dqdqstar[4][4] += Pcoef ;
     
     dqdqstar[1][0] += ucoef*drdt*($un.x-$u.x) ;

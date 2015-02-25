@@ -218,8 +218,10 @@ namespace flowPsi {
   $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtmax{n,it},dtau{n,it},vol{n,it},localPBias{n,it},Pambient,Rtilde,gamma),
     inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepAccurate) {
     const real Tstar = $temperature{n,it} ;
+    const real Tn = $temperature{n} ;
+    const real Tnp1 = Tn*Tstar/(2.*Tn-Tstar) ;
+
     const real pgstar = $gagePressure{n,it} ;
-    const real Tnp1 = (2.*Tstar - $temperature{n}) ;
     const real peps = $localPBias{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
     
