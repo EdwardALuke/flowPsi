@@ -219,7 +219,7 @@ namespace flowPsi {
     inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepAccurate) {
     const real Tstar = $temperature{n,it} ;
     const real Tn = $temperature{n} ;
-    const real Tnp1 = Tn*Tstar/(2.*Tn-Tstar) ;
+    const real Tnp1 = 2.*Tstar - Tn ;
 
     const real pgstar = $gagePressure{n,it} ;
     const real peps = $localPBias{n,it} ;
