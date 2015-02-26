@@ -40,15 +40,20 @@ namespace flowPsi {
 
   $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
 		  temperature{n,it},gagePressure{n,it},u{n,it}),
-    inplace(temperature{n+1}|temperature{n,it}),
-    inplace(gagePressure{n+1}|gagePressure{n,it}),
-    inplace(u{n+1}|u{n,it}),
+  //    inplace(temperature{n+1}|temperature{n,it}),
+  //    inplace(gagePressure{n+1}|gagePressure{n,it}),
+  //    inplace(u{n+1}|u{n,it}),
     constraint(geom_cells,timeStepSteadyState),
-    conditional(newtonFinished{n,it}), prelude { } ;
+    conditional(newtonFinished{n,it}), prelude { } compute {
+      $temperature{n+1}=$temperature{n,it} ;
+      $gagePressure{n+1}=$gagePressure{n,it} ;
+      $u{n+1} = $u{n,it} ;
+    }
   
   $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
 		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
                   localPBias{n,it},
+		  temperature{n},gagePressure{n},
 		  Pambient),
     inplace(temperature{n,it+1}|temperature{n,it}),
     inplace(gagePressure{n,it+1}|gagePressure{n,it}),
@@ -58,12 +63,22 @@ namespace flowPsi {
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
     const real dp = $dfluid{n,it}[4] ;
     real alpha = 1.0 ;
-    const real T_factor = 2.0 ;
-    const real relax = 0.8 ;
-    alpha = min(alpha,0.9*$temperature{n,it}/(fabs(T_factor*dT)+1e-30)) ;
+    double relax = 0.8 ;
+    const real Tstar = $temperature{n,it} ;
+    const real Tn = $temperature{n} ;
+    const real Tnp1 = 2.*Tstar -Tn ;
+
+    double dTlim = (relax*Tnp1)/2.0 ;
+    
+    alpha = min(alpha,dTlim/max(fabs(dT),1e-30)) ;
+
+    const real pgstar = $gagePressure{n,it} ;
     const real peps = $localPBias{n,it} ;
-    const real P_factor = (2.-peps) ;
-    alpha = min(alpha,relax*($gagePressure{n,it}+$Pambient)/(fabs(P_factor*dp)+1e-30)) ;
+    const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
+
+    double dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
+    alpha = min(alpha,dplim/max(fabs(dp),1e-30)) ;
+
     $temperature{n,it+1} = $temperature{n,it} + alpha*dT;
     $gagePressure{n,it+1} = $gagePressure{n,it} + alpha*dp ;
     $u{n,it+1} = $u{n,it} + alpha*du ;

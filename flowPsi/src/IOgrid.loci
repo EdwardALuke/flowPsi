@@ -41,6 +41,7 @@ namespace flowPsi {
   $type output_topo param<bool> ;
   $type ncycle param<int> ;
 
+#ifdef SEPARATE_PLOT
   $rule singleton(output_topo{n,plot}<-ncycle{n,plot},$n{n}) {
     $output_topo{n,plot} = ($$n{n} == 0) ;
   }
@@ -80,6 +81,47 @@ namespace flowPsi {
   } ;
 
 
+#else
+  $rule singleton(output_topo{n,it}<-ncycle{n,it},$n{n},lastNewton{n,it}) {
+    $output_topo{n,it} = ($$n{n} == 0) && $lastNewton{n,it} ;
+  }
+  
+  class output_grid_topology : public pointwise_rule {
+    param<bool> OUTPUT ;
+    const_multiMap upper,lower,boundary_map,face2node ;
+    const_store<flowPsi::vect3d> pos ;
+    const_Map ref ;
+    const_store<string> boundary_names ;
+    const_param<string> modelName ;
+    const_param<bool> firstPlot ;
+    const_param<string> plot_postfix ;
+  public:
+    output_grid_topology() {
+      name_store("OUTPUT{n,it}",OUTPUT) ;
+      name_store("upper",upper) ;
+      name_store("lower",lower) ;
+      name_store("boundary_map",boundary_map) ;
+      name_store("face2node",face2node) ;
+      name_store("ref",ref) ;
+      name_store("boundary_names{n,it}",boundary_names) ;
+      name_store("modelName",modelName) ;
+      name_store("pos{n,it}",pos) ;
+      //      name_store("firstPlot{n,it}",firstPlot) ;
+      name_store("plot_postfix{n,it}",plot_postfix) ;
+      input("plot_postfix{n,it}") ;
+      input("modelName") ;
+      input("(upper,lower,boundary_map)->face2node->pos{n,it}") ;
+      input("boundary_map->ref->boundary_names{n,it}") ;
+      conditional("output_topo{n,it}") ;
+      output("OUTPUT{n,it}") ;
+      disable_threading() ;
+    }
+    
+    void compute(const sequence &seq) ;
+  } ;
+
+
+#endif
 
   void output_grid_topology::compute(const sequence &seq) {
     string basename = *modelName + ".topo" ;

@@ -139,14 +139,28 @@ namespace flowPsi {
     $ncycle{n=0} = $ic_ncycle ;
   }
 
-  $rule singleton(ncycle{n+1}<-ncycle{n}) {
-    $ncycle{n+1} = $ncycle{n} + 1 ;
+  $rule singleton(ncycle{n,it=0}<-ncycle{n}) {
+    $ncycle{n,it=0} = $ncycle{n} + 1 ;
+  }
+
+  $rule singleton(ncycle{n,it+1}<-ncycle{n,it}) {
+    $ncycle{n,it+1} = $ncycle{n,it} ;
+  }
+  $rule singleton(ncycle{n+1}<-ncycle{n,it}),conditional(newtonFinished{n,it}) {
+    $ncycle{n+1} = $ncycle{n,it} ;
   }
   
-  $rule singleton(stime{n+1}<-stime{n},dtmax) {
-    $stime{n+1} = $stime{n} + $dtmax ;
+  $rule singleton(stime{n,it=0}<-stime{n}) {
+    $stime{n,it=0} = $stime{n} ;
   }
-  
+  $rule singleton(stime{n,it+1}<-stime{n,it},dtmax,$it{n,it}) {
+    $stime{n,it+1} = $stime{n,it} + (($$it{n,it}==0)?($dtmax):0.0) ;
+  }
+
+  $rule singleton(stime{n+1}<-stime{n,it}),conditional(newtonFinished{n,it}) {
+    $stime{n+1} = $stime{n,it} ;
+  }
+
   
   $rule default(urelax), comments("under relaxation factor used to compute local timestep based on estimated change in temperature and pressure") {
     $urelax = 0.2 ;

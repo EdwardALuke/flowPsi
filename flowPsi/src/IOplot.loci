@@ -34,6 +34,7 @@ namespace flowPsi {
     $plot_output_exclusive.namelist = "" ;
   }    
 
+#ifdef SEPARATE_PLOT
   $type plot param<int> ;
   $rule singleton(plot{n,plot=0}<-ncycle{n}) {
     $plot{n,plot=0} = $ncycle{n} ;
@@ -71,8 +72,24 @@ namespace flowPsi {
 
   $rule singleton(do_plot{n,plot}<-ncycle{n},plot{n,plot},plot_freq) {
     $do_plot{n,plot} = ((($ncycle{n})%$plot_freq) == 0) ;
+    if(Loci::MPI_rank == 0) {
+      if($do_plot{n,plot}) {
+	cout << "plot output, ncycle = " << $ncycle{n} << endl ;
+      }
+    }
   }
+#else
 
+  $rule singleton(do_plot{n,it}<-ncycle{n,it},plot_freq,lastNewton{n,it}) {
+    $do_plot{n,it} = (((($ncycle{n,it})%$plot_freq) == 0) &&
+		      $lastNewton{n,it}) ;
+    if(Loci::MPI_rank == 0) {
+      if($do_plot{n,it}) {
+	cout << "plot output, ncycle = " << $ncycle{n,it} << endl ;
+      }
+    }
+  }
+#endif 
   $rule singleton(plot_postfix<-ncycle,plot_modulo) {
     $plot_postfix = "" ;
     int cycle = $ncycle ;
@@ -280,5 +297,82 @@ namespace flowPsi {
     option(disable_threading) {
     solver_dump_var(seq,$*Pambient.Rep(),$plot_postfix,$modelName,"par","Pambient") ;
   }
+
+  $rule singleton(do_boundary_plot{n,it}<-ncycle{n,it},plot_freq,lastNewton{n,it}) {
+    $do_boundary_plot{n,it} = (((($ncycle{n,it})%$plot_freq) == 0) &&
+			       $lastNewton{n,it}) ;
+  }
+
+  dump_boundary_scalar::dump_boundary_scalar(const char *vname,
+                                        const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("plotOutput_") + value_name ;
+    name_store(var_name,var) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("modelName",modelName) ;
+    conditional("do_boundary_plot") ;
+    input(var_name) ;
+    input("modelName") ;
+    input("plot_postfix") ;
+    constraint("ci->vol") ;
+    constraint(constraint_name) ;
+    output("OUTPUT") ;
+  }
+  void dump_boundary_scalar::compute(const sequence &seq) {
+    ostringstream oss ;
+    oss << "output/" + value_name + "_bnd." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    //    cout << "opening file " << filename << endl ;
+    entitySet set(seq) ;
+    hid_t file_id = Loci::createUnorderedFile(filename.c_str(),set) ;
+    Loci::writeUnorderedStore(file_id,var,set,value_name.c_str()) ;
+    Loci::closeUnorderedFile(file_id) ;
+  }	
+
+  OUTPUT_BNDRY_SCALAR("yplus_w",yplus,"AllViscousBCs")  ;
+  OUTPUT_BNDRY_SCALAR("wall_stress_mag",taumag,"AllViscousBCs") ;
+  OUTPUT_BNDRY_SCALAR("gaugePressure_f",bpg,"ci") ;
+  OUTPUT_BNDRY_SCALAR("temperature_f",bt,"ci") ;
+  OUTPUT_BNDRY_SCALAR("rho_f",br,"ci") ;
+  OUTPUT_BNDRY_SCALAR("mdot_f",mdot,"ci") ;
+  OUTPUT_BNDRY_SCALAR("k_f",bk,"ci") ;
+  OUTPUT_BNDRY_SCALAR("tmuu_f",btmuu,"ci") ;
+  dump_boundary_vector::dump_boundary_vector(const char *vname,
+                                        const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("plotOutput_") + value_name ;
+    name_store(var_name,var) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("modelName",modelName) ;
+    conditional("do_boundary_plot") ;
+    input(var_name) ;
+    input("modelName") ;
+    input("plot_postfix") ;
+    constraint(constraint_name) ;
+    constraint("ci->vol") ;
+    output("OUTPUT") ;
+  }
+  void dump_boundary_vector::compute(const sequence &seq) {
+    ostringstream oss ;
+    oss << "output/" + value_name + "_bndvec." << *plot_postfix << "_" << *modelName ;
+    string filename = oss.str() ;
+
+    //    cout << "opening file " << filename << endl ;
+    entitySet set(seq) ;
+    hid_t file_id = Loci::createUnorderedFile(filename.c_str(),set) ;
+    Loci::writeUnorderedStore(file_id,var,set,value_name.c_str()) ;
+    Loci::closeUnorderedFile(file_id) ;
+  }	
+
+  OUTPUT_BNDRY_VECTOR("wall_stress",tau,"AllViscousBCs")  ;
+  OUTPUT_BNDRY_VECTOR("u_f",bv,"ci") ;
+  OUTPUT_BNDRY_VECTOR("us",gv,"ci") ;
+  OUTPUT_BNDRY_VECTOR("force_f",force,"AllWallBCs") ;
+
 }
 
