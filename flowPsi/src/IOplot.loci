@@ -374,5 +374,44 @@ namespace flowPsi {
   OUTPUT_BNDRY_VECTOR("us",gv,"ci") ;
   OUTPUT_BNDRY_VECTOR("force_f",force,"AllWallBCs") ;
 
+  class dump_timestep_info : public singleton_rule {
+    const_param<int> ncycle ;
+    const_param<real> stime ;
+    const_param<string> plot_postfix ;
+    const_param<string> modelName ;
+    param<bool> OUTPUT ;
+  public:
+    dump_timestep_info() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+  
+  dump_timestep_info::dump_timestep_info() {
+    name_store("ncycle", ncycle) ;
+    name_store("stime", stime) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("modelName",modelName) ;
+    conditional("do_plot") ;
+    constraint("pos") ;
+    input("modelName") ;
+    input("plot_postfix") ;
+    input("ncycle,stime");
+    output("OUTPUT") ;
+  }
+  void dump_timestep_info::compute(const sequence &seq) {
+    if(Loci::MPI_rank == 0) {
+      ostringstream oss ;
+    
+      oss << "output/" << "timestep" << "_" << "txt" << "." << *plot_postfix
+        << "_" << *modelName ;
+      string filename = oss.str() ;
+      std::ofstream file(filename.c_str(),std::ios::out) ;
+      // Add one to ncycle, because we are now at the end of the newton
+      // iteration, so the timestep should advance
+      file << *ncycle+1 << ' ' << *stime << endl ;
+    }
+  }	
+
+  register_rule<dump_timestep_info> register_dump_timestep_info ;
 }
 
