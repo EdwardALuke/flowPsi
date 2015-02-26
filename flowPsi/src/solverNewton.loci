@@ -40,15 +40,16 @@ namespace flowPsi {
 
   $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
 		  temperature{n,it},gagePressure{n,it},u{n,it}),
-  //    inplace(temperature{n+1}|temperature{n,it}),
-  //    inplace(gagePressure{n+1}|gagePressure{n,it}),
-  //    inplace(u{n+1}|u{n,it}),
+      inplace(temperature{n+1}|temperature{n,it}),
+      inplace(gagePressure{n+1}|gagePressure{n,it}),
+      inplace(u{n+1}|u{n,it}),
     constraint(geom_cells,timeStepSteadyState),
-    conditional(newtonFinished{n,it}), prelude { } compute {
-      $temperature{n+1}=$temperature{n,it} ;
-      $gagePressure{n+1}=$gagePressure{n,it} ;
-      $u{n+1} = $u{n,it} ;
-    }
+    conditional(newtonFinished{n,it}), prelude { } ;
+  //    compute {
+  //      $temperature{n+1}=$temperature{n,it} ;
+  //      $gagePressure{n+1}=$gagePressure{n,it} ;
+  //      $u{n+1} = $u{n,it} ;
+  //    }
   
   $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
 		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
