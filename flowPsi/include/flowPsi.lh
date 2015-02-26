@@ -183,6 +183,7 @@ $type plot_freq   param<int> ;
 $type plot_modulo param<int> ;
 $type do_plot     param<bool> ;
 $type plot_postfix param<std::string> ;
+$type do_boundary_plot     param<bool> ;
 
 $type plot_status       param<int> ;
 $type restart_freq      param<int> ;
