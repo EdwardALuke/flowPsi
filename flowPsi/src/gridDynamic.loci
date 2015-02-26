@@ -161,7 +161,7 @@ namespace flowPsi {
   //    conditional(newton_finished{n,it}),
   //      inplace(pos{n+1}|pos{n,it}), prelude {} ;
   $rule pointwise(pos{n+1}<-pos{n,it}),constraint(movingMesh,pos{n,it}),
-    conditional(newton_finished{n,it}) {
+    conditional(newtonFinished{n,it}) {
     $pos{n+1} = $pos{n,it} ;
   }
   
