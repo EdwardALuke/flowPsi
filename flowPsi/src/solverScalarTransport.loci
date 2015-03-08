@@ -20,36 +20,66 @@ namespace flowPsi {
   $rule pointwise(scalar_mdot_f<-iflux) {
     $scalar_mdot_f = $iflux[0] ;
   }
+  $type X_mdot_f store<real> ;
 
-
-  $type rho_dot store<real> ;
-  $type scalar_mdot_f store<real> ;
-
-  $rule unit(rho_dot),constraint(geom_cells) {
-    $rho_dot = 0 ;
+  $rule pointwise(X_mdot_f<-scalar_mdot_f),
+    parametric(inviscid_flux(X)) {
+    $X_mdot_f = $scalar_mdot_f ;
   }
 
-  $rule apply((cl,cr)->rho_dot<-scalar_mdot_f)[Loci::Summation], 
-      constraint((cl,cr)->geom_cells) {
-    $cl->$rho_dot -= $scalar_mdot_f ;
-    $cr->$rho_dot += $scalar_mdot_f ;
+  $rule pointwise(X_mdot_f<-scalar_mdot_f),
+    parametric(inviscid_fluxP(X,Z)) {
+    $X_mdot_f = $scalar_mdot_f ;
+  }
+
+  $type X_rhodot store<real> ;
+
+  $rule unit(X_rhodot),constraint(geom_cells), 
+    parametric(inviscid_flux(X)) {    
+    $X_rhodot = 0 ;
+  }
+
+  $rule apply((cl,cr)->X_rhodot<-X_mdot_f)[Loci::Summation], 
+    constraint((cl,cr)->geom_cells),
+    parametric(inviscid_flux(X)) {
+    $cl->$X_rhodot -= $X_mdot_f ;
+    $cr->$X_rhodot += $X_mdot_f ;
   }
 
   // Inviscid flux contributions for boundary faces
-  $rule apply(cl->rho_dot<-scalar_mdot_f)[Loci::Summation],constraint(boundary_faces) {
-    $cl->$rho_dot -= $scalar_mdot_f ;
+  $rule apply(cl->X_rhodot<-X_mdot_f)[Loci::Summation],constraint(boundary_faces),
+    parametric(inviscid_flux(X)) {
+    $cl->$X_rhodot -= $X_mdot_f ;
   }
-  
-  $rule pointwise(inviscid_flux(X)<-scalar_mdot_f,lefts(X),rights(X)),
+
+  $rule unit(X_rhodot),constraint(geom_cells),
+    parametric(inviscid_fluxP(X,Z)) {    
+    $X_rhodot = 0 ;
+  }
+
+  $rule apply((cl,cr)->X_rhodot<-X_mdot_f)[Loci::Summation], 
+    constraint((cl,cr)->geom_cells),
+    parametric(inviscid_fluxP(X,Z)) {
+    $cl->$X_rhodot -= $X_mdot_f ;
+    $cr->$X_rhodot += $X_mdot_f ;
+  }
+
+  // Inviscid flux contributions for boundary faces
+  $rule apply(cl->X_rhodot<-X_mdot_f)[Loci::Summation],constraint(boundary_faces),
+    parametric(inviscid_fluxP(X,Z)) {
+    $cl->$X_rhodot -= $X_mdot_f ;
+  }
+
+  $rule pointwise(inviscid_flux(X)<-X_mdot_f,lefts(X),rights(X)),
     constraint((cl,cr)->X) {
-    real Xval = ($scalar_mdot_f <0.0)?($rights(X)):($lefts(X)) ;
-    $inviscid_flux(X) = $scalar_mdot_f*Xval ;
+    real Xval = ($X_mdot_f <0.0)?($rights(X)):($lefts(X)) ;
+    $inviscid_flux(X) = $X_mdot_f*Xval ;
   }
 
   $type X_f store<real> ;
-  $rule pointwise(inviscid_flux(X)<-scalar_mdot_f,X_f,lefts(X)),
+  $rule pointwise(inviscid_flux(X)<-X_mdot_f,X_f,lefts(X)),
     constraint(ci->X) {
-    real mdot = $scalar_mdot_f ;
+    real mdot = $X_mdot_f ;
     real Xval = (mdot <0.0)?($X_f):($lefts(X)) ;
     $inviscid_flux(X) = mdot*Xval ;
   }
@@ -57,16 +87,16 @@ namespace flowPsi {
   $type Z param<real> ;
   $type inviscid_fluxP(X,Z) store<real> ;
 
-  $rule pointwise(inviscid_fluxP(X,Z)<-scalar_mdot_f,lefts(X),rights(X),Z),
+  $rule pointwise(inviscid_fluxP(X,Z)<-X_mdot_f,lefts(X),rights(X),Z),
     constraint((cl,cr)->X) {
-    real Xval = ($scalar_mdot_f <0.0)?($rights(X)):($lefts(X)) ;
-    $inviscid_fluxP(X,Z) = $scalar_mdot_f*max(Xval,$Z) ;
+    real Xval = ($X_mdot_f <0.0)?($rights(X)):($lefts(X)) ;
+    $inviscid_fluxP(X,Z) = $X_mdot_f*max(Xval,$Z) ;
   }
 
-  $rule pointwise(inviscid_fluxP(X,Z)<-scalar_mdot_f,X_f,Z,lefts(X)),
+  $rule pointwise(inviscid_fluxP(X,Z)<-X_mdot_f,X_f,Z,lefts(X)),
     constraint(ci->X) {
-    real Xval = ($scalar_mdot_f <0.0)?($X_f):($lefts(X)) ;
-    $inviscid_fluxP(X,Z) = $scalar_mdot_f*max(Xval,$Z) ;
+    real Xval = ($X_mdot_f <0.0)?($X_f):($lefts(X)) ;
+    $inviscid_fluxP(X,Z) = $X_mdot_f*max(Xval,$Z) ;
   }
   //##########################################################################
   //#
@@ -402,54 +432,53 @@ namespace flowPsi {
     $cr->$X_src += $inviscid_fluxP(X,Zero) ;
   }
   // Compute continuity term (sans time derivative)
-  $type rho_dot store<real> ;
-  $type scalar_mdot_f store<real> ;
+  $type X_rhodot store<real> ;
 
   // Add stabilizing term that comes from substracting the continuity eqn.
-  $rule apply(X_src<-rho_dot,X)[Loci::Summation],
+  $rule apply(X_src<-X_rhodot,X)[Loci::Summation],
     constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
-    $X_src -= $X*$rho_dot ;
+    $X_src -= $X*$X_rhodot ;
   }
-  $rule apply(X_src<-rho_dot,X_np1)[Loci::Summation],
+  $rule apply(X_src<-X_rhodot,X_np1)[Loci::Summation],
     constraint(geom_cells,X,implicit_scheme,timeStepAccurate,C),
     parametric(scalarTransportP(X,C)) {
-    $X_src -= $X_np1*$rho_dot ;
+    $X_src -= $X_np1*$X_rhodot ;
    }
 
   // Jacobian of stabilization term
-  $rule apply(X_srcJ<-rho_dot)[Loci::Summation],
+  $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
     constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
-    double factor = -$rho_dot ; 
+    double factor = -$X_rhodot ; 
     $X_srcJ += factor ;
   }  
 
-   $rule apply(X_srcJ<-rho_dot)[Loci::Summation],
+  $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
      constraint(geom_cells,timeStepAccurate,X,C),
      parametric(scalarTransportP(X,C)) {
-     double factor = -2.*$rho_dot ; 
+     double factor = -2.*$X_rhodot ; 
      $X_srcJ += factor ;
-   }
+  }
 
   // Jacobians of convective transport
-  $rule apply(X_fjp<-scalar_mdot_f)[Loci::Summation],
+  $rule apply(X_fjp<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = max($scalar_mdot_f,0.0) ;
+    real jdiff = max($X_mdot_f,0.0) ;
     $X_fjp += jdiff;
   }    
-  $rule apply(X_fjm<-scalar_mdot_f)[Loci::Summation],
+  $rule apply(X_fjm<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = min($scalar_mdot_f,0.0) ;
+    real jdiff = min($X_mdot_f,0.0) ;
     $X_fjm += jdiff;
   }    
   
-  $rule apply(ci->X_srcJ<-scalar_mdot_f)[Loci::Summation],
+  $rule apply(ci->X_srcJ<-X_mdot_f)[Loci::Summation],
     constraint(ci->X,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = max($scalar_mdot_f,0.0) ;
+    real jdiff = max($X_mdot_f,0.0) ;
     $ci->$X_srcJ -= jdiff ;
   }
 
@@ -604,6 +633,85 @@ namespace flowPsi {
         (*ofile) << *$ncycle{n} << ' ' << sarms << endl ;
     }
   } ;
+  // add in GCL term
+  //--------------------------------------------------------------------
+  // Rules for the Geometric Conservation Law source term.
+  //--------------------------------------------------------------------
+  $type gcl_sum                        store<real>;
+  //--------------------------------------------------------------------
+  $rule unit( gcl_sum ),
+    constraint( geom_cells ) {
+    $gcl_sum = 0;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( cl->gcl_sum <- us_n, area )[Loci::Summation],
+    constraint( cl->geom_cells ) {
+    $cl->$gcl_sum += $area.sada*$us_n;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( cr->gcl_sum <- us_n, area )[Loci::Summation],
+    constraint( cr->geom_cells ) {
+    $cr->$gcl_sum -= $area.sada*$us_n;
+  }
+
+  $rule apply(X_src<-gcl_sum,X,rho)[Loci::Summation],
+  constraint(X,C,geom_cells) {
+    join($X_src,-1.*$gcl_sum*$X*$rho) ;
+  }
+
+  $rule apply(X_srcJ<-gcl_sum,X,rho)[Loci::Summation],
+    constraint(geom_cells,X,gauss_seidel_iter,C),
+    parametric(scalarTransportP(X,C)) {
+    join($X_srcJ,-$gcl_sum*$rho) ;
+  }
+  
+  $type X_nu_f store<real> ;
+  $type X_diff_f store<real> ;
+  $rule pointwise(X_diff_f<-X_nu_f,grads_f(X),area),
+    constraint(X_nu_f,area,C),
+    parametric(scalarTransportP(X,C)) {
+    $X_diff_f = $X_nu_f*dot($grads_f(X),$area.n)*$area.sada ;
+  }
+
+  $rule apply(cl->X_src<-X_diff_f)[Loci::Summation],
+    constraint(cl->geom_cells,X_nu_f,C),
+    parametric(scalarTransportP(X,C)) {  
+    join($cl->$X_src,$X_diff_f) ;
+  }
+  
+  $rule apply(cr->X_src<-X_diff_f)[Loci::Summation],
+    constraint(cr->geom_cells,X_nu_f,C),
+    parametric(scalarTransportP(X,C)) {  
+    join($cr->$X_src,-$X_diff_f) ;
+  }
+
+  $rule apply(X_fjp<-(cl,cr)->cellcenter,X_nu_f,area)[Loci::Summation],
+                    constraint(X_nu_f,(cl,cr)->vol,C),
+    parametric(scalarTransportP(X,C)) {  
+      const real C = $X_nu_f*$area.sada ;
+      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+      join($X_fjp, +C/d);
+  }
+  
+  $rule apply(X_fjm<-(cl,cr)->cellcenter,X_nu_f,area)[Loci::Summation],
+    constraint(X_nu_f,(cl,cr)->vol,C),
+    parametric(scalarTransportP(X,C)) {  
+      const real C = $X_nu_f*$area.sada ;
+      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+      join($X_fjm, -C/d) ;
+  }
+
+  $rule apply(ci->X_srcJ<-(ci->cellcenter),facecenter,
+              X_nu_f,area)[Loci::Summation],
+    constraint(X_nu_f,ci->vol,C),
+    parametric(scalarTransportP(X,C)) {  
+    const real C = $X_nu_f*$area.sada ;
+    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
+
+    join($ci->$X_srcJ, -C/d) ;
+  }
 
 }
 

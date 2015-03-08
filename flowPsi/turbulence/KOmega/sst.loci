@@ -785,120 +785,36 @@ namespace flowPsi {
     $kw_tmuu_f = 0.0 ;
   }
 
-#ifdef TURBULENT_K_DIFFUSION
-  // K equation diffusion term
-  $rule pointwise(diff_t<-muu_f,kw_tmuu_f,sigmak_f,grads_f(k),area) {
-    $diff_t=($muu_f+$kw_tmuu_f*$sigmak_f)*dot($grads_f(k),$area.n)*$area.sada ;
-  }    
-
-  $rule pointwise(wilcox08::diff_t<-muu_f,rho_f,k_f,w_f,sigmak_f,grads_f(k),area),
-    constraint(k_f,Wilcox08Model) {
-    const real kw_tmuu_f = $rho_f*$k_f/max($w_f,1e-30) ;
-    $diff_t=($muu_f+kw_tmuu_f*$sigmak_f)*dot($grads_f(k),$area.n)*$area.sada ;
-  }    
-
   $type k_src store<real> ;
   $type k_srcJ store<real> ;
-  $type k_fjp store<real> ;
-  $type k_fjm store<real> ;
-
   $type w_src store<real> ;
   $type w_srcJ store<real> ;
-  $type w_fjp store<real> ;
-  $type w_fjm store<real> ;
   
-  $rule apply(cl->k_src<-diff_t)[Loci::Summation],constraint(cl->geom_cells,diff_t) {
-    $cl->$k_src += $diff_t ;
+#ifdef TURBULENT_K_DIFFUSION
+  // K equation diffusion term
+  $type k_nu_f store<real> ;
+  $rule pointwise(k_nu_f<-muu_f,kw_tmuu_f,sigmak_f) {
+    $k_nu_f = ($muu_f+$kw_tmuu_f*$sigmak_f) ;
   }
-
-  $rule apply(cr->k_src<-diff_t)[Loci::Summation],constraint(cr->geom_cells,diff_t) {
-    $cr->$k_src -= $diff_t ;
+  $rule pointwise(wilcox08::k_nu_f<-muu_f,rho_f,k_f,w_f,sigmak_f),
+    constraint(k_f,Wilcox08Model) {
+    const real kw_tmuu_f = $rho_f*$k_f/max($w_f,1e-30) ;
+    $k_nu_f=($muu_f+kw_tmuu_f*$sigmak_f) ;
   }
-
-  // Apply for scalar jacobians
-  $rule apply(k_fjp<-(cl,cr)->cellcenter,
-              muu_f,kw_tmuu_f,sigmak_f,area)[Loci::Summation],
-    constraint(diff_t,(cl,cr)->vol) {
-      const real C = ($muu_f+$kw_tmuu_f*$sigmak_f)*$area.sada ;
-      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
-
-      join($k_fjp, +C/d);
-  }
-
-  $rule apply(k_fjm<-(cl,cr)->cellcenter,
-              muu_f,kw_tmuu_f,sigmak_f,area)[Loci::Summation],
-    constraint(diff_t,(cl,cr)->vol) {
-      const real C = ($muu_f+$kw_tmuu_f*$sigmak_f)*$area.sada ;
-      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
-
-      join($k_fjm, -C/d) ;
-  }
-    
-  $rule apply(ci->k_srcJ<-(ci->cellcenter),facecenter,
-              muu_f,kw_tmuu_f,sigmak_f,area)[Loci::Summation],
-              constraint(diff_t,ci->vol) {
-    const real C = ($muu_f+$kw_tmuu_f*$sigmak_f)*$area.sada ;
-    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
-
-    join($ci->$k_srcJ, -C/d) ;
-  }
-  
-
-  
 #endif
   
 #ifdef TURBULENT_W_DIFFUSION
+  $type w_nu_f store<real> ;
   // omega equation diffusion term
-  $rule pointwise(diff_w<-muu_f,kw_tmuu_f,sigmae_f,area,grads_f(w)) {
-    $diff_w=($muu_f+$kw_tmuu_f*$sigmae_f)*dot($grads_f(w),$area.n)*$area.sada ;
+  $rule pointwise(w_nu_f<-muu_f,kw_tmuu_f,sigmae_f) {
+    $w_nu_f=($muu_f+$kw_tmuu_f*$sigmae_f) ;
   }
 
-  $rule pointwise(wilcox08::diff_w<-muu_f,rho_f,k_f,w_f,sigmae_f,grads_f(w),area),
+  $rule pointwise(wilcox08::w_nu_f<-muu_f,rho_f,k_f,w_f,sigmae_f),
     constraint(w_f,Wilcox08Model) {
     const real kw_tmuu_f = $rho_f*$k_f/max($w_f,1e-30) ;
-    $diff_w=($muu_f+kw_tmuu_f*$sigmae_f)*dot($grads_f(w),$area.n)*$area.sada ;
+    $w_nu_f=($muu_f+kw_tmuu_f*$sigmae_f) ;
   }    
-
-  $rule apply(cl->w_src<-diff_w)[Loci::Summation],
-    constraint(cl->geom_cells,diff_w) {
-    $cl->$w_src += $diff_w ;
-  }
-
-  $rule apply(cr->w_src<-diff_w)[Loci::Summation],
-    constraint(cr->geom_cells,diff_w) {
-    $cr->$w_src -= $diff_w ;
-  }
-  
-  // Scalar jacobian terms
-  $rule apply(w_fjp<-(cl,cr)->cellcenter,
-              muu_f,kw_tmuu_f,sigmae_f,area)[Loci::Summation],
-    constraint(diff_w,(cl,cr)->vol) {
-      const real C = ($muu_f+$kw_tmuu_f*$sigmae_f)*$area.sada ;
-      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
-
-      join($w_fjp, +C/d) ;
-  }
-
-  $rule apply(w_fjm<-(cl,cr)->cellcenter,
-              muu_f,kw_tmuu_f,sigmae_f,area)[Loci::Summation],
-    constraint(diff_w,(cl,cr)->vol) {
-      const real C = ($muu_f+$kw_tmuu_f*$sigmae_f)*$area.sada ;
-      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
-
-      join($w_fjm, -C/d) ;
-  }
-    
-  $rule apply(ci->w_srcJ<-ci->cellcenter,facecenter,
-              muu_f,kw_tmuu_f,sigmae_f,area)[Loci::Summation],
-    constraint(diff_w,ci->vol) {
-    const real C = ($muu_f+$kw_tmuu_f*$sigmae_f)*$area.sada ;
-    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
-
-    join($ci->$w_srcJ, -C/d) ;
-  }    
-
-  
-
 #endif
 
 #ifdef TURBULENT_PRODUCTION_DESTRUCTION

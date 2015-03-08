@@ -327,9 +327,6 @@ namespace flowPsi {
     join($cr->$div_nuTilde,-$div_nuTilde_f) ;
   }
 
-
-  // Baseline model.. not stable
-
   // diff1 term = (rho/sigma) *  del . [ ( nu + (1+cb2) nuTilde) del(nuTilde)]
 
   $rule pointwise(diff1_f<-grads_f(nuTilde),nuTilde_f,mu_f,area,spalart,SP_info,rho_f),constraint(SP_info,nuTilde_f,SpTypeBaseline)
