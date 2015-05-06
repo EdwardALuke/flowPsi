@@ -170,7 +170,7 @@ namespace flowPsi {
     $iflux[4] = mdot*(ktilde+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
 
 
-    // Now the roe diffusion part
+    // Now the upwind part
     const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
     const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
     
@@ -206,11 +206,8 @@ namespace flowPsi {
 		  (cl,cr)->alpha_diss,
 		  leftsP(gagePressure,minPg),rightsP(gagePressure,minPg),
 		  leftsP(temperature,Zero),rightsP(temperature,Zero),
-		  facecenter,gradv3d_f(u),grads_f(gagePressure),
-		  grads_f(temperature),
-		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
-			    limiterv3d(u)),
 		  leftv3d(u),rightv3d(u),
+		  facecenter,
 		  Pambient,area,Rtilde,gamma,us_n,LDS_nonSymmetricCoeff,
 		  SSF_Coeff),
     constraint(useSkewSymmetricFluxScheme,(cl,cr)->vol) {
@@ -218,65 +215,134 @@ namespace flowPsi {
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
     const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
     
+    
     double CC = $SSF_Coeff/6.0 ;
-    vect3d ucor = dot($gradv3d_f(u),dv) ;
-    ucor.x *= ($cl->$limiterv3d(u).x)*($cr->$limiterv3d(u).x) ;
-    ucor.y *= ($cl->$limiterv3d(u).y)*($cr->$limiterv3d(u).y) ;
-    ucor.z *= ($cl->$limiterv3d(u).z)*($cr->$limiterv3d(u).z) ;
-    const vect3d uf = 0.5*($cl->$u+$cr->$u) +
-      CC*(vect3d(dot(dv2,$cl->$gradv3d(u).x-$cr->$gradv3d(u).x),
-		 dot(dv2,$cl->$gradv3d(u).y-$cr->$gradv3d(u).y),
-		 dot(dv2,$cl->$gradv3d(u).z-$cr->$gradv3d(u).z)))+ucor ;
+    
     const vect3d an = $area.n ;
     const real sada = $area.sada ;
+
+    const vect3d uf = 0.5*($cl->$u+$cr->$u) ;
     const real ufn = dot(uf,an) - $us_n ;
-    const real pgl = $cl->$gagePressure ;
-    const real pgr = $cr->$gagePressure ;
-    const real pgc = 0.5*(pgl+pgr) +
-      CC*dot(dv2,$cl->$grads(gagePressure)-$cr->$grads(gagePressure)) ;
-    const real pgmin = min(pgl,pgr)-0.5*(min(pgl,pgr)+$Pambient) ;
-    const real pgmax = max(pgl,pgr)+0.5*(max(pgl,pgr)+$Pambient) ;
-    const real pgcl = max(min(pgc,pgmax),pgmin) ;
-
- 
-    real pgf = pgcl + dot($grads_f(gagePressure),dv)*($cl->$limiters(gagePressure))*($cr->$limiters(gagePressure)) ;
-    // compute kinetic energy consistent part plus delta kinetic energy
-    // of correction
-    const real tl = $cl->$temperature ;
-    const real tr = $cr->$temperature ;
-
-    const real tc = 0.5*(tl+tr)+
-      CC*dot(dv2,$cl->$grads(temperature)-$cr->$grads(temperature)) ;
-    const real tcl = max(min(tc,1.5*max(tl,tr)),0.5*min(tl,tr)) ;
-
-    real tfc = (dot($grads_f(temperature),dv)*
-		$cl->$limiters(temperature)*$cr->$limiters(temperature)) ;
-    real tf = tcl + tfc ;
+    
+    const real pgf = 0.5*($cl->$gagePressure + $cr->$gagePressure) ;
+    const real tf = 0.5*($cl->$temperature +$cr->$temperature) ;
 
     const real rf = (pgf+$Pambient)/($Rtilde*tf) ;
     const real mdot = rf*ufn*sada ;
-    $iflux[0] = mdot ;
+    $iflux[0] = 2.*CC*mdot ;
 
     const int mi = 1 ;
     const real apgf = pgf*sada ;
-    $iflux[mi+0] = mdot*uf.x + apgf*an.x ;
-    $iflux[mi+1] = mdot*uf.y + apgf*an.y ;
-    $iflux[mi+2] = mdot*uf.z + apgf*an.z ;
+    $iflux[mi+0] = 2.*CC*(mdot*uf.x + apgf*an.x) ;
+    $iflux[mi+1] = 2.*CC*(mdot*uf.y + apgf*an.y) ;
+    $iflux[mi+2] = 2.*CC*(mdot*uf.z + apgf*an.z) ;
     real e_internalf = $Rtilde*tf/($gamma-1) ;
     real ke_f = 0.5*dot(uf,uf) ;
-    $iflux[4] = mdot*(ke_f+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
+    $iflux[4] = 2.*CC*(mdot*(ke_f+e_internalf) +
+                       (ufn+$us_n)*(pgf+$Pambient)*sada );
 
-    // Now blend in the upwind part
+    vect3d ucor = 0.5*(dot($cl->$gradv3d(u),dv)+dot($cr->$gradv3d(u),dv)) ;
+    vect3d ufc = uf+ucor ;
+
+    real tlo = 0.25*tf ;
+    real thi = 4*tf ;
+    real pglo = 0.25*(pgf+$Pambient)-$Pambient ;
+    real pghi = 4.*(pgf+$Pambient)-$Pambient ;
+
+    real pgfc = pgf + 0.5*(dot($cl->$grads(gagePressure),dv)+
+			   dot($cr->$grads(gagePressure),dv)) ;
+    pgfc = max(pglo,min(pghi,pgfc)) ;
+
+    real tfc = tf + 0.5*(dot($cl->$grads(temperature),dv)+
+			 dot($cr->$grads(temperature),dv)) ;
+    tfc = max(tlo,min(thi,tfc)) ;
+
+    const real rfc = (pgfc+$Pambient)/($Rtilde*tfc) ;
+    const real ufcn = dot(ufc,an) - $us_n ;
+
+    const real mdotc = rfc*ufcn*sada ;
+    $iflux[0] += mdotc ;
+
+    const real apgfc = pgfc*sada ;
+    $iflux[mi+0] += (mdotc*ufc.x + apgfc*an.x) ;
+    $iflux[mi+1] += (mdotc*ufc.y + apgfc*an.y) ;
+    $iflux[mi+2] += (mdotc*ufc.z + apgfc*an.z) ;
+    real e_internalfc = $Rtilde*tfc/($gamma-1) ;
+    real ke_fc = 0.5*dot(ufc,ufc) ;
+    $iflux[4] += (mdotc*(ke_fc+e_internalfc) +
+                  (ufcn+$us_n)*(pgfc+$Pambient)*sada );
+
+
+    vect3d uf_l = $cr->$u-vect3d(dot(dv2,$cl->$gradv3d(u).x),
+				 dot(dv2,$cl->$gradv3d(u).y),
+				 dot(dv2,$cl->$gradv3d(u).z)) ;
+    
+    const real pgr = $cr->$gagePressure ;
+    double pg_l = pgr-dot(dv2,$cl->$grads(gagePressure)) ;
+    const real tr = $cr->$temperature ;
+    double t_l = tr-dot(dv2,$cl->$grads(temperature)) ;
+    pg_l = max(pglo,min(pghi,pg_l)) ;
+    t_l = max(tlo,min(thi,t_l)) ;
+
+
+    const real rf_l = (pg_l+$Pambient)/($Rtilde*t_l) ;
+    const real ufn_l = dot(uf_l,an) - $us_n ;
+    const real mdot_l = rf_l*ufn_l*sada ;
+    $iflux[0] += -CC*mdot_l ;
+
+    const real apgf_l = pg_l*sada ;
+    $iflux[mi+0] += -CC*(mdot_l*uf_l.x + apgf_l*an.x) ;
+    $iflux[mi+1] += -CC*(mdot_l*uf_l.y + apgf_l*an.y) ;
+    $iflux[mi+2] += -CC*(mdot_l*uf_l.z + apgf_l*an.z) ;
+    real e_internalf_l = $Rtilde*t_l/($gamma-1) ;
+    real ke_f_l = 0.5*dot(uf_l,uf_l) ;
+    $iflux[4] += -CC*(mdot_l*(ke_f_l+e_internalf_l) +
+                      (ufn_l+$us_n)*(pg_l+$Pambient)*sada) ;    
+
+    const real pgl = $cl->$gagePressure ;
+    const real tl = $cl->$temperature ;
+    vect3d uf_r = $cl->$u+vect3d(dot(dv2,$cr->$gradv3d(u).x),
+                                 dot(dv2,$cr->$gradv3d(u).y),
+                                 dot(dv2,$cr->$gradv3d(u).z)) ;
+    double pg_r = pgl+dot(dv2,$cr->$grads(gagePressure)) ;
+    double t_r = tl+dot(dv2,$cr->$grads(temperature)) ; 
+    pg_r = max(pglo,min(pghi,pg_r)) ;
+    t_r = max(tlo,min(thi,t_r)) ;
+
+    const real rf_r = (pg_r+$Pambient)/($Rtilde*t_r) ;
+    const real ufn_r = dot(uf_r,an) - $us_n ;
+    const real mdot_r = rf_r*ufn_r*sada ;
+    $iflux[0] += -CC*mdot_r ;
+
+    const real apgf_r = pg_r*sada ;
+    $iflux[mi+0] += -CC*(mdot_r*uf_r.x + apgf_r*an.x) ;
+    $iflux[mi+1] += -CC*(mdot_r*uf_r.y + apgf_r*an.y) ;
+    $iflux[mi+2] += -CC*(mdot_r*uf_r.z + apgf_r*an.z) ;
+    real e_internalf_r = $Rtilde*t_r/($gamma-1) ;
+    real ke_f_r = 0.5*dot(uf_r,uf_r) ;
+    $iflux[4] += -CC*(mdot_r*(ke_f_r+e_internalf_r) +
+                      (ufn_r+$us_n)*(pg_r+$Pambient)*sada) ;    
+
+
+    // Now the upwind part
+    // ------------------------------------------------------------------------
     const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
     const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
-    // compute normalized delta pressure at face
-    const real dp = (2.*fabs($leftsP(gagePressure,minPg)-
-                             $rightsP(gagePressure,minPg))/
-                     (rf*$gamma*$Rtilde*tf)) ;
-    
+    const real pgL = $leftsP(gagePressure,minPg) ;
+    const real pgR = $rightsP(gagePressure,minPg) ;
+    const real tL = $leftsP(temperature,Zero) ;
+    const real tR = $rightsP(temperature,Zero) ;
+    const real rL = (pgL+$Pambient)/($Rtilde*tL) ;
+    const real rR = (pgR+$Pambient)/($Rtilde*tR) ;
+    const real al2 = $gamma*$Rtilde*tL ;
+    const real ar2 = $gamma*$Rtilde*tR ;
+    const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
+
     const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,min(1.0,geom_diff_coef*dot(dv,dv)/dot(df,df))) ;
-    const real alpha = max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+    const real local_alpha =
+      max(ap,min(1.0,geom_diff_coef*dot(dv,dv)/dot(df,df))) ;
+    const real alpha =
+      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
 
     if(alpha >1e-10) {
       Loci::Array<real,5> uflux ;
@@ -289,6 +355,7 @@ namespace flowPsi {
       for(int i=0;i<5;++i)
 	$iflux[i] = alpha*uflux[i]+(1.-alpha)*$iflux[i] ;
     }
+    
   }
 
   OUTPUT_SCALAR("cell2nodeMax(alpha_diss)",alpha) ;  
