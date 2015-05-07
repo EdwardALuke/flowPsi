@@ -16,7 +16,7 @@
 FLOWPSI_BASE ?= ../..
 
 # What is the name of the module given to loadModule
-MODULE_NAME = SAModel
+MODULE_NAME = SAModelFPSI
 # This will by default include all '.loci' files in the current directory
 FILES = $(AUTOMATIC_FILES)
 

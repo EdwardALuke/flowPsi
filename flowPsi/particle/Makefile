@@ -10,7 +10,7 @@ INCLUDES = -I$(FLOWPSI_BASE)/include
 # Put objects in the module here
 OBJS = util.o par_util.o particle.o lagrangian_boundary.o lagrangian_statoutput.o particle_model.o particle_base.o particle_init.o integrate_particle.o load_particle_file.o flowPsi_interface.o
 
-MODULE_NAME = Particle
+MODULE_NAME = ParticleFPSI
 
 LOCAL_LIBS = 
 

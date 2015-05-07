@@ -373,7 +373,9 @@ int main(int ac, char *av[]) {
         }
       } else {
         cerr << "unable to interpret " << modulesToLoad[i] << endl ;
-      }        
+      }
+      mod_name += "FPSI" ; // to keep this application modules
+                          // names from overlapping with others
       Loci::load_module(mod_name,mod_namespace,
                         load_file.c_str(),facts,rdb,str_set) ;
     }
