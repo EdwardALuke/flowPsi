@@ -99,8 +99,24 @@ namespace flowPsi {
   $type LDS_nonSymmetricCoeff param<double> ;
 
   $rule default(LDS_nonSymmetricCoeff) {
-    $LDS_nonSymmetricCoeff = 5.0 ;
+    $LDS_nonSymmetricCoeff = 1.0 ;
   }
+  $type alpha_geom store<float> ;
+
+  $rule pointwise(alpha_geom<-area,facecenter,(cl,cr)->cellcenter,
+                  (cl,cr)->vol,LDS_nonSymmetricCoeff) {
+    const vect3d df = $cr->$cellcenter-$cl->$cellcenter ;
+    const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
+    double a1 = 2.*sqrt(dot(dv,dv)/dot(df,df)) ;
+    double a2 = 1.-dot($area.n,df)/norm(df) ;
+    double vl = $cl->$vol ;
+    double vr = $cr->$vol ;
+    double a3 = 1.-pow(min(vl,vr)/max(vl,vr),1/3) ;
+    double a = max(max(a1,a2),a3) ;
+    double f = $LDS_nonSymmetricCoeff ;
+    $alpha_geom = max(min(f*a+(1.-f)*a*a,1.0),0.0) ;
+  }
+  
 
   
 #undef NOCORRECTION
@@ -110,7 +126,7 @@ namespace flowPsi {
 //#define NOCORRECTION
 
   $rule pointwise(KEC::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
-		  (cl,cr)->alpha_diss,
+		  (cl,cr)->alpha_diss,alpha_geom,
 		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
 			    limiterv3d(u)),
 		  leftsP(gagePressure,minPg),rightsP(gagePressure,minPg),
@@ -118,7 +134,7 @@ namespace flowPsi {
 		  facecenter,gradv3d_f(u),grads_f(gagePressure),
 		  grads_f(temperature),
 		  leftv3d(u),rightv3d(u),
-		  Pambient,area,Rtilde,gamma,us_n,LDS_nonSymmetricCoeff),
+		  Pambient,area,Rtilde,gamma,us_n),
     constraint(useKECFluxScheme,(cl,cr)->vol) {
 
 #ifdef NOCORRECTION
@@ -169,17 +185,12 @@ namespace flowPsi {
     real e_internalf = $Rtilde*tf/($gamma-1) ;
     $iflux[4] = mdot*(ktilde+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
 
-
-    // Now the upwind part
-    const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
-    const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
-    
     const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
 			    $rightsP(gagePressure,minPg))/
       (rf*$gamma*$Rtilde*tf) ;
     
     const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,min(1.0,geom_diff_coef*dot(dv,dv)/dot(df,df))) ;
+    const real local_alpha = max(ap,real($alpha_geom)) ;
     const real alpha = max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
 
     if(alpha >1e-10) {
@@ -203,12 +214,12 @@ namespace flowPsi {
   $rule pointwise(SSF::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
                   (cl,cr)->(grads(gagePressure),grads(temperature)),
 		  (cl,cr)->(gradv3d(u)),
-		  (cl,cr)->alpha_diss,
+		  (cl,cr)->alpha_diss,alpha_geom,
 		  leftsP(gagePressure,minPg),rightsP(gagePressure,minPg),
 		  leftsP(temperature,Zero),rightsP(temperature,Zero),
 		  leftv3d(u),rightv3d(u),
 		  facecenter,
-		  Pambient,area,Rtilde,gamma,us_n,LDS_nonSymmetricCoeff,
+		  Pambient,area,Rtilde,gamma,us_n,
 		  SSF_Coeff),
     constraint(useSkewSymmetricFluxScheme,(cl,cr)->vol) {
     
@@ -326,8 +337,6 @@ namespace flowPsi {
 
     // Now the upwind part
     // ------------------------------------------------------------------------
-    const real geom_diff_coef = 0.5*$LDS_nonSymmetricCoeff ;
-    const vect3d df = $cl->$cellcenter-$cr->$cellcenter ;
     const real pgL = $leftsP(gagePressure,minPg) ;
     const real pgR = $rightsP(gagePressure,minPg) ;
     const real tL = $leftsP(temperature,Zero) ;
@@ -339,8 +348,7 @@ namespace flowPsi {
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
 
     const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha =
-      max(ap,min(1.0,geom_diff_coef*dot(dv,dv)/dot(df,df))) ;
+    const real local_alpha = max(ap,real($alpha_geom)) ;
     const real alpha =
       max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
 
