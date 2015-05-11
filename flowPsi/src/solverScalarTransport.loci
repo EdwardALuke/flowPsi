@@ -354,6 +354,10 @@ namespace flowPsi {
     $cr->$X = $pmap->$cl->$X ;
   }
 
+  // hack to make sure things work if all boundary conditions periodic
+  $rule pointwise(X_f),constraint(ci->X,geom_cells,C),
+    parametric(scalarTransportP(X,C)) { }
+
   // Default boundary definitions for reflecting walls and interfaces
   $rule pointwise(impermeable::X_f<-ci->X),
     constraint(C,symmetry_BC),

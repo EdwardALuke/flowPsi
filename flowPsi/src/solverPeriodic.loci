@@ -28,19 +28,35 @@ namespace flowPsi {
     const rigid_transform &frame = $pmap->$ref->$periodicTransform ;
     $cr->$u= frame.rotate_vec($pmap->$cl->$u) ;
   }
-  
+
+  // this fix will allow gradients of u to be computed when all boundaries
+  // are periodic
+  $rule pointwise(u_f),constraint(ci->u,geom_cells) {}
+
   $rule pointwise(cr->temperature<-pmap->cl->temperature) {
     $cr->$temperature = $pmap->$cl->$temperature ;
   }
-  
+
+  // this fix will allow gradients of u to be computed when all boundaries
+  // are periodic
+  $rule pointwise(temperature_f),constraint(ci->temperature,geom_cells) {}
+
   $rule pointwise(cr->gagePressure<-pmap->cl->gagePressure) {
     $cr->$gagePressure = $pmap->$cl->$gagePressure ;
   }
+
+  // this fix will allow gradients of u to be computed when all boundaries
+  // are periodic
+  $rule pointwise(gagePressure_f),constraint(ci->gagePressure,geom_cells) {}
 
   $rule pointwise(cr->tmu<-pmap->cl->tmu) {
     $cr->$tmu = $pmap->$cl->$tmu ;
   }
   
+  // this fix will allow gradients of u to be computed when all boundaries
+  // are periodic
+  $rule pointwise(tmu_f),constraint(ci->tmu,geom_cells) {}
+
   $rule pointwise(cr->iblank<-pmap->cl->iblank) {
     $cr->$iblank = $pmap->$cl->$iblank ;
   }
