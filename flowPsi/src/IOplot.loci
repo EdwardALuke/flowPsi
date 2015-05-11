@@ -334,7 +334,7 @@ namespace flowPsi {
 
   OUTPUT_BNDRY_SCALAR("yplus_w",yplus,"AllViscousBCs")  ;
   OUTPUT_BNDRY_SCALAR("wall_stress_mag",taumag,"AllViscousBCs") ;
-  OUTPUT_BNDRY_SCALAR("gaugePressure_f",bpg,"ci") ;
+  OUTPUT_BNDRY_SCALAR("gagePressure_f",bpg,"ci") ;
   OUTPUT_BNDRY_SCALAR("temperature_f",bt,"ci") ;
   OUTPUT_BNDRY_SCALAR("rho_f",br,"ci") ;
   OUTPUT_BNDRY_SCALAR("mdot_f",mdot,"ci") ;
