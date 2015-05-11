@@ -223,14 +223,37 @@ namespace flowPsi {
 		  SSF_Coeff),
     constraint(useSkewSymmetricFluxScheme,(cl,cr)->vol) {
     
-    const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
-    const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
+    const vect3d an = $area.n ;
     
+    // Now the upwind part
+    // ------------------------------------------------------------------------
+    const real pgL = $leftsP(gagePressure,minPg) ;
+    const real pgR = $rightsP(gagePressure,minPg) ;
+    const real tL = $leftsP(temperature,Zero) ;
+    const real tR = $rightsP(temperature,Zero) ;
+    const real rL = (pgL+$Pambient)/($Rtilde*tL) ;
+    const real rR = (pgR+$Pambient)/($Rtilde*tR) ;
+    const real al2 = $gamma*$Rtilde*tL ;
+    const real ar2 = $gamma*$Rtilde*tR ;
+    const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
+    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
+    const real local_alpha = max(ap,real($alpha_geom)) ;
+    const real alpha =
+      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+
+    if(alpha >1e-10) {
+      const real sada = $area.sada*alpha ;
+      hllc_flux($iflux, pgL,tL,$leftv3d(u), pgR, tR, $rightv3d(u),
+                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    } else {
+      for(int i=0;i<5;++i)
+	$iflux[i] = 0 ;
+    }
+
     
     double CC = $SSF_Coeff/6.0 ;
     
-    const vect3d an = $area.n ;
-    const real sada = $area.sada ;
+    const real sada = $area.sada*(1.-alpha) ;
 
     const vect3d uf = 0.5*($cl->$u+$cr->$u) ;
     const real ufn = dot(uf,an) - $us_n ;
@@ -240,17 +263,20 @@ namespace flowPsi {
 
     const real rf = (pgf+$Pambient)/($Rtilde*tf) ;
     const real mdot = rf*ufn*sada ;
-    $iflux[0] = 2.*CC*mdot ;
+    $iflux[0] += 2.*CC*mdot ;
 
     const int mi = 1 ;
     const real apgf = pgf*sada ;
-    $iflux[mi+0] = 2.*CC*(mdot*uf.x + apgf*an.x) ;
-    $iflux[mi+1] = 2.*CC*(mdot*uf.y + apgf*an.y) ;
-    $iflux[mi+2] = 2.*CC*(mdot*uf.z + apgf*an.z) ;
+    $iflux[mi+0] += 2.*CC*(mdot*uf.x + apgf*an.x) ;
+    $iflux[mi+1] += 2.*CC*(mdot*uf.y + apgf*an.y) ;
+    $iflux[mi+2] += 2.*CC*(mdot*uf.z + apgf*an.z) ;
     real e_internalf = $Rtilde*tf/($gamma-1) ;
     real ke_f = 0.5*dot(uf,uf) ;
-    $iflux[4] = 2.*CC*(mdot*(ke_f+e_internalf) +
+    $iflux[4] += 2.*CC*(mdot*(ke_f+e_internalf) +
                        (ufn+$us_n)*(pgf+$Pambient)*sada );
+
+    const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
+    const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
 
     vect3d ucor = 0.5*(dot($cl->$gradv3d(u),dv)+dot($cr->$gradv3d(u),dv)) ;
     vect3d ufc = uf+ucor ;
@@ -335,35 +361,6 @@ namespace flowPsi {
                       (ufn_r+$us_n)*(pg_r+$Pambient)*sada) ;    
 
 
-    // Now the upwind part
-    // ------------------------------------------------------------------------
-    const real pgL = $leftsP(gagePressure,minPg) ;
-    const real pgR = $rightsP(gagePressure,minPg) ;
-    const real tL = $leftsP(temperature,Zero) ;
-    const real tR = $rightsP(temperature,Zero) ;
-    const real rL = (pgL+$Pambient)/($Rtilde*tL) ;
-    const real rR = (pgR+$Pambient)/($Rtilde*tR) ;
-    const real al2 = $gamma*$Rtilde*tL ;
-    const real ar2 = $gamma*$Rtilde*tR ;
-    const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
-
-    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,real($alpha_geom)) ;
-    const real alpha =
-      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
-
-    if(alpha >1e-10) {
-      Loci::Array<real,5> uflux ;
-      hllc_flux(uflux,
-                $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-                $leftv3d(u),
-                $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-                $rightv3d(u),
-                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-      for(int i=0;i<5;++i)
-	$iflux[i] = alpha*uflux[i]+(1.-alpha)*$iflux[i] ;
-    }
-    
   }
 
   OUTPUT_SCALAR("cell2nodeMax(alpha_diss)",alpha) ;  
