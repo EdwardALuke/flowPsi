@@ -1,0 +1,136 @@
+#!/bin/bash
+
+LD_LIBRARY_PATH=$DYLD_LIBRARY_PATH:$LD_LIBRARY_PATH:/:/usr:/usr/local:/opt:/opt/local
+
+set +e
+set -u
+set -f
+
+find_exec() {
+    RETURN_VALUE=0
+    for i in ${PATH//:/ }; do
+	if [ -e $i/$1 ]; then 
+	    RETURN_VALUE=$i
+	    break ;
+	fi
+    done
+}
+
+find_lib() {
+    RETURN_VALUE=0
+    for i in ${LD_LIBRARY_PATH//:/ }; do
+	if [ -e $i/lib$1.a ]; then
+	    RETURN_VALUE=$i
+	    break;
+	fi
+	if [ -e $i/lib$1.so ]; then
+	    RETURN_VALUE=$i
+	    break ;
+	fi
+    done
+}
+
+OBJDIR=OBJ
+ARCH=`uname -s`
+
+PREFIX=/usr/local
+LOCI_BASE=notset
+PREFIX_SET=0
+while [ $# -ne 0 ]; do 
+    case "$1" in
+	--prefix)
+	    shift
+	    PREFIX_SET=1
+	    PREFIX=$1
+	    ;;
+	--prefix\=*)
+	    tmp=$1
+	    PREFIX_SET=1
+	    PREFIX=${tmp#--prefix\=}
+	    ;;
+	--loci-dir)
+	    shift
+	    LOCI_BASE=$1
+	    ;;
+	--loci-dir\=*)
+	    tmp=$1
+	    LOCI_BASE=${tmp#--loci-dir\=}
+	    ;;
+	--obj-dir)
+	    shift
+	    OBJDIR=$1
+	    ;;
+	--obj-dir\=*)
+	    tmp=$1
+	    OBJDIR=${tmp#--obj-dir\=}
+	    ;;
+	 --help)
+	    echo "configure usage:"
+	    echo "./configure <options>"
+	    echo "where <options> may include"
+	    echo "  --prefix <install directory>    : tell configure where to install Loci."
+	    echo "  --loci-dir <Loci install directory>      : tell configure where Loci is installed"
+	    echo "  --obj-dir <OBJDIR name>         : tell configure where to put object files"
+	    echo "  --help                          : output this help information"
+	    exit -1
+	    ;;
+	    
+	*)
+	    echo configure option \'$1\' not understood!
+	    echo use ./configure --help to see correct usage!
+	    exit -1 
+            break
+            ;;
+    esac
+    shift
+done
+
+
+
+if [ $LOCI_BASE == "notset" ]; then
+    find_exec lpp
+    if [ $RETURN_VALUE != 0 ]; then
+	LOCI_BASE=${RETURN_VALUE%/bin*}
+    else
+	echo "Unable to find Loci libraries needed to make CHEM!"
+	echo "Use --loci-dir to set Loci directory, or add Loci to your"
+	echo "PATH environment varaible before running configure"
+	exit -1
+    fi
+fi
+
+case "$ARCH" in
+    Linux)
+    USEMAKE=make
+    ;;
+    Darwin)
+    USEMAKE=make
+    ;;
+    CYGWIN*)
+    USEMAKE=make
+    ;;
+    *)
+    USEMAKE=gmake
+    ;;
+esac    
+
+echo "LOCI_BASE = " ${LOCI_BASE} > flowpsi.conf
+echo "FLOWPSI_INSTALL_PATH = " ${PREFIX} >> flowpsi.conf
+
+if [ $PREFIX_SET -eq 0 ]; then
+    echo "*******************************************************************************"
+    echo "** NOTICE!!!!"
+    echo "** Usually the option --prefix will be used to specify an installation"
+    echo "**  directory.  The default setting for the prefix is \"${PREFIX}\".  If you"
+    echo "** want to install into a different directory, use the --prefix option of "
+    echo "** configure.  Execute \"./configure --help\" to see more configure options."
+    echo "** NOTICE!!!!"
+    echo "*******************************************************************************"
+fi
+
+echo 
+echo
+echo "To compile FlowPsi, enter:"
+echo "  make"
+echo "To install FlowPsi in the directory $PREFIX, enter:"
+echo "  make install"
