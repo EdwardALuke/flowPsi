@@ -2,7 +2,8 @@
 #include "flowTypes.h"
 #include "flowPsiIO.h"
 $include "flowPsi.lh"
-
+using std::cout ;
+using std::endl ;
 namespace flowPsi {
 
   $type inviscidFlux param<std::string> ;
@@ -19,14 +20,14 @@ namespace flowPsi {
     if($inviscidFlux == "KEC" || $inviscidFlux == "kec") {
       $useKECFluxScheme = ~EMPTY ;
       if(Loci::MPI_rank==0) {
-	std::cout << "Selecting Kinetic Energy Consistent Low Dissipation Scheme"
+	cout << "Selecting Kinetic Energy Consistent Low Dissipation Scheme"
 	     << endl ;
       }
     }
     if($inviscidFlux == "SSF" || $inviscidFlux == "ssf") {
       $useSkewSymmetricFluxScheme = ~EMPTY ;
       if(Loci::MPI_rank==0) {
-	std::cout << "Selecting 4th Order Skew Symmetric Low Dissipation Scheme"
+	cout << "Selecting 4th Order Skew Symmetric Low Dissipation Scheme"
 	     << endl ;
       }    
     }
