@@ -18,10 +18,19 @@ namespace flowPsi {
     $useSkewSymmetricFluxScheme = EMPTY ;
     if($inviscidFlux == "KEC" || $inviscidFlux == "kec") {
       $useKECFluxScheme = ~EMPTY ;
+      if(Loci::MPI_rank==0) {
+	std::cout << "Selecting Kinetic Energy Consistent Low Dissipation Scheme"
+	     << endl ;
+      }
     }
     if($inviscidFlux == "SSF" || $inviscidFlux == "ssf") {
       $useSkewSymmetricFluxScheme = ~EMPTY ;
+      if(Loci::MPI_rank==0) {
+	std::cout << "Selecting 4th Order Skew Symmetric Low Dissipation Scheme"
+	     << endl ;
+      }    
     }
+
   }
   $type alpha_diss store<real> ;
 
@@ -65,7 +74,7 @@ namespace flowPsi {
   }
   $type LDS_compFactor param<real> ;
   $rule default(LDS_compFactor) {
-    $LDS_compFactor = 10.0 ;
+    $LDS_compFactor = 5.0 ;
   }
 
   $type compDiss store<real> ;
@@ -97,24 +106,30 @@ namespace flowPsi {
   }
 
   $type LDS_nonSymmetricCoeff param<double> ;
-
+  $type LDS_nonSymmetricFactor param<double> ;
+  
   $rule default(LDS_nonSymmetricCoeff) {
-    $LDS_nonSymmetricCoeff = 1.0 ;
+    $LDS_nonSymmetricCoeff = 1.5 ;
   }
+  $rule default(LDS_nonSymmetricFactor) {
+    $LDS_nonSymmetricFactor = 1.0 ;
+  }
+  
   $type alpha_geom store<float> ;
 
   $rule pointwise(alpha_geom<-area,facecenter,(cl,cr)->cellcenter,
-                  (cl,cr)->vol,LDS_nonSymmetricCoeff) {
+                  LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
     const vect3d df = $cr->$cellcenter-$cl->$cellcenter ;
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
-    double a1 = 2.*sqrt(dot(dv,dv)/dot(df,df)) ;
-    double a2 = 1.-dot($area.n,df)/norm(df) ;
-    double vl = $cl->$vol ;
-    double vr = $cr->$vol ;
-    double a3 = 1.-pow(min(vl,vr)/max(vl,vr),1/3) ;
-    double a = max(max(a1,a2),a3) ;
-    double f = $LDS_nonSymmetricCoeff ;
-    $alpha_geom = max(min(f*a+(1.-f)*a*a,1.0),0.0) ;
+    double ndv = norm(dv) ;
+    double ndf = norm(df) ;
+    double cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
+                     dot($area.n,df)/ndf) ;
+    double s = $LDS_nonSymmetricFactor ;
+    double x = min($LDS_nonSymmetricCoeff*(1.-cosa),1.0) ;
+    double x2 = x*x ;
+    double x3 = x2*x ;
+    $alpha_geom =3.*x2-2.*x3 + s*(x3-2.*x2+x) ;
   }
   
 
@@ -137,6 +152,30 @@ namespace flowPsi {
 		  Pambient,area,Rtilde,gamma,us_n),
     constraint(useKECFluxScheme,(cl,cr)->vol) {
 
+    const real tmean = 0.5*($cl->$temperature+$cr->$temperature) ;
+    const real pgmean = 0.5*($cl->$gagePressure+$cr->$gagePressure) ;    
+    const real rhomean = (pgmean+$Pambient)/($Rtilde*tmean) ;
+
+    const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
+			    $rightsP(gagePressure,minPg))/
+      (rhomean*$gamma*$Rtilde*tmean) ;
+    
+    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
+    const real local_alpha = max(ap,real($alpha_geom)) ;
+    const real alpha = max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+
+    const vect3d an = $area.n ;
+
+    hllc_flux($iflux,
+	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+	      $leftv3d(u),
+	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+	      $rightv3d(u),
+	      an,alpha*$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+
+    // remaining flux weighted by (1.-alpha)
+    const real sada = (1.-alpha)*$area.sada ;
+
 #ifdef NOCORRECTION
     const vect3d dv(0.,0.,0.) ;
 #else
@@ -145,8 +184,6 @@ namespace flowPsi {
     
     vect3d ucor = dot($gradv3d_f(u),dv) ;
     const vect3d uf = 0.5*($cl->$u+$cr->$u) ; 
-    const vect3d an = $area.n ;
-    const real sada = $area.sada ;
 
     ucor.x *= ($cl->$limiterv3d(u).x)*($cr->$limiterv3d(u).x) ;
     ucor.y *= ($cl->$limiterv3d(u).y)*($cr->$limiterv3d(u).y) ;
@@ -154,28 +191,24 @@ namespace flowPsi {
 		 
     const real ufn = dot(uf+ucor,an) - $us_n ;
     
-    const real pgl = $cl->$gagePressure ;
-    const real pgr = $cr->$gagePressure ;
- 
-    real pgf = 0.5*(pgl+pgr) + (dot($grads_f(gagePressure),dv)*
-				($cl->$limiters(gagePressure))*
+    const  real pgf = pgmean + (dot($grads_f(gagePressure),dv)*
+		    		($cl->$limiters(gagePressure))*
 				($cr->$limiters(gagePressure))) ;
 
     // limit the temperature correction for stability
-    real dt = (dot($grads_f(temperature),dv))*
+    const real dt = (dot($grads_f(temperature),dv))*
       ($cl->$limiters(temperature))*($cr->$limiters(temperature)) ;
-    real tf = (0.5*($cl->$temperature+$cr->$temperature) + dt) ;
-
+    real tf = tmean + dt ;
     const real rf = (pgf+$Pambient)/($Rtilde*tf) ;
     const real mdot = rf*ufn*sada ;
-    $iflux[0] = mdot ;
+    $iflux[0] += mdot ;
     const int mi = 1 ;
     // Compute kinetic energy flux
 
     const real apgf = pgf*sada ;
-    $iflux[mi+0] = mdot*(uf.x+ucor.x) + apgf*an.x ;
-    $iflux[mi+1] = mdot*(uf.y+ucor.y) + apgf*an.y ;
-    $iflux[mi+2] = mdot*(uf.z+ucor.z) + apgf*an.z ;
+    $iflux[mi+0] += mdot*(uf.x+ucor.x) + apgf*an.x ;
+    $iflux[mi+1] += mdot*(uf.y+ucor.y) + apgf*an.y ;
+    $iflux[mi+2] += mdot*(uf.z+ucor.z) + apgf*an.z ;
 
     real kf = 0.25*(dot($cl->$u,$cl->$u) + dot($cr->$u,$cr->$u)) ; 
     // compute kinetic energy consistent part plus delta kinetic energy
@@ -183,27 +216,7 @@ namespace flowPsi {
     real ktilde = (dot(uf,uf)-kf) + (dot(uf,ucor) + .5*dot(ucor,ucor)) ;
     //            ^KE consistent^   ^ delta KE due to correction     ^ 
     real e_internalf = $Rtilde*tf/($gamma-1) ;
-    $iflux[4] = mdot*(ktilde+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
-
-    const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
-			    $rightsP(gagePressure,minPg))/
-      (rf*$gamma*$Rtilde*tf) ;
-    
-    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,real($alpha_geom)) ;
-    const real alpha = max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
-
-    if(alpha >1e-10) {
-      Loci::Array<real,5> uflux ;
-      hllc_flux(uflux,
-                $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-                $leftv3d(u),
-                $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-                $rightv3d(u),
-                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-      for(int i=0;i<5;++i)
-	$iflux[i] = alpha*uflux[i]+(1.-alpha)*$iflux[i] ;
-    }
+    $iflux[4] += mdot*(ktilde+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
   }
 
   $type SSF_Coeff param<double> ;
