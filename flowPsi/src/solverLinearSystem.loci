@@ -186,7 +186,9 @@ namespace flowPsi {
                   Rtilde) {
     const real Tstar = $temperature{n,it} ;
     const real Tn = $temperature{n} ;
-    const real Tnp1 = 2.*Tstar-Tn ;
+    // use harmonic mean of Tn and Tnp1 to define Tstar
+    const real Tnp1 = Tn*Tstar/(2.*Tn-Tstar) ;
+
 
     const real pgstar = $gagePressure{n,it} ;
     const real peps = $localPBias{n,it} ;
@@ -251,7 +253,10 @@ namespace flowPsi {
     const real srhon = sqrt($rhon) ;
     const real ucoef = 0.5*srhon/($rhonp1*srhonp1) ;
     const real ucoef2 = srhon/srhonp1 ;
-    const real dTdTs = 2.0 ;
+
+    // derivative of harmonic mean formula
+    const real tfactor = 1./(2*$Tn-$temperature) ;
+    const real dTdTs = ($Tn + $Tn*$temperature*tfactor)*tfactor ;
     const real drdt = -dTdTs*rho/$temperature ;
     const real drdp = rho/($gagePressure+$Pambient) ;
 
