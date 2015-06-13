@@ -96,8 +96,8 @@ namespace flowPsi {
     real theta_2 = $veldiv*$veldiv/($vol*$vol) ;
     real omega_2 = $vortMag*$vortMag ;
     $alpha_diss = max($LDS_ducrosFactor*theta_2/(theta_2+omega_2+1e-10),$compDiss) ;
-    int nfaces = $upper.size()+$lower.size()+$boundary_map.size() ;
-    $alpha_diss = (nfaces > 5)?($alpha_diss):1.0 ;
+    //    int nfaces = $upper.size()+$lower.size()+$boundary_map.size() ;
+    //    $alpha_diss = (nfaces > 5)?($alpha_diss):1.0 ;
     $alpha_diss = min($alpha_diss,$LDS_dissipationLimit) ;
     $alpha_diss = max($alpha_diss,$LDS_useUpwind) ;
   }
@@ -138,97 +138,6 @@ namespace flowPsi {
   }
   
 
-  
-#undef NOCORRECTION
-  // NOCORRECTION disables correction that accounts for faces with locations
-  // offset from the midpoint between cellcenters (included as a switch for
-  // testing purposes.  Do not turn this on by default.
-//#define NOCORRECTION
-
-  $rule pointwise(KEC::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
-		  (cl,cr)->alpha_diss,alpha_geom,
-		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
-			    limiterv3d(u)),
-		  leftsP(gagePressure,minPg),rightsP(gagePressure,minPg),
-		  leftsP(temperature,Zero),rightsP(temperature,Zero),
-		  facecenter,gradv3d_f(u),grads_f(gagePressure),
-		  grads_f(temperature),
-		  leftv3d(u),rightv3d(u),
-		  Pambient,area,Rtilde,gamma,us_n),
-    constraint(useKECFluxScheme,(cl,cr)->vol) {
-
-    const real tmean = 0.5*($cl->$temperature+$cr->$temperature) ;
-    const real pgmean = 0.5*($cl->$gagePressure+$cr->$gagePressure) ;    
-    const real rhomean = (pgmean+$Pambient)/($Rtilde*tmean) ;
-
-    const real dp = 2.*fabs($leftsP(gagePressure,minPg)-
-			    $rightsP(gagePressure,minPg))/
-      (rhomean*$gamma*$Rtilde*tmean) ;
-    
-    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,real($alpha_geom)) ;
-    const real alpha = max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
-
-    const vect3d an = $area.n ;
-
-    hllc_flux($iflux,
-	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-	      $leftv3d(u),
-	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-	      $rightv3d(u),
-	      an,alpha*$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-
-    // remaining flux weighted by (1.-alpha)
-    const real sada = (1.-alpha)*$area.sada ;
-
-#ifdef NOCORRECTION
-    const vect3d dv(0.,0.,0.) ;
-#else
-    const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
-#endif
-    
-    vect3d ucor = dot($gradv3d_f(u),dv) ;
-    const vect3d uf = 0.5*($cl->$u+$cr->$u) ; 
-
-    ucor.x *= ($cl->$limiterv3d(u).x)*($cr->$limiterv3d(u).x) ;
-    ucor.y *= ($cl->$limiterv3d(u).y)*($cr->$limiterv3d(u).y) ;
-    ucor.z *= ($cl->$limiterv3d(u).z)*($cr->$limiterv3d(u).z) ;
-		 
-    const real ufn = dot(uf+ucor,an) - $us_n ;
-    
-    const  real pgf = pgmean + (dot($grads_f(gagePressure),dv)*
-		    		($cl->$limiters(gagePressure))*
-				($cr->$limiters(gagePressure))) ;
-
-    // limit the temperature correction for stability
-    const real dt = (dot($grads_f(temperature),dv))*
-      ($cl->$limiters(temperature))*($cr->$limiters(temperature)) ;
-    real tf = tmean + dt ;
-    const real rf = (pgf+$Pambient)/($Rtilde*tf) ;
-    const real mdot = rf*ufn*sada ;
-    $iflux[0] += mdot ;
-    const int mi = 1 ;
-    // Compute kinetic energy flux
-
-    const real apgf = pgf*sada ;
-    $iflux[mi+0] += mdot*(uf.x+ucor.x) + apgf*an.x ;
-    $iflux[mi+1] += mdot*(uf.y+ucor.y) + apgf*an.y ;
-    $iflux[mi+2] += mdot*(uf.z+ucor.z) + apgf*an.z ;
-
-    real kf = 0.25*(dot($cl->$u,$cl->$u) + dot($cr->$u,$cr->$u)) ; 
-    // compute kinetic energy consistent part plus delta kinetic energy
-    // of correction
-    real ktilde = (dot(uf,uf)-kf) + (dot(uf,ucor) + .5*dot(ucor,ucor)) ;
-    //            ^KE consistent^   ^ delta KE due to correction     ^ 
-    real e_internalf = $Rtilde*tf/($gamma-1) ;
-    $iflux[4] += mdot*(ktilde+e_internalf) + (ufn+$us_n)*(pgf+$Pambient)*sada ;
-  }
-
-  $type SSF_Coeff param<double> ;
-  $rule default(SSF_Coeff) {
-    $SSF_Coeff = 1.0 ;
-  }
-
   void kec_flux(Loci::Array<real, 5> &iflux,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
@@ -264,6 +173,125 @@ namespace flowPsi {
     iflux[4] += coef*(mdot*(ke_f+e_internalf) +
                        (ufn+Us_n)*(pgf+pambient) );
   }
+  
+#undef NOCORRECTION
+  // NOCORRECTION disables correction that accounts for faces with locations
+  // offset from the midpoint between cellcenters (included as a switch for
+  // testing purposes.  Do not turn this on by default.
+//#define NOCORRECTION
+
+  $rule pointwise(KEC::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
+		  (cl,cr)->alpha_diss,alpha_geom,
+		  (cl,cr)->(grads(temperature),grads(gagePressure),
+			    gradv3d(u)),
+		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
+			    limiterv3d(u)),
+		  facecenter, Pambient,area,Rtilde,gamma,us_n),
+    constraint(useKECFluxScheme,(cl,cr)->vol) {
+    
+    const vect3d an = $area.n ;
+    const vect3d dll = $facecenter-$cl->$cellcenter ;
+    const vect3d dlr = $facecenter-$cr->$cellcenter ;
+
+    // Now the upwind part
+    // ------------------------------------------------------------------------
+    const real pglim = (0.1*min($cl->$gagePressure,$cr->$gagePressure)+
+			-0.9*$Pambient) ;
+    const real tlim = (0.1*min($cl->$temperature,$cr->$temperature)) ;
+
+      
+    const real pgL = max($cl->$gagePressure + 
+			 $cl->$limiters(gagePressure)*
+			 dot($cl->$grads(gagePressure),dll),
+			 pglim) ;
+    const real pgR = max($cr->$gagePressure + 
+			 $cr->$limiters(gagePressure)*
+			 dot($cr->$grads(gagePressure),dlr),
+			 pglim) ;
+    const real tL = max($cl->$temperature + 
+			$cl->$limiters(temperature)*
+			dot($cl->$grads(temperature),dll),
+			tlim) ;
+    const real tR = max($cr->$temperature + 
+			$cr->$limiters(temperature)*
+			dot($cr->$grads(temperature),dlr),
+			tlim) ;
+    const real rL = (pgL+$Pambient)/($Rtilde*tL) ;
+    const real rR = (pgR+$Pambient)/($Rtilde*tR) ;
+    const real al2 = $gamma*$Rtilde*tL ;
+    const real ar2 = $gamma*$Rtilde*tR ;
+    const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
+    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
+    const real local_alpha = max(ap,real($alpha_geom)) ;
+    const real alpha =
+      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+
+    if(alpha >1e-10) {
+      const real sada = $area.sada*alpha ;
+      vect3d uL = $cl->$u + vect3d($cl->$limiterv3d(u).x*
+				   dot($cl->$gradv3d(u).x,dll),
+				   $cl->$limiterv3d(u).y*
+				   dot($cl->$gradv3d(u).y,dll),
+				   $cl->$limiterv3d(u).z*
+				   dot($cl->$gradv3d(u).z,dll)) ;
+      vect3d uR = $cr->$u + vect3d($cr->$limiterv3d(u).x*
+				   dot($cr->$gradv3d(u).x,dlr),
+				   $cr->$limiterv3d(u).y*
+				   dot($cr->$gradv3d(u).y,dlr),
+				   $cr->$limiterv3d(u).z*
+				   dot($cr->$gradv3d(u).z,dlr)) ;
+      hllc_flux($iflux, pgL,tL,uL, pgR, tR, uR,
+                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    } else {
+      for(int i=0;i<5;++i)
+	$iflux[i] = 0 ;
+    }
+
+    
+    
+
+    const real sada = $area.sada*(1.-alpha) ;
+    const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
+    const real pg_l = max($cl->$gagePressure + 
+			 $cl->$limiters(gagePressure)*
+			 dot($cl->$grads(gagePressure),dv),
+			 pglim) ;
+    const real pg_r = max($cr->$gagePressure + 
+			 $cr->$limiters(gagePressure)*
+			 dot($cr->$grads(gagePressure),dv),
+			 pglim) ;
+    const real t_l = max($cl->$temperature + 
+			$cl->$limiters(temperature)*
+			dot($cl->$grads(temperature),dv),
+			tlim) ;
+    const real t_r = max($cr->$temperature + 
+			$cr->$limiters(temperature)*
+			dot($cr->$grads(temperature),dv),
+			tlim) ;
+    const vect3d u_l = $cl->$u + vect3d($cl->$limiterv3d(u).x*
+					dot($cl->$gradv3d(u).x,dv),
+					$cl->$limiterv3d(u).y*
+					dot($cl->$gradv3d(u).y,dv),
+					$cl->$limiterv3d(u).z*
+					dot($cl->$gradv3d(u).z,dv)) ;
+    const vect3d u_r = $cr->$u + vect3d($cr->$limiterv3d(u).x*
+					dot($cr->$gradv3d(u).x,dv),
+					$cr->$limiterv3d(u).y*
+					dot($cr->$gradv3d(u).y,dv),
+					$cr->$limiterv3d(u).z*
+					dot($cr->$gradv3d(u).z,dv)) ;
+
+    
+    kec_flux($iflux,pg_l,t_l,u_l,pg_r,t_r,u_r,an,sada,
+	     $Pambient,$Rtilde,$gamma,$us_n) ;
+
+  }
+
+  $type SSF_Coeff param<double> ;
+  $rule default(SSF_Coeff) {
+    $SSF_Coeff = 1.0 ;
+  }
+
 
   $rule pointwise(SSF::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
                   (cl,cr)->(grads(gagePressure),grads(temperature)),
