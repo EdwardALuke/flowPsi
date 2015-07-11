@@ -20,7 +20,7 @@ OBJS =  \
 	solverLinearSystem.o solverResidual.o solverRestart.o\
 	solverTurbulence.o solverScalarTransport.o solverPeriodic.o \
 	solverSetup.o solverGravity.o\
-	IOplot.o IOintegrated.o IOgrid.o \
+	IOplot.o IOintegrated.o IOgrid.o IOprobe.o\
 	linearSolverSGS.o linearSolverFSGS.o linearSolverLSGS.o \
 	fluxInviscid.o fluxLowDiss.o fluxViscous.o
 

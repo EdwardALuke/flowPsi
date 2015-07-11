@@ -1,0 +1,293 @@
+#include <Loci.h>
+#include <iostream>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+$include "flowPsi.lh"
+
+using std::endl ;
+using std::ofstream ;
+using std::ios ;
+using std::cerr ;
+
+namespace Loci {
+  extern void register_closing_function(void (*fptr)(int code)) ;
+}
+
+namespace flowPsi {
+
+  $type probe_freq param<int> ;
+  
+  $rule default(probe_freq),comments("Frequency of output to probe files") {
+    $probe_freq = 10 ;
+  }
+
+  $type probe param<options_list> ;
+  
+  $rule optional(probe),comments("Put probes into the solution.  The user specifies a list of probes in the form of < probe1=[x1,y1,z1],probe2=[x2,y2,z2],... > and the solver produces probex.dat files that contains the solution located at that point over time.")  {
+}
+  
+  struct probe_values {
+    real distance ;
+    vect3d position ;
+    vect3d velocity ;
+    real gagepressure ;
+    real temperature ;
+    probe_values() { distance = 1e30 ; position=vect3d(0,0,0) ;
+    velocity = position; ;gagepressure=0;temperature=0;}
+  } ;
+
+  typedef std::vector<probe_values> probe_list ;
+
+  std::ostream &operator<<(std::ostream &s, const probe_values &pl) {
+    s << pl.distance << ' ' << pl.position << ' '
+      << pl.velocity << ' ' << pl.gagepressure << ' ' 
+      << pl.temperature << endl ;
+    return s ;
+  }
+
+  std::istream &operator>>(std::istream &s, probe_values &pl) {
+    s >> pl.distance >>  pl.position 
+      >> pl.velocity >> pl.gagepressure >> pl.temperature ;
+    return s ;
+  }
+  
+}
+
+namespace Loci {
+
+  // Tell Loci how to deal with probe_values struct ;
+
+  class probeSchemaConverter {
+    std::vector<flowPsi::probe_values> &ref ;
+  public:
+    explicit probeSchemaConverter(std::vector<flowPsi::probe_values> &iref) :
+      ref(iref) {}
+    int getSize() const {
+      int sz = 1 ;
+      for(size_t i=0;i<ref.size();++i)
+        sz += 9  ;
+      return sz ;
+    }
+    void getState(flowPsi::real *buf, int &size) {
+      size = getSize() ;
+      size_t p=0 ;
+
+      buf[p++] = ref.size() ;
+
+      for(size_t i=0;i<ref.size();++i) {
+        buf[p++] = ref[i].distance ;
+        buf[p++] = ref[i].position.x ;
+        buf[p++] = ref[i].position.y ;
+        buf[p++] = ref[i].position.z ;
+        buf[p++] = ref[i].velocity.x ;
+        buf[p++] = ref[i].velocity.y ;
+        buf[p++] = ref[i].velocity.z ;
+        buf[p++] = ref[i].gagepressure ;
+        buf[p++] = ref[i].temperature ;
+      }
+    }
+    void setState(flowPsi::real *buf, int size) {
+      ref.clear() ;
+      int p = 0 ;
+      int sz = int(buf[p++]) ;
+      ref.reserve(sz) ;
+      for(int i=0;i<sz;++i) {
+        flowPsi::probe_values pv ;
+        pv.distance = buf[p++] ;
+        pv.position.x = buf[p++] ;
+        pv.position.y = buf[p++] ;
+        pv.position.z = buf[p++] ;
+        pv.velocity.x = buf[p++] ;
+        pv.velocity.y = buf[p++] ;
+        pv.velocity.z = buf[p++] ;
+        pv.gagepressure = buf[p++] ;
+        pv.temperature = buf[p++] ;
+      }
+    }
+  } ;
+    
+  template <> struct data_schema_traits<std::vector<flowPsi::probe_values> > {
+    typedef USER_DEFINED_CONVERTER Schema_Converter ;
+    typedef flowPsi::real Converter_Base_Type ;
+    typedef probeSchemaConverter Converter_Type ;
+  } ;
+}
+
+namespace flowPsi {
+
+  $type probecenter store<vect3d> ;
+
+  $rule pointwise(probecenter{n,it}<-cellcenter),constraint(geom_cells{n,it}) {
+    $probecenter{n,it} = $cellcenter ;
+  }
+    
+  $type probePos param<std::vector<vect3d> > ;
+
+  $rule singleton(probePos<-probe) {
+    options_list::option_namelist l = $probe.getOptionNameList() ;
+    std::vector<vect3d> pposlist ;
+    for(options_list::option_namelist::const_iterator li=l.begin();
+	li!=l.end();++li) {
+      vect3d val=vect3d(0.,0.,0.) ;
+      get_vect3dOption($probe,li->c_str(),"m",val,1) ;
+      pposlist.push_back(val) ;
+    }
+    $probePos = pposlist ;
+  }
+
+  $type probeList param<probe_list> ;
+
+  $rule unit(probeList<-probePos) {
+    size_t sz = $probePos.size() ;
+    probe_list tmp(sz) ;
+    $probeList = tmp ;
+  }
+  
+  template <class T> struct min_probe_list {
+    void operator()(T &r, const T &s) {
+      fatal(r.size() != s.size()) ;
+      for(size_t i=0;i<r.size();++i) {
+        if(s[i].distance < r[i].distance)
+          r[i] = s[i] ;
+      }
+    }
+  } ;
+
+  $rule apply(probeList<-probecenter,probePos,gagePressure,temperature,u)[min_probe_list] {
+    size_t psz = $probeList.size() ;
+    fatal($probePos.size() != psz) ;
+    
+    for(size_t i=0; i<psz ;++i) {
+      const vect3d dr = $probecenter-$probePos[i] ;
+      const real dist = dot(dr,dr) ;
+      if(dist < $probeList[i].distance) {
+	probe_values pv ;
+	pv.distance = dist ;
+	pv.position = $probecenter ;
+	pv.velocity = $u ;
+	pv.gagepressure = $gagePressure ;
+	pv.temperature = $temperature ;
+	$probeList[i] = pv ;
+      }
+    }
+  }
+  
+
+
+  $type do_probe param<bool> ;
+
+  $rule singleton(do_probe{n,it}<-ncycle{n,it},probe_freq,lastNewton{n,it}) {
+    $do_probe{n,it} = (((($ncycle{n,it})%$probe_freq) == 0) &&
+		       $lastNewton{n,it}) ;
+  }
+
+  std::vector<ofstream *> probefiles ;
+  
+  
+  void LociProbeCloser(int code) {
+    // close any probe files already opened on Loci error
+    if(probefiles.size() > 0) {
+      for(size_t i = 0 ;i<probefiles.size();++i) {
+	probefiles[i]->close() ;
+	delete probefiles[i] ;
+      }
+      probefiles.clear() ;
+    }
+  }
+
+  static int probefilecloser_registered = 0 ;
+  class probeFileCloser {
+  public:
+    probeFileCloser() { 
+      if(probefilecloser_registered==0) {
+	Loci::register_closing_function(LociProbeCloser) ; 
+	probefilecloser_registered = 1 ;
+      }
+    }
+    ~probeFileCloser() {
+      // close any probe files already opened
+      if(probefiles.size() > 0) {
+        for(size_t i = 0 ;i<probefiles.size();++i) {
+          probefiles[i]->close() ;
+          delete probefiles[i] ;
+        }
+        probefiles.clear() ;
+      }
+      //      cerr << "probeFileCloser destructed" << endl ;
+    }
+  } ;
+      
+  $type probeFileManager blackbox<probeFileCloser> ;
+
+  $rule blackbox(probeFileManager),constraint(UNIVERSE) {
+  }
+  
+  class output_probe : public pointwise_rule {
+    const_param<options_list> probe ;
+    const_param<probe_list> probeList ;
+    const_param<int> ncycle ;
+    const_param<real> stime ;
+    const_param<flowPsi::TimeValue> dtmax ;
+    const_blackbox<probeFileCloser> probeFileManager ;
+    param<bool> OUTPUT ;
+  public:
+    output_probe() {
+      name_store("probe",probe) ;
+      name_store("probeList",probeList) ;
+      name_store("OUTPUT",OUTPUT) ;
+      name_store("stime",stime) ;
+      name_store("ncycle",ncycle) ;
+      name_store("dtmax",dtmax) ;
+      name_store("probeFileManager",probeFileManager) ;
+      input("probeFileManager") ;
+      input("ncycle,stime,dtmax") ;
+      input("probe,probeList") ;
+      output("OUTPUT") ;
+      conditional("do_probe") ;
+    }
+    void compute(const sequence &seq) {
+      if(Loci::MPI_rank == 0) {
+	//      $[Once] {
+        options_list::option_namelist l = probe->getOptionNameList() ;
+        if(probefiles.size() == 0) { // If files not open, open them
+          size_t i = 0 ;
+          for(options_list::option_namelist::const_iterator li=l.begin();
+              li!=l.end();++li,++i) {
+            string filename = *li ;
+            filename += ".dat" ;
+            probefiles.push_back( new ofstream()) ;
+            if(*ncycle == 0) 
+              probefiles[i]->open(filename.c_str(), ios::out) ;
+            else
+              probefiles[i]->open(filename.c_str(), ios::app) ;
+            if(probefiles[i]->fail()) {
+              cerr << "Probe: can't open "<< filename << endl ;
+              continue ;
+            }
+            probefiles[i]->precision(14) ;
+          }
+        }
+        double time = *stime - *dtmax ;
+        size_t i = 0 ;
+        for(options_list::option_namelist::const_iterator li=l.begin();
+            li!=l.end();++li,++i) {
+          
+          if(!probefiles[i]->fail()) {
+            *(probefiles[i]) << *ncycle << " " << time
+                             << " " << (*probeList)[i].temperature
+                             << " " << (*probeList)[i].gagepressure
+                             << " " << (*probeList)[i].velocity 
+                             << " " << (*probeList)[i].position
+                             << sqrt((*probeList)[i].distance) ;
+
+	  }
+	  *(probefiles[i]) << endl ;
+	}
+        
+      }
+    }
+  } ;
+
+  register_rule<output_probe> register_output_probe ;
+}
+
