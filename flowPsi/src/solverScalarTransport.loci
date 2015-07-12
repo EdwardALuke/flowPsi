@@ -637,27 +637,8 @@ namespace flowPsi {
         (*ofile) << *$ncycle{n} << ' ' << sarms << endl ;
     }
   } ;
-  // add in GCL term
-  //--------------------------------------------------------------------
-  // Rules for the Geometric Conservation Law source term.
-  //--------------------------------------------------------------------
-  $type gcl_sum                        store<real>;
-  //--------------------------------------------------------------------
-  $rule unit( gcl_sum ),
-    constraint( geom_cells ) {
-    $gcl_sum = 0;
-  }
-  //--------------------------------------------------------------------
-  $rule apply( cl->gcl_sum <- us_n, area )[Loci::Summation],
-    constraint( cl->geom_cells ) {
-    $cl->$gcl_sum += $area.sada*$us_n;
-  }
-  //--------------------------------------------------------------------
-  $rule apply( cr->gcl_sum <- us_n, area )[Loci::Summation],
-    constraint( cr->geom_cells ) {
-    $cr->$gcl_sum -= $area.sada*$us_n;
-  }
 
+  // add in GCL term
   $rule apply(X_src<-gcl_sum,X,rho)[Loci::Summation],
   constraint(X,C,geom_cells) {
     join($X_src,-1.*$gcl_sum*$X*$rho) ;

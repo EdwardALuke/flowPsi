@@ -228,4 +228,83 @@ namespace flowPsi {
   } ;
   register_rule<restart_pos> register_restart_pos ;
 
+  //--------------------------------------------------------------------
+  // Rules for the Geometric Conservation Law source term.
+  //--------------------------------------------------------------------
+  //--------------------------------------------------------------------
+  // Rules for the Geometric Conservation Law source term.
+  //--------------------------------------------------------------------
+  $rule unit( gcl_sum ),
+    constraint( geom_cells ) {
+    $gcl_sum = 0;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( cl->gcl_sum <- us_n, area )[Loci::Summation],
+    constraint( cl->geom_cells ) {
+    $cl->$gcl_sum += $area.sada*$us_n;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( cr->gcl_sum <- us_n, area )[Loci::Summation],
+    constraint( cr->geom_cells ) {
+    $cr->$gcl_sum -= $area.sada*$us_n;
+  }
+
+  //--------------------------------------------------------------------
+  // Apply GCL source term to the global source term
+  //--------------------------------------------------------------------
+  $rule apply( src <-  gcl_sum, rho,e_internal,u)[Loci::Summation],
+    constraint( geom_cells, movingMesh ) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    const real rcoef = -$gcl_sum*$rho ;
+    $src[0] += rcoef ;
+    $src[mi+0] += rcoef*$u.x ;
+    $src[mi+1] += rcoef*$u.y ;
+    $src[mi+2] += rcoef*$u.z ;
+    $src[ei] += rcoef*(0.5*dot($u,$u)+$e_internal) ;
+  }
+  //--------------------------------------------------------------------
+  // Compute the GCL source Jacobian
+  //--------------------------------------------------------------------
+  $rule apply( srcJ <- u,rho, temperature, gagePressure,Pambient, e_internal, gcl_sum)[Loci::Summation],
+    constraint( geom_cells, movingMesh ) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+
+    const vect3d U = $u  ;
+    const real coef = -$gcl_sum ;
+    const real rcoef = $rho*coef ;
+
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+
+    // derivative of densit source term with respect to temperature and pressure
+    $srcJ[0][0] += coef*drdt ;
+    $srcJ[0][4] += coef*drdp ;
+
+    // Derivative of momentum source term with rescpect to temperature, 
+    // velocity and pressure
+    $srcJ[mi+0][0] += coef*U.x*drdt ;
+    $srcJ[mi+0][mi+0] += rcoef ;
+    $srcJ[mi+0][4] += coef*U.x*drdp ;
+
+    $srcJ[mi+1][0] += coef*U.y*drdt ;
+    $srcJ[mi+1][mi+1] += rcoef ;
+    $srcJ[mi+1][4] += coef*U.y*drdp ;
+
+    $srcJ[mi+2][0] += coef*U.z*drdt ;
+    $srcJ[mi+2][mi+2] += rcoef ;
+    $srcJ[mi+2][4] += coef*U.z*drdp ;
+
+    // derivative of energy source term with respect to temperature
+    // velocity, and pressure
+    const real q = 0.5*dot(U,U) ;
+    $srcJ[ei][0] += (coef*(q+$e_internal)*drdt + 
+			rcoef*$e_internal/$temperature) ;
+    $srcJ[ei][mi+0] += rcoef*U.x ;
+    $srcJ[ei][mi+1] += rcoef*U.y ;
+    $srcJ[ei][mi+2] += rcoef*U.z ;
+    $srcJ[ei][4] += coef*(q+$e_internal)*drdp ;
+  }
+
 }

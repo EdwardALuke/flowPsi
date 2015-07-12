@@ -42,6 +42,7 @@ $type u                 store<flowPsi::vect3d> ;
 // grid velocity at face
 $type us_n store<flowPsi::real> ;
 $type us store<flowPsi::vect3d> ;
+$type gcl_sum store<flowPsi::real>;
 
 $type mu        store<real> ; // fluid viscosity cell
 $type mu_f      store<real> ; // fluid viscosity face
