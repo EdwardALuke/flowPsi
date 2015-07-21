@@ -41,6 +41,15 @@ namespace flowPsi {
   $rule pointwise(us_n),constraint(area) {
     $us_n = 0 ;
   }
+
+  $type xgvel param<double> ;
+  $rule optional(xgvel) { $xgvel = 0 ;  }
+
+  $rule pointwise(specified::us_n<-area,xgvel),constraint(xgvel,area) {
+    vect3d us($xgvel,0.0,0.0) ;
+    $us_n = dot(us,$area.n) ;
+  }
+
   
   $rule pointwise(moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
     constraint(movingMesh,area) {
@@ -102,6 +111,10 @@ namespace flowPsi {
     $us = vect3d(0,0,0) ;
   }
   
+  $rule pointwise(specified::us<-area,xgvel),constraint(xgvel,area) {
+    $us= vect3d($xgvel,0.0,0.0) ;
+  }
+
   $rule pointwise(moving::us{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),
                   us_n{n,it},area{n,it}),
     constraint(movingMesh,area) {
