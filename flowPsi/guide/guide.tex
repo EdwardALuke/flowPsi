@@ -306,8 +306,9 @@ Similar to restart modulo, except applies to plot files.
 \item {\tt plot\_output}
 
   Provides a comma delimited list of additional variables to output
-  along with the default variables.  A list of the additional variables
-  is given in table \ref{tab:nodalextract}.
+  along with the default variables.  
+%%A list of the additional variables
+%%  is given in table \ref{tab:nodalextract}.
 
 \item {\tt plot\_output\_exclusive}
 
@@ -315,7 +316,8 @@ Similar to restart modulo, except applies to plot files.
   If this variable is present, then the default output variables
   will not be written unless they are included in this list.  A list
   of additional variables is given in table
-  \ref{tab:extract} table \ref{tab:nodalextract}.  Note that if you
+  \ref{tab:extract}. %%table \ref{tab:nodalextract}.  
+  Note that if you
   want to output ``put'' files for restarting put {\tt put} in this
   list and if you want to output species mixtures put {\tt mixture} in
   this list.
@@ -1097,19 +1099,21 @@ executing the command {\tt extract} without any arguments.
 
 The {\em FlowPsi} code will optionally output other scalar and vector data
 when these variables are provided in the {\tt plot\_output} list
-in the {\tt .vars} file.  The scalar variables that can be optionally written
-by {\em FlowPsi} are given in Table \ref{tab:nodalextract}, and the vector
-variables are given in Table \ref{tab:vectorextract}.  For example, to
-extract the turbulence model scalars {\tt k}, {\tt w}, and {\tt tmuu},
+in the {\tt .vars} file.  
+%%The scalar variables that can be optionally written
+%%by {\em FlowPsi} are given in Table \ref{tab:nodalextract}, and the vector
+%%variables are given in Table \ref{tab:vectorextract}.  
+For example, to
+extract the turbulence model scalars {\tt k}, {\tt w}, and {\tt tmu},
 one would place the following in the {\tt .vars} file:
 \begin{verbatim}
 // Note, no spaces between variables, just commas
-plot_output: k,w,tmuu
+plot_output: k,w,tmu
 \end{verbatim}
 
 Now the variables can be extracted for visualization with {\it FieldView} for the case {\tt plume} at iteration {\tt 100} using the command:
 \begin{verbatim}
-extract -fv plume 100 k w tmuu
+extract -fv plume 100 k w tmu
 \end{verbatim}
 
 
