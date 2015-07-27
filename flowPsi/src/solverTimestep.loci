@@ -67,14 +67,23 @@ namespace flowPsi {
   $rule unit(ic_stime),constraint(UNIVERSE) {
     $ic_stime = 0 ;
   }
-  $rule apply(ic_stime<-dtmax)[Loci::Maximum], prelude {
+
+  
+  $rule singleton(timeStepSize<-dtmax,timeStepMode) {
+    $timeStepSize = 0 ;
+    if($timeStepMode!="steady") {
+      $timeStepSize = $dtmax ;
+    }
+  }
+  	
+  $rule apply(ic_stime<-timeStepSize)[Loci::Maximum], prelude {
   } ;
   
   $rule unit(ic_ncycle),constraint(UNIVERSE) {
     $ic_ncycle = 0 ;
   } ;
   
-  $rule apply(ic_ncycle<-dtmax)[Loci::Maximum], prelude {
+  $rule apply(ic_ncycle<-timeStepSize)[Loci::Maximum], prelude {
   } ;
 
   class ic_time_from_file : public singleton_rule {
@@ -150,15 +159,15 @@ namespace flowPsi {
     $ncycle{n+1} = $ncycle{n,it} ;
   }
   
-  $rule singleton(stime{n,it=0}<-stime{n},dtmax{n}) {
-    $stime{n,it=0} = $stime{n}+0.5*dtmax{n,it} ;
+  $rule singleton(stime{n,it=0}<-stime{n},timeStepSize{n}) {
+    $stime{n,it=0} = $stime{n}+0.5*$timeStepSize{n} ;
   }
-  $rule singleton(stime{n,it+1}<-stime{n,it},dtmax,$it{n,it}) {
+  $rule singleton(stime{n,it+1}<-stime{n,it},$it{n,it}) {
     $stime{n,it+1} = $stime{n,it} ;
   }
 
-  $rule singleton(stime{n+1}<-stime{n,it},dtmax{n}),conditional(newtonFinished{n,it}) {
-    $stime{n+1} = $stime{n,it} + 0.5*dtmax{n};
+  $rule singleton(stime{n+1}<-stime{n,it},timeStepSize{n}),conditional(newtonFinished{n,it}) {
+    $stime{n+1} = $stime{n,it} + 0.5*$timeStepSize{n};
   }
 
   

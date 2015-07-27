@@ -78,50 +78,37 @@ namespace flowPsi {
     $LDS_compFactor = 5.0 ;
   }
 
-  $type compDiss store<real> ;
-  $rule unit(compDiss),constraint(geom_cells) {
-    $compDiss = 0 ;
-  }
+  // $type compDiss store<real> ;
+  // $rule unit(compDiss),constraint(geom_cells) {
+  //   $compDiss = 0 ;
+  // }
 
-  $rule apply((cl,cr)->compDiss<-(cl,cr)->(veldiv,soundSpeed),LDS_compFactor,area)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
+  // $rule apply((cl,cr)->compDiss<-(cl,cr)->(veldiv,soundSpeed),LDS_compFactor,area)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
 
-    real factor = $LDS_compFactor*(fabs($cl->$veldiv) + fabs($cr->$veldiv))/
-        (($cl->$soundSpeed + $cr->$soundSpeed)*$area.sada) ;
-    factor = factor*factor ;
-    join($cl->$compDiss,factor) ;
-    join($cr->$compDiss,factor) ;
-  }
-
-  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,LDS_dissipationLimit,LDS_useUpwind,compDiss,LDS_ducrosFactor,(upper,lower,boundary_map)->facecenter),constraint(geom_cells,u) {
-    real theta_2 = $veldiv*$veldiv/($vol*$vol) ;
-    real omega_2 = $vortMag*$vortMag ;
-    $alpha_diss = max($LDS_ducrosFactor*theta_2/(theta_2+omega_2+1e-10),$compDiss) ;
-    //    int nfaces = $upper.size()+$lower.size()+$boundary_map.size() ;
-    //    $alpha_diss = (nfaces > 5)?($alpha_diss):1.0 ;
-    $alpha_diss = min($alpha_diss,$LDS_dissipationLimit) ;
-    $alpha_diss = max($alpha_diss,$LDS_useUpwind) ;
-  }
-
-  $rule pointwise(cr->alpha_diss<-pmap->cl->alpha_diss) {
-    $cr->$alpha_diss = $pmap->$cl->$alpha_diss ;
-  }
+  //   real factor = $LDS_compFactor*(fabs($cl->$veldiv) + fabs($cr->$veldiv))/
+  //       (($cl->$soundSpeed + $cr->$soundSpeed)*$area.sada) ;
+  //   factor = factor*factor ;
+  //   join($cl->$compDiss,factor) ;
+  //   join($cr->$compDiss,factor) ;
+  // }
 
   $type LDS_nonSymmetricCoeff param<double> ;
   $type LDS_nonSymmetricFactor param<double> ;
-  
-  // This defines the cutoff angle where full upwinding occurs
+  // This defines the cutoff angle where full upwinding occurs,
+  // A setting of 2 gives full upwinding at 53 degrees
   $rule default(LDS_nonSymmetricCoeff) {
-    $LDS_nonSymmetricCoeff = 1.5 ;
+    $LDS_nonSymmetricCoeff = 2.5 ;
   }
-  // This defines the slope of the upwind relative to the cos(angle)
+  // This defines the slope of the upwind factor relative to the cos(angle)
   // in the limit as angle->0
   $rule default(LDS_nonSymmetricFactor) {
-    $LDS_nonSymmetricFactor = 1.0 ;
+    $LDS_nonSymmetricFactor = 0.0 ;
   }
   
-  $type alpha_geom store<float> ;
 
-  $rule pointwise(alpha_geom<-area,facecenter,(cl,cr)->cellcenter,
+  $type alpha_geom_f store<float> ;
+
+  $rule pointwise(alpha_geom_f<-area,facecenter,(cl,cr)->cellcenter,
                   LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
     const vect3d df = $cr->$cellcenter-$cl->$cellcenter ;
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
@@ -134,10 +121,39 @@ namespace flowPsi {
     double x = min(scale*(1.-cosa),1.0) ;
     double x2 = x*x ;
     double x3 = x2*x ;
-    $alpha_geom =3.*x2-2.*x3 + s*(x3-2.*x2+x) ;
+    $alpha_geom_f =3.*x2-2.*x3 + s*(x3-2.*x2+x) ;
   }
   
 
+  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,soundSpeed,LDS_compFactor,LDS_dissipationLimit,LDS_useUpwind,LDS_ducrosFactor,(upper,lower,boundary_map)->(area)),constraint(geom_cells,u) {
+
+    int usz = $upper.size() ;
+    double minArea = 1e30 ;
+    for(int i=0;i<usz;++i)
+      minArea = min(minArea,$upper[i]->$area.sada) ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      minArea = min(minArea,$lower[i]->$area.sada) ;
+    // Compute alpha_comp
+    real factor = $LDS_compFactor*(fabs($veldiv))/($soundSpeed*minArea) ;
+    real alpha_comp= factor*factor ;
+
+    // compute alpha_ducro
+    real theta_2 = $veldiv*$veldiv/($vol*$vol) ;
+    real omega_2 = $vortMag*$vortMag ;
+    real alpha_ducro = $LDS_ducrosFactor*theta_2/(theta_2+omega_2+1e-10) ;
+    $alpha_diss = max(alpha_ducro,alpha_comp) ;
+    //    int nfaces = $upper.size()+$lower.size()+$boundary_map.size() ;
+    //    $alpha_diss = (nfaces > 5)?($alpha_diss):1.0 ;
+    $alpha_diss = min($alpha_diss,$LDS_dissipationLimit) ;
+    $alpha_diss = max($alpha_diss,$LDS_useUpwind) ;
+  }
+
+  $rule pointwise(cr->alpha_diss<-pmap->cl->alpha_diss) {
+    $cr->$alpha_diss = $pmap->$cl->$alpha_diss ;
+  }
+
+  
   void kec_flux(Loci::Array<real, 5> &iflux,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
@@ -174,14 +190,8 @@ namespace flowPsi {
                        (ufn+Us_n)*(pgf+pambient) );
   }
   
-#undef NOCORRECTION
-  // NOCORRECTION disables correction that accounts for faces with locations
-  // offset from the midpoint between cellcenters (included as a switch for
-  // testing purposes.  Do not turn this on by default.
-//#define NOCORRECTION
-
   $rule pointwise(KEC::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
-		  (cl,cr)->alpha_diss,alpha_geom,
+		  (cl,cr)->alpha_diss,alpha_geom_f,
 		  (cl,cr)->(grads(temperature),grads(gagePressure),
 			    gradv3d(u)),
 		  (cl,cr)->(limiters(temperature),limiters(gagePressure),
@@ -221,8 +231,7 @@ namespace flowPsi {
     const real al2 = $gamma*$Rtilde*tL ;
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
-    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,real($alpha_geom)) ;
+    const real local_alpha = max(double($alpha_geom_f),min(1.0,dp*1.0-0.5)) ;
     const real alpha =
       max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
 
@@ -297,7 +306,7 @@ namespace flowPsi {
                   (cl,cr)->(grads(gagePressure),grads(temperature)),
 		  (cl,cr)->(limiters(gagePressure),limiters(temperature)),
 		  (cl,cr)->(gradv3d(u),limiterv3d(u)),
-		  (cl,cr)->alpha_diss,alpha_geom,
+		  (cl,cr)->alpha_diss,alpha_geom_f,
 		  facecenter,
 		  Pambient,area,Rtilde,gamma,us_n,
 		  SSF_Coeff),
@@ -335,8 +344,7 @@ namespace flowPsi {
     const real al2 = $gamma*$Rtilde*tL ;
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
-    const real ap = max(0.0,min(1.0,dp*1.0-0.5)) ;
-    const real local_alpha = max(ap,real($alpha_geom)) ;
+    const real local_alpha = max(double($alpha_geom_f),min(1.0,dp*1.0-0.5)) ;
     const real alpha =
       max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
 
