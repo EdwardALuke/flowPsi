@@ -200,6 +200,7 @@ $type maximumRunTime    param<flowPsi::TimeValue> ;
 
 $type grid_vol_iblank param<flowPsi::real> ;
 $type integratedOutputFileManager blackbox<flowPsi::integratedFileDBManager> ;
+$type do_output_integrate param<bool> ;
 
 $type localPBias store<float> ;
 $type localPBias_next store<float> ;
