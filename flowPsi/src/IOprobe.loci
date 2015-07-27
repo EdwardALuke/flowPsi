@@ -267,7 +267,7 @@ namespace flowPsi {
             probefiles[i]->precision(14) ;
           }
         }
-        double time = *stime - *dtmax ;
+        double time = *stime ;
         size_t i = 0 ;
         for(options_list::option_namelist::const_iterator li=l.begin();
             li!=l.end();++li,++i) {
