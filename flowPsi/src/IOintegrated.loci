@@ -240,7 +240,6 @@ namespace flowPsi {
     join($integrate_flux(X),f) ;
   }
   
-  $type do_output_integrate param<bool> ;
   $rule singleton(do_output_integrate{n,it}<-lastNewton{n,it},
                   ncycle{n,it},print_freq) {
     $do_output_integrate{n,it} = $lastNewton{n,it} && (($ncycle{n,it}%$print_freq) == 0) ;
