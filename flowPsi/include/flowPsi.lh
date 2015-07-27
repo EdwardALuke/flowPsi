@@ -145,6 +145,7 @@ $type newtonFinished    param<bool> ;
 $type lastNewton        param<bool> ;
 $type urelax            param<flowPsi::real> ;
 $type dtmax             param<flowPsi::TimeValue> ;
+$type timeStepSize      param<flowPsi::real> ;
 $type cflmax            param<flowPsi::real> ;
 $type cflpdt            store<real> ; // Multiply this by dt to get cfl
 $type cfl               param<std::pair<double,double> > ;
