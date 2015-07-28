@@ -97,7 +97,7 @@ namespace flowPsi {
   // This defines the cutoff angle where full upwinding occurs,
   // A setting of 2 gives full upwinding at 53 degrees
   $rule default(LDS_nonSymmetricCoeff) {
-    $LDS_nonSymmetricCoeff = 2.5 ;
+    $LDS_nonSymmetricCoeff = 2.75 ;
   }
   // This defines the slope of the upwind factor relative to the cos(angle)
   // in the limit as angle->0
@@ -249,6 +249,11 @@ namespace flowPsi {
 				   dot($cr->$gradv3d(u).y,dlr),
 				   $cr->$limiterv3d(u).z*
 				   dot($cr->$gradv3d(u).z,dlr)) ;
+      //Thornber low dissipation preconditioning
+      const real Ma = min(max(dot(uL,an)-$us_n,dot(uR,an)-$us_n)/
+			  sqrt(min(al2,ar2))+0.001,1.0);
+      vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
+      vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
       hllc_flux($iflux, pgL,tL,uL, pgR, tR, uR,
                 an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
     } else {
@@ -362,6 +367,11 @@ namespace flowPsi {
 				   dot($cr->$gradv3d(u).y,dlr),
 				   $cr->$limiterv3d(u).z*
 				   dot($cr->$gradv3d(u).z,dlr)) ;
+      //Thornber low dissipation preconditioning
+      const real Ma = min(max(dot(uL,an)-$us_n,dot(uR,an)-$us_n)/
+			  sqrt(min(al2,ar2))+0.001,1.0);
+      vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
+      vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
       hllc_flux($iflux, pgL,tL,uL, pgR, tR, uR,
                 an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
     } else {
