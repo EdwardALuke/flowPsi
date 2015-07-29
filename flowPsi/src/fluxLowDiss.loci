@@ -97,7 +97,7 @@ namespace flowPsi {
   // This defines the cutoff angle where full upwinding occurs,
   // A setting of 2 gives full upwinding at 53 degrees
   $rule default(LDS_nonSymmetricCoeff) {
-    $LDS_nonSymmetricCoeff = 2.75 ;
+    $LDS_nonSymmetricCoeff = 1.5 ;
   }
   // This defines the slope of the upwind factor relative to the cos(angle)
   // in the limit as angle->0
@@ -108,7 +108,7 @@ namespace flowPsi {
 
   $type alpha_geom_f store<float> ;
 
-  $rule pointwise(alpha_geom_f<-area,facecenter,(cl,cr)->cellcenter,
+  $rule pointwise(alpha_geom_f<-area,facecenter,(cl,cr)->(cellcenter,vol),
                   LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
     const vect3d df = $cr->$cellcenter-$cl->$cellcenter ;
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
@@ -116,7 +116,8 @@ namespace flowPsi {
     double ndf = norm(df) ;
     double cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
                      dot($area.n,df)/ndf) ;
-    double scale = $LDS_nonSymmetricCoeff ;
+    double vol_ratio = max($cl->$vol,$cr->$vol)/min($cl->$vol,$cr->$vol) ;
+    double scale = $LDS_nonSymmetricCoeff*sqrt(vol_ratio) ;
     double s = $LDS_nonSymmetricFactor/max(scale,1.0) ; ;
     double x = min(scale*(1.-cosa),1.0) ;
     double x2 = x*x ;
@@ -231,9 +232,10 @@ namespace flowPsi {
     const real al2 = $gamma*$Rtilde*tL ;
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
-    const real local_alpha = max(double($alpha_geom_f),min(1.0,dp*1.0-0.5)) ;
-    const real alpha =
-      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+    const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
+			     min(1.0,dp*1.0-0.5)) ;
+
+    const real alpha = max(alpha_c,double($alpha_geom_f)) ;
 
     if(alpha >1e-10) {
       const real sada = $area.sada*alpha ;
@@ -250,11 +252,12 @@ namespace flowPsi {
 				   $cr->$limiterv3d(u).z*
 				   dot($cr->$gradv3d(u).z,dlr)) ;
       //Thornber low dissipation preconditioning
-      const real Ma = min(max(dot(uL,an)-$us_n,dot(uR,an)-$us_n)/
-			  sqrt(min(al2,ar2))+0.001,1.0);
+      const real amin = sqrt(min(al2,ar2)) ;
+      const real utmax = max(fabs(dot(uL,an)+$us_n),fabs(dot(uR,an)+$us_n)) ;
+      const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
       vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
       vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
-      hllc_flux($iflux, pgL,tL,uL, pgR, tR, uR,
+      hllc_flux($iflux, pgL,tL,uLp, pgR, tR, uRp,
                 an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
     } else {
       for(int i=0;i<5;++i)
@@ -349,9 +352,10 @@ namespace flowPsi {
     const real al2 = $gamma*$Rtilde*tL ;
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
-    const real local_alpha = max(double($alpha_geom_f),min(1.0,dp*1.0-0.5)) ;
-    const real alpha =
-      max(max($cl->$alpha_diss,$cr->$alpha_diss),local_alpha) ;
+    const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
+			     min(1.0,dp*1.0-0.5)) ;
+
+    const real alpha = max(alpha_c,double($alpha_geom_f)) ;
 
     if(alpha >1e-10) {
       const real sada = $area.sada*alpha ;
@@ -368,11 +372,12 @@ namespace flowPsi {
 				   $cr->$limiterv3d(u).z*
 				   dot($cr->$gradv3d(u).z,dlr)) ;
       //Thornber low dissipation preconditioning
-      const real Ma = min(max(dot(uL,an)-$us_n,dot(uR,an)-$us_n)/
-			  sqrt(min(al2,ar2))+0.001,1.0);
-      vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
-      vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
-      hllc_flux($iflux, pgL,tL,uL, pgR, tR, uR,
+      const real amin = sqrt(min(al2,ar2)) ;
+      const real utmax = max(fabs(dot(uL,an)+$us_n),fabs(dot(uR,an)+$us_n)) ;
+      const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
+      const vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
+      const vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
+      hllc_flux($iflux, pgL,tL,uLp, pgR, tR, uRp,
                 an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
     } else {
       for(int i=0;i<5;++i)
