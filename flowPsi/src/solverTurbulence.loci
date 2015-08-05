@@ -1,6 +1,7 @@
 #include <Loci.h>
 #include <Tools/tools.h>
 #include "flowTypes.h"
+#include "flowPsiIO.h"
 $include "flowPsi.lh"
 
 namespace flowPsi {
@@ -186,4 +187,10 @@ namespace flowPsi {
     $Q = 0.5*($vortMag*$vortMag - $strainRate*$strainRate) ;
   }
 
+  $type Q_f store<real> ;
+  $rule pointwise(Q_f<-ci->Q) {
+    $Q_f = $ci->$Q ;
+  }
+
+  OUTPUT_SCALAR("cell2node(Q)",Q) ;
 }
