@@ -152,9 +152,15 @@ namespace flowPsi {
     $kconduct_f = (vl*$cr->$kconduct+vr*$cl->$kconduct)/(vl+vr) ;
   }    
 
+  // This will cause the code to crash if tmu is active with a laminar 
+  // simulation
+  $rule pointwise(tmu<-vol),constraint(LaminarSimulation) {
+    $tmu=0.0 ;
+  }
+
   $rule pointwise(muTotal<-mu),inplace(muTotal|mu),constraint(LaminarSimulation,mu), prelude {} ;
   
-$rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulation,mu) {
+  $rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulation,mu) {
     $muTotal = $mu + $tmu ;
   }
 
