@@ -1,0 +1,20 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+
+namespace flowPsi {
+  OUTPUT_SCALAR_ALWAYS("cell2node(scalarMean(temperature))",tmean) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(scalarVariance(temperature))",tvar) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(scalarMean(gagePressure))",pgmean) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(scalarVariance(gagePressure))",pgvar) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(scalarMean(rho))",rmean) ;
+
+  OUTPUT_VECTOR_ALWAYS("cell2node_v3d(vect3dFavreMean(u))",umean) ;
+  OUTPUT_VECTOR_ALWAYS("cell2node_v3d(vect3dFavreVar(u))",uvar) ;
+  OUTPUT_VECTOR_ALWAYS("cell2node_v3d(vect3dFavreCoVar(u))",ucovar) ;
+
+  OUTPUT_BNDRY_SCALAR("scalarMean_f(gagePressure)",bpgmean,"no_symmetry_BC") ;
+  OUTPUT_BNDRY_SCALAR("scalarVariance_f(gagePressure)",bpgvar,"no_symmetry_BC") ;
+  OUTPUT_BNDRY_SCALAR("scalarMean_f(temperature)",btmean,"no_symmetry_BC") ;
+  OUTPUT_BNDRY_SCALAR("scalarVariance_f(temperature)",btvar,"no_symmetry_BC") ;
+}
