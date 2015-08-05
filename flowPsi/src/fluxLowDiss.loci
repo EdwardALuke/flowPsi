@@ -102,7 +102,7 @@ namespace flowPsi {
   // This defines the slope of the upwind factor relative to the cos(angle)
   // in the limit as angle->0
   $rule default(LDS_nonSymmetricFactor) {
-    $LDS_nonSymmetricFactor = 0.1 ;
+    $LDS_nonSymmetricFactor = 1 ;
   }
   
 
@@ -126,21 +126,23 @@ namespace flowPsi {
   }
   
 
-  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,soundSpeed,LDS_compFactor,LDS_dissipationLimit,LDS_useUpwind,LDS_ducrosFactor,(upper,lower,boundary_map)->(area)),constraint(geom_cells,u) {
+  $rule pointwise(alpha_diss<-veldiv,vol,vortMag,soundSpeed,LDS_compFactor,LDS_dissipationLimit,LDS_useUpwind,LDS_ducrosFactor,cellcenter,(upper,lower)->(facecenter)),constraint(geom_cells,u) {
 
     int usz = $upper.size() ;
-    double sumArea = 0 ;
-    for(int i=0;i<usz;++i)
-      sumArea += $upper[i]->$area.sada ;
+    vect3d ccenter = $cellcenter ;
+    double maxdist2 = 0 ;
+    for(int i=0;i<usz;++i) {
+      vect3d dv = $upper[i]->$facecenter-ccenter ;
+      maxdist2 = max(maxdist2,dot(dv,dv)) ;
+    }
     int lsz = $lower.size() ;
-    for(int i=0;i<lsz;++i)
-      sumArea += $lower[i]->$area.sada ;
-    int bsz = $boundary_map.size() ;
-    for(int i=0;i<bsz;++i)
-      sumArea += $boundary_map[i]->$area.sada ;
-    sumArea *= 1./6. ;
+    for(int i=0;i<lsz;++i) {
+      vect3d dv = $lower[i]->$facecenter-ccenter ;
+      maxdist2 = max(maxdist2,dot(dv,dv)) ;
+    }
+    double len = 2.*sqrt(maxdist2) ;
     // Compute alpha_comp
-    real factor = $LDS_compFactor*(fabs($veldiv))/($soundSpeed*sumArea) ;
+    real factor = $LDS_compFactor*(fabs($veldiv))*len/($soundSpeed*$vol) ;
     real alpha_comp= factor*factor ;
 
     // compute alpha_ducro
