@@ -10,8 +10,11 @@ namespace flowPsi {
     $stop_iter=1000 ;
   }
   
-  $rule singleton(timestepFinished{n}<-$n{n},stop_iter) {
-    $timestepFinished{n} = $$n{n}>$stop_iter+1 ;
+  $rule singleton(plot_status{n=-1}),constraint(UNIVERSE) {
+    $plot_status{n=-1} = 0 ;
+  }
+  $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1}) {
+    $timestepFinished{n} = ($$n{n}>$stop_iter+1)||($plot_status{n-1}>1) ;
   }
 					    
   $rule pointwise(solution<-gagePressure{n},temperature{n},u{n}),

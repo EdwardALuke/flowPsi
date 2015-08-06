@@ -80,8 +80,9 @@ namespace flowPsi {
   }
 #else
 
-  $rule singleton(do_plot{n,it}<-ncycle{n,it},plot_freq,lastNewton{n,it}) {
-    $do_plot{n,it} = (((($ncycle{n,it})%$plot_freq) == 0) &&
+  $rule singleton(do_plot{n,it}<-ncycle{n,it},plot_freq,plot_status{n},lastNewton{n,it}) {
+    $do_plot{n,it} = ((((($ncycle{n,it})%$plot_freq) == 0) ||
+		       ($plot_status{n} != 0)) &&
 		      $lastNewton{n,it}) ;
     if(Loci::MPI_rank == 0) {
       if($do_plot{n,it}) {
