@@ -227,4 +227,31 @@ namespace flowPsi {
   $rule pointwise(AllWallBCs), constraint(impermeable_BC) {}
   $rule pointwise(AllWallBCs), constraint(reflecting_BC) {}
 
+
+  // boundary condition output variables support
+  $rule pointwise(heatf,wall_stress<-area,vflux,u_f) {
+    const int mi = 0 ;
+    const int ei = 3 ;
+    const real sadar = -1./($area.sada+1e-30) ;
+    // Compute values per unit area.
+    $heatf = ($vflux[ei]-
+              ($u_f.x*$vflux[mi+0]+
+               $u_f.y*$vflux[mi+1]+
+               $u_f.z*$vflux[mi+2]))*sadar ;
+    $wall_stress = vect3d($vflux[mi+0],$vflux[mi+1],$vflux[mi+2])*sadar ;
+  }
+
+  $rule pointwise(yplus_w<-ci->mu,rho_f,facecenter,ci->cellcenter,wall_stress,
+		  area) {
+    const real rho_w = $rho_f ;
+    const real mu_w = $ci->$mu ;
+    const real tau_w = sqrt(dot($wall_stress,$wall_stress)) ;
+    const real dist_1 = dot($facecenter-$ci->$cellcenter,$area.n) ;
+    $yplus_w=sqrt(rho_w*tau_w)*dist_1/mu_w ;
+  }
+
+  $type wall_stress_mag store<real> ;
+  $rule pointwise(wall_stress_mag<-wall_stress) {
+    $wall_stress_mag = norm($wall_stress) ;
+  }
 }

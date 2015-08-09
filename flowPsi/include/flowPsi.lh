@@ -138,6 +138,10 @@ $type T_interface store<flowPsi::real> ;
 $type qwall store<flowPsi::real> ;
 $type qwall_prescribed store<flowPsi::real> ;
 $type wallVelocity store<flowPsi::vect3d> ;
+$type heatf store<flowPsi::real> ;
+$type wall_stress store<flowPsi::vect3d> ;
+$type yplus_w store<flowPsi::real> ;
+
 $type stime             param<flowPsi::real> ; // simulation time
 $type ncycle            param<int> ; // simulation iteration number
 $type newtonMaxIter     param<int> ;

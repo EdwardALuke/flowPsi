@@ -231,7 +231,7 @@ namespace flowPsi {
     const int ei=3 ;
     conservativeFlux f ;
     f.mass_flux = 0 ;
-    f.energy_flux = $vflux[ei] ;
+    f.energy_flux = -1.*$vflux[ei] ;
     f.momentum_vis = -1.*vect3d($vflux[mi+0],$vflux[mi+1],$vflux[mi+2]) ;
     f.momentum_flux = vect3d(0.,0.,0.) ;
     f.area = 0 ;
