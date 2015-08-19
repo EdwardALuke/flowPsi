@@ -5,52 +5,6 @@
 $include "flowPsi.lh"
 
 namespace flowPsi {
-//   class turbulence_check : public BC_Check {
-//     string error_message ;
-//   public:
-//     std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
-//     std::string variablesChecked() { return "k,e,w,tmu" ; }
-//     bool checkOptions(const options_list& bc_options) {
-//       error_message = "" ;
-//       return true ;
-//     }
-//     std::ostream &ErrorMessage(std::ostream &s) {
-//       s << error_message << endl ;
-//       return s;
-//     }
-//   } ;
-
-//   register_BC<turbulence_check> register_BC_turbulence_check ;
-
-//   $type turbulence_model param<std::string> ;
-//   $rule default(turbulence_model),
-//     comments("Select the turbulence model: options currently supported are 'KW' - Wilcox k-omega model, 'BSL' - Menter's baseline model, 'SST' - Menter's Shear Stress Transport Model, 'RKE' - realizable k-epsilon model, 'RKECUBIC' - nonlinear (cubic) realizable k-epsilon model, and 'Spalart_Allmaras' for the Spalart Allmaras model.") 
-//   {
-//     $turbulence_model = "none" ; 
-//   } 
-
-//   $type LaminarSimulation Constraint ;
-//   $type TurbulentSimulation Constraint ;
-//   $type transport_model param<std::string> ;
-
-//   $rule constraint(LaminarSimulation,TurbulentSimulation<-
-//                    turbulence_model,transport_model) {
-//     $LaminarSimulation = EMPTY ;
-//     $TurbulentSimulation = EMPTY ;
-//       if($turbulence_model == "none") {
-//         $LaminarSimulation = ~EMPTY ;
-//       } else {
-//         $TurbulentSimulation = ~EMPTY ;
-//         if($transport_model == "none") {
-//           if(Loci::MPI_rank == 0) {
-//             cerr << "You must set transport_model in the vars file when using"
-//                  << endl << "turbulence_model = " << $turbulence_model 
-//                  << endl ;
-//           }
-//           Loci::Abort() ;
-//         }
-//       }
-//   } 
 
   $type distance_function param<std::string> ;
   $rule default(distance_function),
@@ -193,4 +147,165 @@ namespace flowPsi {
   }
 
   OUTPUT_SCALAR("cell2node(Q)",Q) ;
+
+  // multi_scale options for hybrid RANS/LES modeling modes
+  $type MS_LG_3D Constraint ;
+
+  $rule constraint(MS_LG_3D<-multi_scale) {
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+         
+    $MS_LG_3D = EMPTY ;
+    if(!(len==0 || is2d))
+      $MS_LG_3D = $*multi_scale.domain() ;
+  }
+
+  $type MS_LG_2DX Constraint ;
+  $type MS_LG_2DY Constraint ;
+  $type MS_LG_2DZ Constraint ;
+
+  $rule constraint(MS_LG_2DX<-multi_scale) {
+    $MS_LG_2DX = EMPTY ;
+    
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'X' ||
+                $multi_scale[len-1] == 'x'))
+      $MS_LG_2DX = $*multi_scale.domain() ;
+  }
+
+  $rule constraint(MS_LG_2DY<-multi_scale) {
+    $MS_LG_2DY = EMPTY ;
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'Y' ||
+                $multi_scale[len-1] == 'y'))
+      $MS_LG_2DY = $*multi_scale.domain() ;
+  }
+
+  $rule constraint(MS_LG_2DZ<-multi_scale) {
+    $MS_LG_2DZ = EMPTY ;
+    int len = $multi_scale.size() ;
+    bool is2d = false ;
+    if(len >= 3 && $multi_scale[len-3] == '2' &&
+       ($multi_scale[len-2] == 'D' || $multi_scale[len-2] == 'd'))
+      is2d = true ;
+    if(is2d && ($multi_scale[len-1] == 'Z' ||
+                $multi_scale[len-1] == 'z'))
+      $MS_LG_2DZ = $*multi_scale.domain() ;
+  }
+
+  $type LG store<real> ;
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_3D) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *li=$upper.begin();li!=$upper.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *ui=$lower.begin();ui!=$lower.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DX) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.x = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DY) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.y = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+  $rule pointwise(LG<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_2DZ) {
+    real max_d = 0.0 ;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *ui=$upper.begin();ui!=$upper.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *li=$lower.begin();li!=$lower.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      dist.z = 0. ;
+      d = 2.0*norm (dist) ;
+      max_d = max(d,max_d) ;
+    }
+    $LG = max_d ;
+  }
+
+
 }

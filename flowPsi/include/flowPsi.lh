@@ -160,6 +160,7 @@ $type iblank store<flowPsi::byte_t> ;
 // General Turbulence Model
 // Map from cell to nearest viscous wall
 $type min_cell2noslip    Map ;
+$type multi_scale param<std::string> ;
 
 $type divu store<flowPsi::real> ;
 

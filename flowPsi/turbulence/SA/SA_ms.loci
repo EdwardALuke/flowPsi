@@ -8,16 +8,16 @@ $include "flowPsi.lh"
 $include "SA.lh"
 
 namespace flowPsi {
-  $type multi_scale param<std::string> ;
   $rule optional(multi_scale) {
   }
 
+
   $type SA_DES Constraint ;
   $type SA_DDES Constraint ;
+  $type SA_IDDES Constraint ;
+  
 
-
-
-  $rule constraint(SA_DES,SA_DDES<-multi_scale) {
+  $rule constraint(SA_DES,SA_DDES,SA_IDDES<-multi_scale) {
     int len = $multi_scale.size() ;
     string mode ;
     for(int i=0;i<len;++i)
@@ -27,12 +27,16 @@ namespace flowPsi {
         break ;
     $SA_DES = EMPTY ;
     $SA_DDES = EMPTY ;
+    $SA_IDDES = EMPTY ;
     if(mode == "DES") {
       $SA_DES = $*multi_scale.domain() ;
     } else if(mode == "DDES") {
       $SA_DDES = $*multi_scale.domain() ;
+    } else if(mode == "IDDES") {
+      $SA_IDDES = $*multi_scale.domain() ;
     }
   }
+
 
   $type dist_noslip_des store<real> ;
   $type LG store<real> ;
@@ -56,46 +60,88 @@ namespace flowPsi {
   
   $type sa_dist_noslip store<real> ;
   $rule pointwise(des::sa_dist_noslip<-dist_noslip_des),
-    constraint(SA_DES,vol) {
+    constraint(SA_DES,geom_cells) {
     $sa_dist_noslip = $dist_noslip_des ;
   }
   
   $rule pointwise(ddes::sa_dist_noslip<-dist_noslip,LG,f_ddes),
-    constraint(SA_DDES,vol) {
+    constraint(SA_DDES,geom_cells) {
     const real des_param = 0.65 ;
     const real d = $dist_noslip ;
     $sa_dist_noslip = d - $f_ddes*max(0.,d-des_param*$LG) ;
   }
+  // IDDES section
+  $type f_iddes store<real> ;
+  $type f_restore store<real> ;
+  $type low_Re store<real> ;
+  $type LGMIN store<real> ;
+  $rule pointwise(f_iddes,f_restore,low_Re<-mu,tmu,gradv3d(u),fv1,fv2,cw1,spalart,dist_noslip,rho,LG) {
+    const tens3d &gu = $gradv3d(u) ;
+    const real S = sqrt(gu.x.x*gu.x.x + gu.x.y*gu.x.y + gu.x.z*gu.x.z+
+                        gu.y.x*gu.y.x + gu.y.y*gu.y.y + gu.y.z*gu.y.z+ 
+                        gu.z.x*gu.z.x + gu.z.y*gu.z.y + gu.z.z*gu.z.z) ;
+    const real d = $dist_noslip ;
+    const real ka = $spalart.k_coeff ;
+    const real r_d = $tmu/max($rho*S*ka*ka*d*d,1e-30) ;
+    const real r_dl = $mu/max($rho*S*ka*ka*d*d,1e-30) ;
+    const real fd = 1.-tanh(512.*r_d*r_d*r_d) ;
 
-  $type SA_production param<std::string> ;
-  $rule optional(SA_production),
-    comments("How the Spalart Allmaras turbulence model production term is defined.  May be either 'standard' or 'DaclesMariani'.  DaclesMariani provides a modification that reduces turbulence production in vortical flows.  Note, when using DaclesMariani the constant used in the modification is defined by Cvor")
-  {
-    $SA_production = "standard" ;
-  }
-  
-  $type SP_rotat Constraint ;
-
-  $rule constraint(SP_rotat<-SA_production) {
-    $SP_rotat = EMPTY ;
-    if ($SA_production == "DaclesMariani") {
-      $SP_rotat = $*SA_production.domain() ;
-    } else if ($SA_production != "standard") {
-      if(Loci::MPI_rank == 0)
-        cerr << "SA_production: " << $SA_production << " is unknown, defauting to standard" << endl ;
+    const real ct = 1.63 ;
+    const real cl = 3.55 ;
+    const real f_t = tanh(pow(ct*ct*r_d,3)) ;
+    const real f_l = tanh(pow(cl*cl*r_dl,10)) ; 
+    const real f_amp = 1. - max(f_t,f_l) ;
+    const real alph = 0.25 - d/$LG ;
+    real f_hill=0;
+    if (alph >= 0.) {
+       f_hill = 2.*exp(-11.09*alph*alph) ;
+    } else {
+       f_hill = 2.*exp(-9.*alph*alph) ;
     }
+    $f_restore = max((f_hill-1.),0.)*f_amp ;
+    const real f_step = min(2.*exp(-9.*alph*alph),1.) ;
+    $f_iddes = max((1.-fd),f_step) ;
+    const real fwstar = 0.424 ;
+    const real ft2 = 0. ;
+    real tmpRe = 1. - $spalart.cb1*(ft2+(1.-ft2)*$fv2)/($cw1*ka*ka*fwstar) ;
+    tmpRe = tmpRe/($fv1*max(1.0e-10,1.-ft2)) ;
+    tmpRe = min(100.,tmpRe) ;
+    $low_Re = sqrt(tmpRe) ;
+  }
+  $rule pointwise(iddes::sa_dist_noslip<-dist_noslip,LG,f_iddes,f_restore,low_Re,LGMIN),
+    constraint(SA_IDDES,vol,LG) {
+    const real des_param = 0.65 ;
+    const real d = $dist_noslip ;
+    const real sgs_cw = 0.15 ;
+    const real maxvar=max(sgs_cw*d,sgs_cw*$LG);
+    const real ddes = min(max(maxvar,$LGMIN),$LG) ;
+    $sa_dist_noslip = $f_iddes*(1.+$f_restore*$low_Re)*d + (1.-$f_iddes)*des_param*$low_Re*ddes ;
   }
 
-  $type Cvor param<real> ;
 
-$rule default(Cvor),comments("Vorticity correction coefficient used when SA_production is set to 'DaclesMariani'.") {
-    $Cvor = 4.0 ;
-  }
-  
 
-  $type S_tilda store<real> ;
-  $rule apply(S_tilda<-vortMag,strainRate,S_tilda,Cvor)[Loci::Summation],
-    constraint(vortMag,SP_rotat) {
-    $S_tilda += $Cvor*min(0.0, ($strainRate-$vortMag)) ;
+
+  $rule pointwise(LGMIN<-(upper,lower,boundary_map)->facecenter,cellcenter),
+    constraint(cellcenter,(upper,lower,boundary_map)->facecenter,MS_LG_3D) {
+    real min_d = 1.0e13;
+    real d = 0.0 ;
+    vect3d dist = vect3d(0.0,0.0,0.0) ;
+    for(const Entity *li=$upper.begin();li!=$upper.end();++li) {
+      dist = $cellcenter- li->$facecenter ;
+      d = 2.0*norm (dist) ;
+      min_d = min(d,min_d) ;
+    }
+    for(const Entity *ui=$lower.begin();ui!=$lower.end();++ui) {
+      dist = $cellcenter- ui->$facecenter ;
+      d = 2.0*norm (dist) ;
+      min_d = min(d,min_d) ;
+    }
+    for(const Entity *bi=$boundary_map.begin();bi!=$boundary_map.end();++bi) {
+      dist = $cellcenter- bi->$facecenter ;
+      d = 2.0*norm (dist) ;
+      min_d = min(d,min_d) ;
+    }
+    $LGMIN = min_d ;
   }
+
 }

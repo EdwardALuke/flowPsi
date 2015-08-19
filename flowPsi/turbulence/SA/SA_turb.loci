@@ -179,31 +179,35 @@ namespace flowPsi {
   }
 
   // Get nu tilde from turbulent nu
-  real find_nu_tilde(const real nu_turb,const real cv1, const real nu_lam) {
-    // Solve nu_turb*(nu_tilde^3+cv1^3/nu_lam^3) - nu_tilde^4 = 0
-    // using newton method
-
-    real nu_tilde = nu_turb ;
-    const real coef = nu_turb*pow(cv1*nu_lam,3) ;
-    const real eps = 1e-8 ;
-    const int MAX_ITER = 100 ;
+  double find_nu_tilde(const double nu_turb, const double cv1, const double nu_lam) {
+    // solve chi_turb*(chi^3+cv1^3)-chi^4 = 0
+    // find chi using newton iteration
+    double chi_turb = nu_turb/nu_lam ;
+    if(chi_turb> 350) { // At this point nu_tilde will effectively be nu_turb
+      return nu_turb ;
+    }
+    double cv13 = cv1*cv1*cv1 ;
+    const int MAX_ITER=100 ;
+    double eps = 1e-8 ;
     int i ;
-    for(i=0;i<MAX_ITER;++i) {
-      real nu_tilde2 = nu_tilde*nu_tilde ;
-      real nu_tilde3 = nu_tilde*nu_tilde2 ;
-      real f = nu_turb*nu_tilde3 + coef - nu_tilde3*nu_tilde  ;
-      real fp = 3.*nu_turb*nu_tilde2 - 4.*nu_tilde3 ;
-      real h = -f/fp ;
-      nu_tilde += h ;
-      if(abs(h) > nu_turb*eps)
+    // Initial guess is turbulent value
+    double chi = max(chi_turb,1.0) ;
+    for( i=0;i<MAX_ITER;++i) {
+      double chi3 = chi*chi*chi ;
+      double f = chi_turb*(chi3+cv13)-chi3*chi ;
+      if(fabs(f)<eps*chi_turb)
         break ;
+      double fp = 3*chi_turb*chi*chi-4.*chi3 ;
+      double dchi = -f/fp ;
+      // limit change so that chi does not overshoot
+      double scale = min(1.0,.5*chi/(fabs(dchi)+1e-30)) ;
+      chi += dchi*scale ;
     }
     if(i == MAX_ITER) {
-      Loci::debugout << "nu_tilde = " << nu_tilde <<" " ;
-      Loci::debugout << "prescribed SA bc failed to converge!" << endl ;
-      nu_tilde = nu_turb ;
+      cerr << "find_nu_tilde unable to converge, chi_turb=" << chi_turb  << endl ;
     }
-    return nu_tilde ;
+    // convert chi to nu_tilde
+    return chi*nu_lam;
   }
   
 //   $rule pointwise(prescribe::nuTilde_f<-area,mu_f,u_f,us_n,
@@ -301,6 +305,39 @@ namespace flowPsi {
     const real rsum = 1./(g6+$cw36) ;
     $fwp= $gpcoeff*term - $gpcoeff*(($cw36 + 1)*g6) *rsum*rsum*rterm5 ;
   }
+
+  $type SA_production param<std::string> ;
+  $rule optional(SA_production),
+    comments("How the Spalart Allmaras turbulence model production term is defined.  May be either 'standard' or 'DaclesMariani'.  DaclesMariani provides a modification that reduces turbulence production in vortical flows.  Note, when using DaclesMariani the constant used in the modification is defined by Cvor")
+  {
+    $SA_production = "standard" ;
+  }
+  
+  $type SP_rotat Constraint ;
+
+  $rule constraint(SP_rotat<-SA_production) {
+    $SP_rotat = EMPTY ;
+    if ($SA_production == "DaclesMariani") {
+      $SP_rotat = $*SA_production.domain() ;
+    } else if ($SA_production != "standard") {
+      if(Loci::MPI_rank == 0)
+        cerr << "SA_production: " << $SA_production << " is unknown, defauting to standard" << endl ;
+    }
+  }
+
+  $type Cvor param<real> ;
+
+$rule default(Cvor),comments("Vorticity correction coefficient used when SA_production is set to 'DaclesMariani'.") {
+    $Cvor = 4.0 ;
+  }
+  
+
+  $type S_tilda store<real> ;
+  $rule apply(S_tilda<-vortMag,strainRate,S_tilda,Cvor)[Loci::Summation],
+    constraint(vortMag,SP_rotat) {
+    $S_tilda += $Cvor*min(0.0, ($strainRate-$vortMag)) ;
+  }
+
   $rule apply(nuTilde_srcJ<-rho,nuTilde,sa_dist_noslip,cw1,
               fw,fwp,spalart,vol,SP_info)[Loci::Summation] {
     const real y=$sa_dist_noslip ;

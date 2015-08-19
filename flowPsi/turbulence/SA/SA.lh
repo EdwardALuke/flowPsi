@@ -18,7 +18,7 @@ $type gcoeff            store<flowPsi::real> ;
 $type gpcoeff           store<flowPsi::real> ;
 $type fw                store<flowPsi::real> ;
 $type fwp               store<flowPsi::real> ;
-$type cw1               store<flowPsi::real> ;
+$type cw1               param<flowPsi::real> ;
 // convection, diffusion, and source terms
 $type SA_src            store<flowPsi::real> ;
 // turmbulent destruction
