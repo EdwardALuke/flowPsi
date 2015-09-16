@@ -154,7 +154,7 @@ namespace flowPsi {
 
   // This will cause the code to crash if tmu is active with a laminar 
   // simulation
-  $rule pointwise(tmu<-vol),constraint(LaminarSimulation) {
+  $rule pointwise(tmu<-vol),constraint(LaminarSimulation,geom_cells) {
     $tmu=0.0 ;
   }
 
