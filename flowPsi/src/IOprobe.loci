@@ -3,9 +3,11 @@
 #include "flowTypes.h"
 #include "flowPsiIO.h"
 $include "flowPsi.lh"
-
+#include <sstream>
 using std::endl ;
+using std::ostringstream ;
 using std::ofstream ;
+using std::ifstream ;
 using std::ios ;
 using std::cerr ;
 
@@ -289,5 +291,159 @@ namespace flowPsi {
   } ;
 
   register_rule<output_probe> register_output_probe ;
+
+  $type probePosFile param<std::vector<vect3d> > ;
+  $type probeListFile param<std::string> ;
+  $rule optional(probeListFile) {
+  }
+  $rule singleton(probePosFile<-probeListFile) {
+    // processor 0 read file
+    if(Loci::MPI_rank == 0) {
+      string filename = $probeListFile ;
+      ifstream file(filename.c_str(),ios::in) ;
+      if(file.fail()) {
+	cerr << "unable to open probeListFile '" << filename
+	     << "'" << endl ;
+	std::vector<vect3d> plist(1) ;
+	plist[0] = vect3d(0,0,0) ;
+	$probePosFile=plist ;
+      } else {
+	int npnts = 0 ;
+	file >> npnts ;
+	std::vector<vect3d> plist(npnts) ;
+	for(int i=0;i<npnts;++i) {
+	  file >> plist[i].x >> plist[i].y >> plist[i].z ;
+	}
+	$probePosFile = plist ;
+      }
+    }
+    // broadcast number of points in probeListFile
+    int pfile_size = $probePosFile.size() ;
+    MPI_Bcast(&pfile_size,1,MPI_INT,0,MPI_COMM_WORLD) ;
+    // allocate space on high numbered processors
+    if(Loci::MPI_rank != 0) {
+      std::vector<vect3d> plist(pfile_size) ;
+      $probePosFile = plist ;
+    }
+    //broadcast points
+    MPI_Bcast(&($probePosFile[0]),pfile_size*3,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
+  }
+
+  $type probeListData param<probe_list> ;
+
+  $rule unit(probeListData<-probePosFile) {
+    size_t sz = $probePosFile.size() ;
+    probe_list tmp(sz) ;
+    $probeListData = tmp ;
+  }
+  
+  $rule apply(probeListData<-cellcenter,probePosFile,
+	      gagePressure,temperature,u,
+	      grads(temperature),grads(gagePressure),gradv3d(u),
+	      upper->cr->(temperature,gagePressure,u),
+	      lower->cl->(temperature,gagePressure,u),
+	      boundary_map->(temperature_f,gagePressure_f,u_f))
+  [min_probe_list] {
+    size_t psz = $probeListData.size() ;
+    fatal($probePosFile.size() != psz) ;
+    
+    for(size_t i=0; i<psz ;++i) {
+      const vect3d dr = $probePosFile[i]-$cellcenter ;
+      const real dist = dot(dr,dr) ;
+      if(dist < $probeListData[i].distance) {
+	int lsz = $lower.size() ;
+	real tmax = $temperature ;
+	real tmin = tmax ;
+	real pgmax = $gagePressure ;
+	real pgmin = pgmax ;
+	vect3d umax = $u ;
+	vect3d umin = umax ;
+	for(int i=0;i<lsz;++i) {
+	  real t = $lower[i]->$cl->$temperature ;
+	  real pg = $lower[i]->$cl->$gagePressure ;
+	  vect3d ut = $lower[i]->$cl->$u ;
+	  tmax = max(tmax,t) ;
+	  tmin = min(tmin,t) ;
+	  pgmax = max(pgmax,pg) ;
+	  pgmin = min(pgmin,pg) ;
+	  umax.x = max(umax.x,ut.x) ;
+	  umin.x = min(umin.x,ut.x) ;
+	  umax.y = max(umax.y,ut.y) ;
+	  umin.y = min(umin.y,ut.y) ;
+	  umax.z = max(umax.z,ut.z) ;
+	  umin.z = min(umin.z,ut.z) ;
+	}
+	const int usz = $upper.size() ;
+	for(int i=0;i<usz;++i) {
+	  real t = $upper[i]->$cr->$temperature ;
+	  real pg = $upper[i]->$cr->$gagePressure ;
+	  vect3d ut = $upper[i]->$cr->$u ;
+	  tmax = max(tmax,t) ;
+	  tmin = min(tmin,t) ;
+	  pgmax = max(pgmax,pg) ;
+	  pgmin = min(pgmin,pg) ;
+	  umax.x = max(umax.x,ut.x) ;
+	  umin.x = min(umin.x,ut.x) ;
+	  umax.y = max(umax.y,ut.y) ;
+	  umin.y = min(umin.y,ut.y) ;
+	  umax.z = max(umax.z,ut.z) ;
+	  umin.z = min(umin.z,ut.z) ;
+	}
+	int bsz = $boundary_map.size() ;
+	for(int i=0;i<bsz;++i) {
+	  real t = $boundary_map[i]->$temperature_f ;
+	  real pg = $boundary_map[i]->$gagePressure_f ;
+	  vect3d ut = $boundary_map[i]->$u_f ;
+	  tmax = max(tmax,t) ;
+	  tmin = min(tmin,t) ;
+	  pgmax = max(pgmax,pg) ;
+	  pgmin = min(pgmin,pg) ;
+	  umax.x = max(umax.x,ut.x) ;
+	  umin.x = min(umin.x,ut.x) ;
+	  umax.y = max(umax.y,ut.y) ;
+	  umin.y = min(umin.y,ut.y) ;
+	  umax.z = max(umax.z,ut.z) ;
+	  umin.z = min(umin.z,ut.z) ;
+	}
+
+	real ti = max(min($temperature+dot($grads(temperature),dr),
+			  tmax),tmin) ;
+	real pgi = max(min($gagePressure+dot($grads(gagePressure),dr),
+			   pgmax),pgmin) ;
+	vect3d ui ;
+	ui.x = max(min($u.x+dot($gradv3d(u).x,dr),
+		       umax.x),umin.x) ;
+	ui.y = max(min($u.y+dot($gradv3d(u).y,dr),
+		       umax.y),umin.y) ;
+	ui.z = max(min($u.z+dot($gradv3d(u).z,dr),
+		       umax.z),umin.z) ;
+	probe_values pv ;
+	pv.distance = dist ;
+	pv.position = $probePosFile[i] ;
+	pv.velocity = ui ;
+	pv.gagepressure = pgi ;
+	pv.temperature = ti ;
+	$probeListData[i] = pv ;
+      }
+    }
+  }
+  
+  $rule pointwise(OUTPUT<-probeListFile,probeListData,ncycle,stime,dtmax),
+    conditional(do_probe),prelude {
+    if(Loci::MPI_rank == 0) {
+      ostringstream oss ;
+      oss << "probeArray_" << *$ncycle << ".dat"  ;
+      string filename = oss.str() ;
+      ofstream file(filename.c_str(),ios::trunc) ;
+      int sz = (*$probeListData).size() ;
+      for(int i=0;i<sz;++i) {
+	file << (*$probeListData)[i].temperature
+	     << " " << (*$probeListData)[i].gagepressure
+	     << " " << (*$probeListData)[i].velocity 
+	     << " " << (*$probeListData)[i].position
+	     << sqrt((*$probeListData)[i].distance) << endl ;
+      }
+    }
+  } ;
 }
 

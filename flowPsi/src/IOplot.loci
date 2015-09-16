@@ -341,8 +341,6 @@ namespace flowPsi {
   OUTPUT_BNDRY_SCALAR("temperature_f",bt,"ci") ;
   OUTPUT_BNDRY_SCALAR("rho_f",br,"ci") ;
   OUTPUT_BNDRY_SCALAR("mdot_f",mdot,"ci") ;
-  OUTPUT_BNDRY_SCALAR("k_f",bk,"ci") ;
-  OUTPUT_BNDRY_SCALAR("tmuu_f",btmuu,"ci") ;
   dump_boundary_vector::dump_boundary_vector(const char *vname,
                                         const char *valname) {
     var_name = string(vname) ;
