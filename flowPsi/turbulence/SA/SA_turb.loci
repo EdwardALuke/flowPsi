@@ -752,5 +752,7 @@ $rule default(Cvor),comments("Vorticity correction coefficient used when SA_prod
 
   OUTPUT_SCALAR("cell2node(nuTilde)",nu_t) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(tmu)",tmu) ;
+  OUTPUT_BNDRY_SCALAR("nuTilde_f",bnut,"ci") ;
+  OUTPUT_BNDRY_SCALAR("tmu_f",btmu,"ci") ;
 }
 
