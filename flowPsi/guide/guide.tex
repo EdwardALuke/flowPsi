@@ -257,6 +257,22 @@ plane (away from the normal) are included in this geometry.
 
 \end{itemize}
 
+\item {\tt flowRegime }
+
+This sets the type of flow model we will be using.  This will be set
+to either {\tt inviscid}, {\tt laminar}, or {\tt turbulent}.  If the
+setting is {\tt turbulent} then a turbulence model will need to be
+loaded using a {\tt loadModule} directive at the top of the vars file.  
+
+\item {\tt timeStepMode }
+
+This variable selects the time integration mode.  It is set to either
+{\tt steady} or {\tt unsteady}.  In {\tt steady} mode, {\tt flowPsi }
+will utilize a backward Euler time integration method with local
+timestepping enabled.  For time-accurate simulations select {\tt
+  unsteady} to disable local timestepping and switch to a second order
+temporal integration.
+
 \item {\tt print\_freq}
 
   This variable describes the frequency at which CFL numbers and integrated
