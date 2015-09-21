@@ -26,7 +26,7 @@ namespace flowPsi {
   $type probe param<options_list> ;
   
   $rule optional(probe),comments("Put probes into the solution.  The user specifies a list of probes in the form of < probe1=[x1,y1,z1],probe2=[x2,y2,z2],... > and the solver produces probex.dat files that contains the solution located at that point over time.")  {
-}
+  }
   
   struct probe_values {
     real distance ;
@@ -35,7 +35,7 @@ namespace flowPsi {
     real gagepressure ;
     real temperature ;
     probe_values() { distance = 1e30 ; position=vect3d(0,0,0) ;
-    velocity = position; ;gagepressure=0;temperature=0;}
+      velocity = position; ;gagepressure=0;temperature=0;}
   } ;
 
   typedef std::vector<probe_values> probe_list ;
@@ -104,6 +104,7 @@ namespace Loci {
         pv.velocity.z = buf[p++] ;
         pv.gagepressure = buf[p++] ;
         pv.temperature = buf[p++] ;
+	ref.push_back(pv) ;
       }
     }
   } ;
@@ -346,66 +347,65 @@ namespace flowPsi {
   [min_probe_list] {
     size_t psz = $probeListData.size() ;
     fatal($probePosFile.size() != psz) ;
-    
+    int lsz = $lower.size() ;
+    real tmax = $temperature ;
+    real tmin = tmax ;
+    real pgmax = $gagePressure ;
+    real pgmin = pgmax ;
+    vect3d umax = $u ;
+    vect3d umin = umax ;
+    for(int j=0;j<lsz;++j) {
+      real t = $lower[j]->$cl->$temperature ;
+      real pg = $lower[j]->$cl->$gagePressure ;
+      vect3d ut = $lower[j]->$cl->$u ;
+      tmax = max(tmax,t) ;
+      tmin = min(tmin,t) ;
+      pgmax = max(pgmax,pg) ;
+      pgmin = min(pgmin,pg) ;
+      umax.x = max(umax.x,ut.x) ;
+      umin.x = min(umin.x,ut.x) ;
+      umax.y = max(umax.y,ut.y) ;
+      umin.y = min(umin.y,ut.y) ;
+      umax.z = max(umax.z,ut.z) ;
+      umin.z = min(umin.z,ut.z) ;
+    }
+    const int usz = $upper.size() ;
+    for(int j=0;j<usz;++j) {
+      real t = $upper[j]->$cr->$temperature ;
+      real pg = $upper[j]->$cr->$gagePressure ;
+      vect3d ut = $upper[j]->$cr->$u ;
+      tmax = max(tmax,t) ;
+      tmin = min(tmin,t) ;
+      pgmax = max(pgmax,pg) ;
+      pgmin = min(pgmin,pg) ;
+      umax.x = max(umax.x,ut.x) ;
+      umin.x = min(umin.x,ut.x) ;
+      umax.y = max(umax.y,ut.y) ;
+      umin.y = min(umin.y,ut.y) ;
+      umax.z = max(umax.z,ut.z) ;
+      umin.z = min(umin.z,ut.z) ;
+    }
+    int bsz = $boundary_map.size() ;
+    for(int j=0;j<bsz;++j) {
+      real t = $boundary_map[j]->$temperature_f ;
+      real pg = $boundary_map[j]->$gagePressure_f ;
+      vect3d ut = $boundary_map[j]->$u_f ;
+      tmax = max(tmax,t) ;
+      tmin = min(tmin,t) ;
+      pgmax = max(pgmax,pg) ;
+      pgmin = min(pgmin,pg) ;
+      umax.x = max(umax.x,ut.x) ;
+      umin.x = min(umin.x,ut.x) ;
+      umax.y = max(umax.y,ut.y) ;
+      umin.y = min(umin.y,ut.y) ;
+      umax.z = max(umax.z,ut.z) ;
+      umin.z = min(umin.z,ut.z) ;
+    }
+
     for(size_t i=0; i<psz ;++i) {
       const vect3d dr = $probePosFile[i]-$cellcenter ;
       const real dist = dot(dr,dr) ;
       if(dist < $probeListData[i].distance) {
-	int lsz = $lower.size() ;
-	real tmax = $temperature ;
-	real tmin = tmax ;
-	real pgmax = $gagePressure ;
-	real pgmin = pgmax ;
-	vect3d umax = $u ;
-	vect3d umin = umax ;
-	for(int i=0;i<lsz;++i) {
-	  real t = $lower[i]->$cl->$temperature ;
-	  real pg = $lower[i]->$cl->$gagePressure ;
-	  vect3d ut = $lower[i]->$cl->$u ;
-	  tmax = max(tmax,t) ;
-	  tmin = min(tmin,t) ;
-	  pgmax = max(pgmax,pg) ;
-	  pgmin = min(pgmin,pg) ;
-	  umax.x = max(umax.x,ut.x) ;
-	  umin.x = min(umin.x,ut.x) ;
-	  umax.y = max(umax.y,ut.y) ;
-	  umin.y = min(umin.y,ut.y) ;
-	  umax.z = max(umax.z,ut.z) ;
-	  umin.z = min(umin.z,ut.z) ;
-	}
-	const int usz = $upper.size() ;
-	for(int i=0;i<usz;++i) {
-	  real t = $upper[i]->$cr->$temperature ;
-	  real pg = $upper[i]->$cr->$gagePressure ;
-	  vect3d ut = $upper[i]->$cr->$u ;
-	  tmax = max(tmax,t) ;
-	  tmin = min(tmin,t) ;
-	  pgmax = max(pgmax,pg) ;
-	  pgmin = min(pgmin,pg) ;
-	  umax.x = max(umax.x,ut.x) ;
-	  umin.x = min(umin.x,ut.x) ;
-	  umax.y = max(umax.y,ut.y) ;
-	  umin.y = min(umin.y,ut.y) ;
-	  umax.z = max(umax.z,ut.z) ;
-	  umin.z = min(umin.z,ut.z) ;
-	}
-	int bsz = $boundary_map.size() ;
-	for(int i=0;i<bsz;++i) {
-	  real t = $boundary_map[i]->$temperature_f ;
-	  real pg = $boundary_map[i]->$gagePressure_f ;
-	  vect3d ut = $boundary_map[i]->$u_f ;
-	  tmax = max(tmax,t) ;
-	  tmin = min(tmin,t) ;
-	  pgmax = max(pgmax,pg) ;
-	  pgmin = min(pgmin,pg) ;
-	  umax.x = max(umax.x,ut.x) ;
-	  umin.x = min(umin.x,ut.x) ;
-	  umax.y = max(umax.y,ut.y) ;
-	  umin.y = min(umin.y,ut.y) ;
-	  umax.z = max(umax.z,ut.z) ;
-	  umin.z = min(umin.z,ut.z) ;
-	}
-
 	real ti = max(min($temperature+dot($grads(temperature),dr),
 			  tmax),tmin) ;
 	real pgi = max(min($gagePressure+dot($grads(gagePressure),dr),
