@@ -1,0 +1,2951 @@
+#include "interpolate_file.h"
+#include <map>
+#include <strings.h>
+#include <stdio.h>
+//#define REPORT_TIMES
+//#define VERBOSE
+//#define MEMORY_DEBUG
+
+
+#ifdef MEMORY_DEBUG
+#include <malloc.h>
+
+#endif
+namespace {
+  void memSpace(string s) {
+#ifdef MEMORY_DEBUG
+    using Loci::debugout ;
+    debugout << s <<":" << endl;
+    
+    struct mallinfo info = mallinfo() ;
+    int mem_alloc_local
+      = (((info.hblkhd+512)>>10) + // mmap allocation in Kbytes
+         ((info.uordblks+512)>>10)) ; // sbrk allocation in Kbytes
+    int mem_req_local = mem_alloc_local + ((info.fordblks+512)>>10) ;
+    int mem_alloc_global = 0 ;
+    int mem_req_global = 0 ;
+    MPI_Allreduce(&mem_alloc_local,&mem_alloc_global,1,MPI_INT,MPI_SUM,
+                  MPI_COMM_WORLD) ;
+    MPI_Allreduce(&mem_req_local,&mem_req_global,1,MPI_INT,MPI_SUM,
+                  MPI_COMM_WORLD) ;
+    int mem_alloc_max = 0 ;
+    int mem_req_max = 0 ;
+    MPI_Allreduce(&mem_alloc_local,&mem_alloc_max,1,MPI_INT,MPI_MAX,
+                  MPI_COMM_WORLD) ;
+    MPI_Allreduce(&mem_req_local,&mem_req_max,1,MPI_INT,MPI_MAX,
+                  MPI_COMM_WORLD) ;
+
+    debugout << "   alloc=" << ((mem_alloc_global+512)>>10) <<"Mb"
+             << ",imb="
+             << floor(((double(Loci::MPI_processes)*double(mem_alloc_max))/
+                       double(mem_alloc_global)-1.)*100.) << "%" 
+             << ",sys=" << ((mem_req_global+512)>>10) << "Mb"
+             << ",imb="
+             << floor(((double(Loci::MPI_processes)*double(mem_req_max))/
+                       double(mem_req_global)-1.)*100.) << "%" 
+             << ",local=" << ((mem_alloc_local+512)>>10) << "Mb" << endl ;
+
+    debugout.flush() ;
+#endif
+  }
+  string i2s(int i) {
+    char buf[512] ;
+    bzero(buf,512) ;
+    snprintf(buf,511,"%d",i) ;
+    return string(buf) ;
+  }
+
+}
+
+#undef MEMORY_PROFILE
+#ifdef MEMORY_DEBUG
+#define MEMORY_PROFILE(X) memSpace(string(# X) +";" + string(__FILE__) + ";"+i2s(__LINE__))
+#else
+#define MEMORY_PROFILE(X)
+#endif
+
+using std::string ;
+using std::vector ;
+using std::map ;
+
+namespace Loci { 
+void ORBPartition(const vector<vector3d<float> > &pnts,
+                  vector<int> &procid,
+                  MPI_Comm comm) ;
+}
+
+namespace flowPsi {
+
+  typedef vector3d<float> coord3df ;
+  
+  using namespace Loci ;
+  
+
+
+
+  void broadcast_storeRep(Loci::storeRepP rep) {
+    if(Loci::MPI_processes == 1)
+      return ;
+    entitySet domain = rep->domain() ;
+    int size = rep->pack_size(domain) ;
+    unsigned char *my_stuff = new unsigned char[size] ;
+    int loc_pack = 0 ;
+    if(Loci::MPI_rank == 0) {
+      rep->pack(my_stuff,loc_pack,size,domain) ;
+      MPI_Bcast(my_stuff,size,MPI_PACKED,0,MPI_COMM_WORLD) ;
+    } else {
+      MPI_Bcast(my_stuff,size,MPI_PACKED,0,MPI_COMM_WORLD) ;
+      rep->unpack(my_stuff,loc_pack,size,domain) ;
+    }
+    delete[] my_stuff ;
+  }
+
+  class interpolate_data {
+  public:
+    Loci::kdTree::KDTree<float> *kd ;
+    int domain_offset ;
+    store<vector3d<double> > pos ;
+    storeVec<double> data ;
+    vector<int> distribution ;
+    interpolate_data &operator=(const interpolate_data &in) {
+      cerr << "interpolate_data shouldn't be copied!" << endl ;
+      kd = 0 ;
+      domain_offset = in.domain_offset ;
+      pos.setRep(in.pos.Rep()) ;
+      data.setRep(in.data.Rep()) ;
+      distribution = in.distribution ;
+      return *this ;
+    }
+    ~interpolate_data() {
+      if(kd !=0)
+        delete kd ;
+      kd = 0 ;
+      data.allocate(EMPTY) ;
+      pos.allocate(EMPTY) ;
+    }
+    interpolate_data() {
+      kd = 0 ;
+    }
+  } ;
+
+
+
+  class interpolate_file_read : public blackbox_rule {
+    const_param<string> filename ;
+    const_param<real> Pambient ;
+    blackbox<interpolate_data> interp_data ;
+  public:
+    interpolate_file_read() {
+      name_store("Pambient",Pambient) ;
+      input("Pambient") ;
+      name_store("FILENAME",filename) ;
+      name_store("interpolateFile(FILENAME)",interp_data) ;
+      input("FILENAME") ;
+      output("interpolateFile(FILENAME)") ;
+    }
+    void compute(const sequence &seq) ;
+  } ;
+
+  void readContainerSimple(hid_t file_id, std::string vname,
+                           Loci::storeRepP var) {
+    Loci::readContainerRAW(file_id,vname,var,MPI_COMM_WORLD) ;
+  }
+  void interpolate_file_read::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+#ifdef VERBOSE
+    Loci::debugout << "opening file " << *filename << endl ;
+    Loci::debugout.flush() ;
+#endif
+    hid_t file_id = Loci::hdf5OpenFile((*filename).c_str(),
+                                       H5F_ACC_RDONLY,H5P_DEFAULT) ;
+    store<vect3d> pos ;
+
+    readContainerSimple(file_id,"pos",pos.Rep()) ;
+    entitySet dom = pos.domain() ;
+    int dom_offset = dom.Min() ;
+    entitySet allocdom = dom<<dom_offset ;
+    vector<vector3d<float> > spos(dom.size()) ;
+    int cnt=0;
+    FORALL(dom,nd) {
+      spos[cnt++] = vector3d<float>(pos[nd].x,pos[nd].y,pos[nd].z) ;
+    } ENDFORALL ;
+
+#ifdef VERBOSE
+    Loci::debugout << "spos.size() = " << spos.size() << endl ;
+    Loci::debugout.flush() ;
+#endif
+    const int p = Loci::MPI_processes ;
+    // Redistribute data
+    vector<int> send_count(p,0) ;
+
+    vector<int> procid ;
+    if(p> 1)
+      Loci::ORBPartition(spos,procid,MPI_COMM_WORLD) ;
+    else {
+      vector<int> tmp(spos.size(),0) ;
+      procid.swap(tmp) ;
+    }
+
+    for(size_t i=0;i<procid.size();++i)
+      send_count[procid[i]]++ ;
+
+
+    vector<int> recv_count(p,0) ;
+
+    MPI_Alltoall(&send_count[0],1,MPI_INT,&recv_count[0],1,MPI_INT,
+                 MPI_COMM_WORLD) ;
+
+    int final_size = 0 ;
+    for(int i=0;i<p;++i)
+      final_size += recv_count[i] ;
+
+    vector<int> dist_sizes(p,0) ;
+    MPI_Allgather(&final_size,1,MPI_INT,
+                  &dist_sizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+
+
+    vector<int> offsets(p+1,0) ;
+    for(int i=1;i<p+1;++i)
+      offsets[i] = offsets[i-1]+dist_sizes[i-1] ;
+
+    interp_data->distribution = offsets ;
+    vector<int> soffsets(p,0) ;
+    for(int i=1;i<p;++i)
+      soffsets[i] = soffsets[i-1] + send_count[i-1] ;
+
+#ifdef VERBOSE
+    Loci::debugout << "finished with orb partition" << endl ;
+    Loci::debugout.flush() ;
+#endif
+
+    int npos = pos.domain().size() ;
+    vector<vector3d<double> > dpos(npos) ;
+    vector<int> counts = soffsets ;
+    cnt = 0 ;
+    FORALL(dom,nd) {
+      int pid = procid[cnt++] ;
+      dpos[counts[pid]++] = pos[nd] ;
+    } ENDFORALL ;
+
+    int r = Loci::MPI_rank ;
+    interp_data->domain_offset = offsets[r] ;
+    entitySet mydom = interval(0,dist_sizes[r]-1) ;
+    if(dist_sizes[r] == 0)
+      mydom = EMPTY ;
+    interp_data->pos.allocate(mydom) ;
+
+    vector<int> send_num(p),recv_num(p) ;
+    for(int i=0;i<p;++i) {
+      send_num[i] = send_count[i] ;
+      recv_num[i] = recv_count[i] ;
+      send_count[i] *= 3 ;
+      recv_count[i] *= 3 ;
+    }
+    vector<int> send_displacement(p,0) ;
+    vector<int> recv_displacement(p,0) ;
+    send_displacement[0] = 0;
+    recv_displacement[0] = 0 ;
+    for(int i=1;i<p;++i) {
+      send_displacement[i] = send_displacement[i-1]+send_count[i-1] ;
+      recv_displacement[i] = recv_displacement[i-1]+recv_count[i-1] ;
+    }
+
+    int rbase = mydom.Min() ;
+
+    MPI_Alltoallv(&dpos[0],
+                  &send_count[0],&send_displacement[0], MPI_DOUBLE,
+                  &(interp_data->pos[rbase].x),
+                  &recv_count[0],&recv_displacement[0], MPI_DOUBLE,
+                  MPI_COMM_WORLD) ;
+
+#ifdef VERBOSE
+    Loci::debugout << "finished redistrubuting pos" << endl ;
+    Loci::debugout.flush() ;
+#endif
+    store<real> t,pg,k,tmuu ;
+    store<vect3d> u ;
+    storeVec<real> mixture ;
+
+    readContainerSimple(file_id,"t",t.Rep()) ;
+    readContainerSimple(file_id,"pg",pg.Rep()) ;
+
+    readContainerSimple(file_id,"u",u.Rep()) ;
+
+    param<string> turbulence_model ;
+    Loci::readContainer(file_id,"turbulence_model",turbulence_model.Rep()
+                        ,EMPTY) ;
+    bool has_turbulence_data = false ;
+    if(*turbulence_model != "none") {
+      has_turbulence_data = true ;
+      readContainerSimple(file_id,"k",k.Rep()) ;
+      readContainerSimple(file_id,"tmuu",tmuu.Rep()) ;
+    }
+
+
+    param<real> filePambient ;
+    Loci::readContainer(file_id,"Pambient",filePambient.Rep(),EMPTY) ;
+
+    Loci::hdf5CloseFile(file_id) ;
+#ifdef VERBOSE
+    Loci::debugout << "closed put file" << endl ;
+    Loci::debugout.flush() ;
+#endif
+    const int base_size = 7 ;
+    int vec_size = base_size ; // Number of values for pg, t, and u(x,y,z)
+
+    if(mixture.vecSize() > 1)
+      vec_size += mixture.vecSize() ;
+
+    storeVec<real> data_vec ;
+    entitySet local_dom = interval(0,dom.size()-1) ;
+    data_vec.allocate(local_dom) ;
+    data_vec.setVecSize(vec_size) ;
+    interp_data->data.allocate(mydom) ;
+    interp_data->data.setVecSize(vec_size) ;
+
+#ifdef VERBOSE
+    Loci::debugout << "allocated interp_data, dom=" << dom
+		   << ",local_dom = " << local_dom
+		   << ", vec_size =" << vec_size 
+		   << endl ;
+    Loci::debugout.flush() ;
+#endif
+
+    real padjust = *filePambient - *Pambient ;
+
+    counts = soffsets ;
+    cnt = 0 ;
+    const int ms = vec_size-base_size ;
+    FORALL(dom,ii) {
+      int pid = procid[cnt] ;
+      int addr = counts[pid]++ ;
+      cnt++ ;
+      data_vec[addr][0] = t[ii] ;
+      data_vec[addr][1] = pg[ii] + padjust ;
+      data_vec[addr][2] = u[ii].x ;
+      data_vec[addr][3] = u[ii].y ;
+      data_vec[addr][4] = u[ii].z ;
+      data_vec[addr][5] = 0 ;
+      data_vec[addr][6] = 0 ;
+      if(has_turbulence_data) {
+        data_vec[addr][5] = k[ii] ;
+        data_vec[addr][6] = tmuu[ii] ;
+      }
+
+      for(int i=0;i<ms;++i)
+        data_vec[addr][base_size+i] = mixture[ii][i] ;
+    } ENDFORALL ;
+
+#ifdef VERBOSE
+    Loci::debugout << "data_vec copied" << endl ;
+    Loci::debugout.flush() ;
+#endif
+
+    for(int i=0;i<p;++i) {
+      send_count[i] = send_num[i]*vec_size ;
+      recv_count[i] = recv_num[i]*vec_size ;
+    }
+    send_displacement[0] = 0;
+    recv_displacement[0] = 0 ;
+    for(int i=1;i<p;++i) {
+      send_displacement[i] = send_displacement[i-1]+send_count[i-1] ;
+      recv_displacement[i] = recv_displacement[i-1]+recv_count[i-1] ;
+    }
+
+#ifdef VERBOSE
+    Loci::debugout << "before Alltoallv, rbase = " << rbase 
+		   << ",mxsenddisp=" << send_displacement[p-1]+send_count[p-1]
+		   << ",mxrecvdisp=" << recv_displacement[p-1]+recv_count[p-1]
+		   << endl ;
+    Loci::debugout.flush() ;
+#endif
+
+   MPI_Alltoallv(&(data_vec[0][0]),
+                 &send_count[0],&send_displacement[0], MPI_DOUBLE,
+                 &(interp_data->data[rbase][0]),
+                 &recv_count[0],&recv_displacement[0], MPI_DOUBLE,
+                 MPI_COMM_WORLD) ;
+
+#ifdef VERBOSE
+    Loci::debugout << "completed redistribution of interp_data" << endl ;
+    Loci::debugout.flush();
+#endif
+
+   // Create kd_tree
+   coord3df zero(0,0,0) ;
+   vector<coord3df > pnts(mydom.size(),zero) ;
+   vector<int> pnt_id(mydom.size(),0) ;
+   cnt = 0 ;
+   FORALL(mydom,ii) {
+     pnt_id[cnt] = ii+interp_data->domain_offset ;
+     pnts[cnt][0] = interp_data->pos[ii].x ;
+     pnts[cnt][1] = interp_data->pos[ii].y ;
+     pnts[cnt][2] = interp_data->pos[ii].z ;
+     cnt++ ;
+   } ENDFORALL ;
+   interp_data->kd = new Loci::kdTree::KDTree<float>(pnts,pnt_id) ;
+#ifdef VERBOSE
+   Loci::debugout << "completed construction of kd_tree" << endl ;
+   Loci::debugout.flush() ;
+#endif
+   MEMORY_PROFILE(compute_end) ;
+  }
+
+  register_rule<interpolate_file_read> register_interpolate_file_read ;
+
+  class interpolate_Data : public pointwise_rule {
+    const_blackbox<interpolate_data> interp_data ;
+    const_store<vect3d> pnts ;
+    const_param<double> interpolateMinStencilSize ;
+    storeVec<real> data ;
+  public:
+    interpolate_Data() {
+      name_store("interpolateMinStencilSize",interpolateMinStencilSize) ;
+      input("interpolateMinStencilSize") ;
+      name_store("interpolateData(DATA,PNTS)",data) ;
+      output("interpolateData(DATA,PNTS)") ;
+      name_store("PNTS",pnts) ;
+      input("PNTS") ;
+      name_store("DATA",interp_data) ;
+      input("DATA") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+
+  } ;
+
+#define COUNT_SIZE 100
+#define SMALLEST_SPLIT 2048
+#define STOP_SPLIT 10240
+  
+  inline double split_histogram(const int counts[COUNT_SIZE]) {
+    int tot = counts[0] ;
+    int mxcount = counts[0] ;
+    int mxcid = 0 ;
+    for(int i=1;i<COUNT_SIZE;++i) {
+      tot += counts[i] ;
+      if(mxcount < counts[i]) {
+        mxcid = i ;
+        mxcount = counts[i] ;
+      }
+    }
+    int mean = tot/COUNT_SIZE ;
+
+    // If there are zero counts in the histogram, split here.
+    int tot2 = counts[0];
+    int maxdist = 0 ;
+    int sp = -1 ;
+    for(int i=1;i<COUNT_SIZE;++i) {
+      tot2 += counts[i] ;
+      if(counts[i] == 0)
+        if(maxdist < min(tot2,tot-tot2)) {
+          sp = i ;
+          maxdist = max(maxdist,min(tot2,tot-tot2)) ;
+        }
+    }
+    if(maxdist > SMALLEST_SPLIT)
+      return (double(sp)+.5)/double(COUNT_SIZE) ;
+
+    if(10*mxcount < 12*mean)  // If less than 20% variation in histogram
+      return .5 ;             // split down the middle.
+    
+    int s1 ;
+    for(s1=mxcid-1;s1>=0;--s1)
+      if(counts[s1] < mean)
+        break ;
+    int s2 ;
+    for(s2=mxcid+1;s2<COUNT_SIZE;++s2)
+      if(counts[s2] < mean)
+        break ;
+    
+    int c1 = 0 ;
+    int c2 = 0 ;
+    for(int i=s1;i>=0;--i)
+      if(counts[i] < mean)
+        c1++ ;
+    for(int i=s2;i<COUNT_SIZE;++i)
+      if(counts[i] < mean)
+        c2++ ;
+
+    // find split loc
+    int cx = 0 ;
+    if(c1 > c2)
+      cx = s1+1 ;
+    else
+      cx = s2 ;
+    // Check to see if enough points to split.
+    int sum = 0 ;
+    for(int i=0;i<cx;++i)
+      sum += counts[i] ;
+    if(min(sum,tot-sum) < SMALLEST_SPLIT)
+      return 0.5 ;
+    return double(cx)/double(COUNT_SIZE) ;
+  }
+
+  void histogram_part(vect3d vecs[], int ids[],int start,int end,int depth,vector<int> &sizes,int &splits) {
+    if(depth == 0 ||splits == 0) {
+      sizes.push_back(end-start) ;
+      return ;
+    }
+    if(start == end) {
+      return ;
+    }
+    if(end-start < STOP_SPLIT) {
+      sizes.push_back(end-start) ;
+      return ;
+    }
+      
+    int counts[COUNT_SIZE] ;
+    for(int i=0;i<COUNT_SIZE;++i)
+      counts[i] = 0 ;
+    vect3d mx=vecs[start],mn=vecs[start] ;
+    for(int i=start+1;i<end;++i) {
+      mx.x = max(mx.x,vecs[i].x) ;
+      mx.y = max(mx.y,vecs[i].y) ;
+      mx.z = max(mx.z,vecs[i].z) ;
+      mn.x = min(mn.x,vecs[i].x) ;
+      mn.y = min(mn.y,vecs[i].y) ;
+      mn.z = min(mn.z,vecs[i].z) ;
+    }
+    double dx = mx.x-mn.x ;
+    double dy = mx.y-mn.y ;
+    double dz = mx.z-mn.z ;
+    int top = start ;
+    int bot = end-1 ;
+
+    if(dx > dy && dx > dz) { // x coord split
+      for(int i=start;i<end;++i) {
+        double t = (vecs[i].x-mn.x)/dx ;
+        int ind = max(min(int(floor(t*COUNT_SIZE)),COUNT_SIZE-1),0) ;
+        counts[ind]++ ;
+      }
+      double t = split_histogram(counts) ;
+
+      double xs = mn.x + t*dx ;
+      while(top <= bot) {
+        if(vecs[top].x > xs) {
+          std::swap(vecs[top],vecs[bot]) ;
+          std::swap(ids[top],ids[bot]) ;
+          bot-- ;
+        } else
+          top++ ;
+      }
+    } else if(dy > dz) { // y coord split
+      for(int i=start;i<end;++i) {
+        double t = (vecs[i].y-mn.y)/dy ;
+        int ind = max(min(int(floor(t*COUNT_SIZE)),COUNT_SIZE-1),0) ;
+        counts[ind]++ ;
+      }
+
+      double t = split_histogram(counts) ;
+
+      double ys = mn.y + t*dy ;
+      while(top <= bot) {
+        if(vecs[top].y > ys) {
+          std::swap(vecs[top],vecs[bot]) ;
+          std::swap(ids[top],ids[bot]) ;
+          bot-- ;
+        } else
+          top++ ;
+      }
+    } else {      // z coord split
+      for(int i=start;i<end;++i) {
+        double t = (vecs[i].z-mn.z)/dz ;
+        int ind = max(min(int(floor(t*COUNT_SIZE)),COUNT_SIZE-1),0) ;
+        counts[ind]++ ;
+      }
+
+      double t = split_histogram(counts) ;
+
+      double zs = mn.z + t*dz ;
+      while(top <= bot) {
+        if(vecs[top].z > zs) {
+          std::swap(vecs[top],vecs[bot]) ;
+          std::swap(ids[top],ids[bot]) ;
+          bot-- ;
+        } else
+          top++ ;
+      }
+    }
+    top = min(top,end) ;
+    splits-- ;
+    if(min(top-start,end-top) < SMALLEST_SPLIT) {
+      sizes.push_back(end-start) ; // If split ineffective, just return chunk
+    } else {
+      histogram_part(vecs,ids,start,top,depth-1,sizes,splits) ;
+      histogram_part(vecs,ids,top,end,depth-1,sizes,splits) ;
+    }
+  }
+
+  // Note, this needs to be made more general.
+  void sendStencilData2(storeVec<double> &stencilData,
+                       const_storeVec<double> &sourceData,
+			int sourceDataOffset,
+                       const vector<int> &send_info,
+                       const vector<int> &req_sizes_in,
+                       const vector<int> &snd_sizes_in) {
+    MEMORY_PROFILE(sendStencilDataStartv) ;
+
+#ifdef VERBOSE
+    entitySet dom = sourceData.domain() ;
+#endif
+    int vec_size = sourceData.vecSize() ;
+    vector<real_t> databuf(send_info.size()*vec_size) ;
+    for(size_t i = 0;i<send_info.size();++i) {
+      int id = send_info[i] - sourceDataOffset ;
+#ifdef VERBOSE
+      if(!dom.inSet(id)) {
+        debugout << "id=" <<id << " out of domain " << dom << endl ;
+        id = dom.Min() ;
+      }
+
+#endif
+      for(int j=0;j<vec_size;++j) {
+        databuf[i*vec_size+j] = sourceData[id][j] ;
+      }
+    }
+
+    int p = MPI_processes ;
+    vector<int> req_sizes(p),snd_sizes(p) ;
+    for(int i=0;i<p;++i) {
+      req_sizes[i] = req_sizes_in[i]*vec_size ;
+      snd_sizes[i] = snd_sizes_in[i]*vec_size ;
+    }
+
+    vector<int> sdispls(p) ;
+    sdispls[0] = 0 ;
+    for(int i=1;i<p;++i)
+      sdispls[i] = sdispls[i-1]+req_sizes[i-1] ;
+
+    vector<int> rdispls(p) ;
+    rdispls[0] = 0 ;
+    for(int i=1;i<p;++i) {
+      rdispls[i] = rdispls[i-1]+snd_sizes[i-1] ;
+    }
+
+    int loc_size = 0 ;
+    for(int i=0;i<p;++i)
+      loc_size += req_sizes_in[i] ;
+
+    stencilData.allocate(entitySet(interval(0,loc_size-1))) ;
+    stencilData.setVecSize(vec_size) ;
+
+    MEMORY_PROFILE(sendStencilDataStartall2all) ;
+    MPI_Alltoallv(&databuf[0],&snd_sizes[0],&rdispls[0],MPI_DOUBLE,
+                  &stencilData[0][0],&req_sizes[0],&sdispls[0],MPI_DOUBLE,
+                  MPI_COMM_WORLD) ;
+    MEMORY_PROFILE(sendStencilDataStartEnd3dv) ;
+  }
+
+  void interpolate_Data::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+    using Loci::debugout ;
+
+    entitySet dom = entitySet(seq) ;
+
+    // Check to see if there are any points in query
+    int nsize = dom.size() ;
+    int asize = 0 ;
+    MPI_Allreduce(&nsize,&asize,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(asize == 0)
+      return ;
+
+    const int p = Loci::MPI_processes ;
+
+    // Repartition the points using an ORB partition
+    vector<int> procid ;
+    if(p> 1) {
+      vector<vector3d<float> > spnts(dom.size()) ;
+      int ct=0;
+      FORALL(dom,nd) {
+        spnts[ct++] = vector3d<float>(pnts[nd].x,pnts[nd].y,pnts[nd].z) ;
+      } ENDFORALL ;
+      Loci::ORBPartition(spnts,procid,MPI_COMM_WORLD) ;
+    } else {
+      vector<int> tmp(dom.size(),0) ;
+      procid.swap(tmp) ;
+    }
+
+
+    vector<vect3d> vecs(dom.size()) ;
+    int cnt = 0 ;
+    FORALL(dom,cc) {
+      vecs[cnt] = pnts[cc] ;
+      cnt++ ;
+    } ENDFORALL ;
+
+    // Distribute vecs using the ORB partition
+    scatterVector(vecs,procid,MPI_COMM_WORLD) ;
+      
+    int nlocs = vecs.size() ;
+    vector<Array<double,4> > weights(nlocs) ;
+    vector<Array<int,4> > stencils(nlocs) ;
+    
+    Loci::kdTree::KDTree<float>::bounds bnd ;
+
+    vector<int> lid(nlocs) ;
+
+    for(int i=0;i<nlocs;++i)
+      lid[i] = i ;
+
+    vector<int> sizes ;
+
+    int splits = 32 ;
+    histogram_part(&vecs[0],&lid[0],0,nlocs,5,sizes,splits) ;
+    int sz = sizes.size() ;
+    int szmx = sz;
+    MPI_Allreduce(&sz,&szmx,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+    for(int i=0;i<szmx-sz;++i)
+      sizes.push_back(0) ;
+    cnt = 0 ;
+    for(size_t i=0;i<sizes.size();++i)
+      cnt += sizes[i] ;
+      
+    //    FATAL(cnt != ds) ;
+
+    int start = 0 ;
+    for(size_t b=0;b<sizes.size();++b) { // loop over blocks
+      int end = start+sizes[b] ;
+	
+      real dist = *interpolateMinStencilSize ;
+      getStencilBoundingBox2(bnd,dist,*(interp_data->kd),&vecs[0],start,end) ;
+
+      using namespace Loci::kdTree ;
+        
+      vector<KDTree<float>::coord_info> pcollect ;
+
+      collectPoints(pcollect,*(interp_data->kd),bnd) ;
+#ifdef VERBOSE
+      for(int d=0;d<3;++d) {
+        debugout << "bnd[" << d <<"]= {" << bnd.minc[d]<< ","
+                 << bnd.maxc[d] << "} "<< endl ;
+      }
+      Loci::debugout << "boxsize = " << end-start << " collectsize = " << pcollect.size() << endl ;
+#endif
+      int result_size = pcollect.size() ;
+
+      store<vect3d> loc ;
+      store<int> ids ;
+      entitySet locdom = interval(0,result_size-1) ;
+      loc.allocate(locdom) ;
+      ids.allocate(locdom) ;
+      for(int i=0;i<result_size;++i) {
+        loc[i].x = pcollect[i].coords[0] ;
+        loc[i].y = pcollect[i].coords[1] ;
+        loc[i].z = pcollect[i].coords[2] ;
+        ids[i] = pcollect[i].id ;
+        WARN(ids[i] < 0) ;
+            
+        pcollect[i].id = i ;
+      }
+      KDTree<float> stree(pcollect) ;
+	
+	
+      for(int ip=start;ip<end;++ip)  {
+        vector<int> neighbors = get_stencil(stree,vecs[ip],dist) ;
+
+        WARN(neighbors.size() == 0) ;
+
+        // compute stencil weights
+        vector<double> w  ;
+        stencil_weights(w,neighbors,loc,vecs[ip]) ;
+
+        int nsz = neighbors.size() ;
+
+        WARN(nsz == 0) ;
+
+        Array<int,4> st ;
+        Array<double,4> wt ;
+        for(int i=0;i<nsz;++i) {
+          WARN((neighbors[i] < 0 || neighbors[i] >= result_size)) ;
+          st[i] = ids[neighbors[i]] ;
+          WARN(st[i]<0) ;
+          wt[i] = w[i] ;
+        }
+        for(int i=nsz;i<4;++i) {
+          st[i] = st[nsz-1] ;
+          wt[i] = 0 ;
+        }
+        stencils[lid[ip]] = st ;
+        weights[lid[ip]] = wt ;
+      }
+      start += sizes[b] ;
+    }
+
+
+    // now gather the stencils and weights back from the ORB partition
+    gatherVector(stencils,procid,MPI_COMM_WORLD) ;
+    gatherVector(weights,procid,MPI_COMM_WORLD) ;
+
+    // Now we need to remap the stencils to use a local contiguous id and
+    // create the ids map to the global id
+
+    vector<int> sids(stencils.size()*4) ;
+    for(size_t i=0;i<stencils.size();++i) {
+      sids[i*4+0] = stencils[i][0] ;
+      sids[i*4+1] = stencils[i][1] ;
+      sids[i*4+2] = stencils[i][2] ;
+      sids[i*4+3] = stencils[i][3] ;
+    }
+    // get unique referenced ids
+    sort(sids.begin(),sids.end()) ;
+    vector<int>::const_iterator se = std::unique(sids.begin(),sids.end()) ;
+    
+    int nids = se-sids.begin() ;
+    store<int> ids ;
+    entitySet locdom = interval(0,nids-1) ;
+    ids.allocate(locdom) ;
+    // compute mapping from global to local
+    map<int,int> rmap ;
+    cnt = 0 ;
+    for(vector<int>::const_iterator ii=sids.begin();ii!=se;++ii) {
+      ids[cnt] = *ii ;
+      rmap[*ii] = cnt ;
+      cnt++ ;
+    }
+    //remap stencils
+    for(size_t i=0;i<stencils.size();++i)
+      for(int j=0;j<4;++j)
+	stencils[i][j] = rmap[stencils[i][j]] ;
+
+    vector<int> send_info, req_sizes, snd_sizes, access ;
+
+
+    getCommSchedFromStencil(send_info,req_sizes,snd_sizes, access,
+                            stencils,ids,interp_data->distribution) ;
+
+    remapStencil(stencils,access, ids) ;
+
+    const_storeVec<double> tmp ;
+    tmp.setRep(interp_data->data.Rep()) ;
+    int tmpoff= interp_data->domain_offset ;
+    storeVec<double> valx ;
+    sendStencilData2(valx,tmp,tmpoff,send_info,req_sizes,snd_sizes) ;
+
+
+    int base_size = 7 ;
+    int out_vec_size = base_size+1 ;
+    data.setVecSize(out_vec_size) ;
+    int c2 = 0 ;
+
+    FORALL(dom,cc) {
+      for(int i=0;i<out_vec_size;++i)
+        data[cc][i] = 0 ;
+      for(int i=0;i<base_size;++i) {
+        double dval = 0 ;
+        for(int j=0;j<4;++j) {
+          dval += weights[c2][j]*valx[stencils[c2][j]][i] ;
+        }
+        data[cc][i] = dval ;
+      }
+      c2++ ;
+    } ENDFORALL ;
+    MEMORY_PROFILE(compute_start) ;
+  }
+
+  register_rule<interpolate_Data> register_interpolate_Data ;
+
+
+  class StencilSizer {
+  public:
+    Loci::kdTree::KDTree<float> *kd ;
+    float ref_size ;
+    float getSpacing(coord3df pt) const {
+      int id = kd->find_closest(pt) ;
+      if(id <= 0)
+        return ref_size ;
+      return ref_size/float(id) ;
+    }
+
+
+    StencilSizer &operator=(const StencilSizer &in) {
+      cerr << "interpolate_data shouldn't be copied!" << endl ;
+      kd = 0 ;
+      return *this ;
+    }
+    ~StencilSizer() {
+      if(kd !=0)
+        delete kd ;
+      kd = 0 ;
+    }
+    StencilSizer() {
+      kd = 0 ;
+    }
+  } ;
+
+  class interpolateStencilSizer: public blackbox_rule {
+    const_store<vect3d> cellcenter ;
+    const_store<float> cellSize2 ;
+    const_store<flowPsi::byte_t> donorCell ;
+    const_param<double> stencilSize2 ;
+    blackbox<StencilSizer> stencilSizer ;
+  public:
+    interpolateStencilSizer() {
+      name_store("cellcenter",cellcenter) ;
+      name_store("cellSize2",cellSize2) ;
+      name_store("donorCell",donorCell) ;
+      name_store("stencilSize2",stencilSize2) ;
+      name_store("stencilSizer",stencilSizer) ;
+      
+      input("cellcenter,cellSize2,donorCell,stencilSize2");
+      output("stencilSizer") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+  } ;
+
+
+  void interpolateStencilSizer::compute(const sequence &seq) {
+
+    using Loci::vpair ;
+    using Loci::ORBSort ;
+
+#ifdef REPORT_TIMES
+    Loci::stopWatch s ;
+    s.start() ;
+#endif
+    int p = Loci::MPI_processes ;
+    entitySet dom = cellcenter.domain() & cellSize2.domain() ;
+    if(p > 1)
+      dom &= Loci::exec_current_fact_db->get_distribute_info()->my_entities ;
+    
+    double mxstencil = 10.*sqrt(*stencilSize2) ;
+    
+    int cnt = 0 ;
+    // Count donor cells
+    FORALL(dom,cc) {
+      if(donorCell[cc] != 0)
+        cnt++ ;
+    } ENDFORALL ;
+    
+    vector<vpair> points(cnt) ;
+    cnt = 0 ;
+    // Collect points and stencil sizes
+    FORALL(dom,cc) {
+      if(donorCell[cc] != 0) {
+        points[cnt].first = vector3d<float>(cellcenter[cc].x,
+                                            cellcenter[cc].y,
+                                            cellcenter[cc].z) ;
+        double size_norm = mxstencil/sqrt(max(cellSize2[cc],1e-30f)) ;
+        int size_i = max(int(min(2e9,size_norm)),1) ;
+        points[cnt].second = size_i ;
+        cnt++ ;
+      }
+    } ENDFORALL ;
+    
+
+    Loci::balanceDistribution(points,MPI_COMM_WORLD) ;
+    
+    // Sort points using ORB method
+    ORBSort(points,MPI_COMM_WORLD) ;
+
+    cnt = points.size() ;
+
+    // Divide this processor points into a set of bounding boxes and
+    // reduce them to a subset of point-to-spacing values
+    // Estimate the division depth by finding log base 4 of the number
+    // of processors
+    int div=6 ;
+    int ptmp  = p/4 ;
+    while(ptmp>0) {
+      div=max(div-1,3) ; // Always divide into at least 8 parts per processor
+      ptmp=ptmp/4 ;
+    }
+    
+    // The minimum grouping size for the stencil estimate.  This will ensure
+    // that a region is fairly represented.
+    int minGroupSize = 50 ;
+    vector<vpair> results ;
+    collectGroups(results,points,0,cnt,div,minGroupSize) ;
+
+    // Now collect all of these points onto all of the processors
+    vector<int> rcounts(p,0) ;
+    int tsz = results.size() ;
+    MPI_Allgather(&tsz,1,MPI_INT,&rcounts[0],1,MPI_INT,MPI_COMM_WORLD) ;
+    
+    int rsize = rcounts[0] ;
+    for(int i=1;i<p;++i)
+      rsize += rcounts[i] ;
+    
+    vector<vpair> recvdata(rsize) ;
+
+    // Adjust counts to account for bytes in vpair
+    for(int i=0;i<p;++i)
+      rcounts[i] = rcounts[i] * sizeof(vpair) ;
+    // Compute displacement array
+    vector<int> rdispls(p,0) ;
+    rdispls[0] = 0 ;
+    for(int i=1;i<p;++i)
+      rdispls[i] = rdispls[i-1]+rcounts[i-1] ;
+    
+    MPI_Allgatherv((void *)&results[0],sizeof(vpair)*tsz,MPI_BYTE,
+                   (void *)&recvdata[0],&rcounts[0],&rdispls[0],MPI_BYTE,
+                   MPI_COMM_WORLD) ;
+    vector<int> pt_id(rsize,0);
+    coord3df pt0(0.0f,0.0f,0.0f) ;
+    vector<coord3df > pts(rsize,pt0) ;
+    for(int i=0;i<rsize;++i) {
+      pt_id[i] = recvdata[i].second ;
+      coord3df pt(recvdata[i].first.x,
+                  recvdata[i].first.y,
+                  recvdata[i].first.z) ;
+      pts[i] = pt ;
+    }
+    stencilSizer->kd = new Loci::kdTree::KDTree<float>(pts,pt_id) ;
+    stencilSizer->ref_size = mxstencil ;
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to build stencilSizer: " << s.stop() << endl ;
+#endif
+  }
+  
+  register_rule<interpolateStencilSizer> register_interpolateStencilSizer ;
+  
+  class interpolate_DataCell : public pointwise_rule {
+    const_blackbox<interpolate_data> interp_data ;
+    const_store<vect3d> pnts ;
+
+    const_Map min_cell2noslip ;
+    const_store<vect3d> facecenter ;
+    const_store<Area> area ;
+
+    const_param<double> interpolateMinStencilSize ;
+
+    storeVec<real> data ;
+  public:
+    interpolate_DataCell() {
+      name_store("min_cell2noslip",min_cell2noslip) ;
+      name_store("facecenter",facecenter) ;
+      name_store("area",area) ;
+      input("min_cell2noslip->(facecenter,area)") ;
+      name_store("interpolateMinStencilSize",interpolateMinStencilSize) ;
+      input("interpolateMinStencilSize") ;
+       name_store("interpolateDataCell(DATA,PNTS)",data) ;
+       output("interpolateDataCell(DATA,PNTS)") ;
+       name_store("PNTS",pnts) ;
+       input("PNTS") ;
+       name_store("DATA",interp_data) ;
+       input("DATA") ;
+       disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+
+  } ;
+  void interpolate_DataCell::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+    using Loci::debugout ;
+
+    entitySet dom = entitySet(seq) ;
+
+    // Check to see if there are any points in query
+    int nsize = dom.size() ;
+    int asize = 0 ;
+    MPI_Allreduce(&nsize,&asize,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(asize == 0)
+      return ;
+    
+    const int p = Loci::MPI_processes ;
+
+    // Repartition the points using an ORB partition
+    vector<int> procid ;
+    if(p> 1) {
+      vector<vector3d<float> > spnts(dom.size()) ;
+      int ct=0;
+      FORALL(dom,nd) {
+        spnts[ct++] = vector3d<float>(pnts[nd].x,pnts[nd].y,pnts[nd].z) ;
+      } ENDFORALL ;
+      Loci::ORBPartition(spnts,procid,MPI_COMM_WORLD) ;
+    } else {
+      vector<int> tmp(dom.size(),0) ;
+      procid.swap(tmp) ;
+    }
+
+
+    vector<vect3d> vecs(dom.size()) ;
+    vector<vect3d> fcenter(dom.size()) ;
+    vector<vect3d> fnormal(dom.size()) ;
+    int cnt = 0 ;
+    FORALL(dom,cc) {
+      vecs[cnt] = pnts[cc] ;
+      fcenter[cnt] = facecenter[min_cell2noslip[cc]] ;
+      fnormal[cnt] = area[min_cell2noslip[cc]].n ;
+      cnt++ ;
+    } ENDFORALL ;
+
+    
+    // Distribute vecs using the ORB partition
+    scatterVector(vecs,procid,MPI_COMM_WORLD) ;
+    scatterVector(fcenter,procid,MPI_COMM_WORLD) ;
+    scatterVector(fnormal,procid,MPI_COMM_WORLD) ;
+
+    int nlocs = vecs.size() ;
+    vector<Array<double,4> > weights(nlocs) ;
+    vector<Array<int,4> > stencils(nlocs) ;
+
+    Loci::kdTree::KDTree<float>::bounds bnd ;
+
+    vector<int> lid(nlocs) ;
+
+    for(int i=0;i<nlocs;++i)
+      lid[i] = i ;
+
+    vector<int> sizes ;
+
+    int splits = 20 ;
+    histogram_part(&vecs[0],&lid[0],0,nlocs,5,sizes,splits) ;
+    int sz = sizes.size() ;
+    int szmx = sz;
+    MPI_Allreduce(&sz,&szmx,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
+    for(int i=0;i<szmx-sz;++i)
+      sizes.push_back(0) ;
+    cnt = 0 ;
+    for(size_t i=0;i<sizes.size();++i)
+      cnt += sizes[i] ;
+      
+    //    FATAL(cnt != ds) ;
+
+    int start = 0 ;
+    for(size_t b=0;b<sizes.size();++b) { // loop over blocks
+      int end = start+sizes[b] ;
+	
+      real dist = *interpolateMinStencilSize ;
+
+      getStencilBoundingBox2(bnd,dist,*(interp_data->kd),&vecs[0],start,end) ;
+
+      using namespace Loci::kdTree ;
+        
+      vector<KDTree<float>::coord_info> pcollect ;
+
+      collectPoints(pcollect,*(interp_data->kd),bnd) ;
+#ifdef VERBOSE
+      for(int d=0;d<3;++d) {
+        debugout << "bnd[" << d <<"]= {" << bnd.minc[d]<< ","
+                 << bnd.maxc[d] << "} "<< endl ;
+      }
+      Loci::debugout << "boxsize = " << end-start << " collectsize = " << pcollect.size() << endl ;
+#endif
+
+      int result_size = pcollect.size() ;
+
+      store<vect3d> loc ;
+      store<int> ids ;
+      entitySet locdom = interval(0,result_size-1) ;
+      loc.allocate(locdom) ;
+      ids.allocate(locdom) ;
+      for(int i=0;i<result_size;++i) {
+        loc[i].x = pcollect[i].coords[0] ;
+        loc[i].y = pcollect[i].coords[1] ;
+        loc[i].z = pcollect[i].coords[2] ;
+        ids[i] = pcollect[i].id ;
+        pcollect[i].id = i ;
+      }
+      KDTree<float> stree(pcollect) ;
+	
+	
+      for(int ip=start;ip<end;++ip)  {
+        vector<int> neighbors = get_stencil(stree,vecs[ip],dist) ;
+        
+        WARN(neighbors.size() == 0) ;
+        
+        // remove any points on the wrong side of a viscous wall
+        if(neighbors.size() > 1) {
+          int cnt = 0 ;
+          int nid = -1 ;
+          for(size_t i = 0;i<neighbors.size();++i)
+            if(neighbors[i] >= 0) {
+              vect3d fctr = fcenter[lid[ip]] ;
+              vect3d n = fnormal[lid[ip]] ;
+              if(dot(n,loc[neighbors[i]]-fctr) > 0.0)
+                neighbors[i] = -1 ; // null out this neighbor
+              else {
+                cnt++ ;
+                nid = neighbors[i] ;
+              }
+            }
+          if(cnt == 0) // If all points removed, no choice but proceed
+            // with original neighbors
+            neighbors = get_stencil(stree,vecs[ip],dist) ;
+          if(cnt == 1) {
+            vector<int> n(1) ;
+            n[0] = nid ;
+            neighbors.swap(n) ;
+          }
+        }
+
+        // compute stencil weights
+        vector<double> w  ;
+        stencil_weights(w,neighbors,loc,vecs[ip]) ;
+
+        Array<int,4> st ;
+        Array<double,4> wt ;
+        int nsz = neighbors.size() ;
+        
+        if(nsz > 0) {
+          for(int i=0;i<nsz;++i) {
+            st[i] = ids[neighbors[i]] ;
+            wt[i] = w[i] ;
+          }
+          for(int i=nsz;i<4;++i) {
+            st[i] = st[nsz-1] ;
+            wt[i] = 0 ;
+          }
+        } else {
+          for(int i=0;i<4;++i) {
+            st[i] = 0 ;
+            wt[i] = 0 ;
+          }
+        }
+        stencils[lid[ip]] = st ;
+        weights[lid[ip]] = wt ;
+        cnt++ ;
+      }
+      start += sizes[b] ;
+    }
+
+    // now gather the stencils and weights back from the ORB partition
+    gatherVector(stencils,procid,MPI_COMM_WORLD) ;
+    gatherVector(weights,procid,MPI_COMM_WORLD) ;
+
+    // Now we need to remap the stencils to use a local contiguous id and
+    // create the ids map to the global id
+
+    vector<int> sids(stencils.size()*4) ;
+    for(size_t i=0;i<stencils.size();++i) {
+      sids[i*4+0] = stencils[i][0] ;
+      sids[i*4+1] = stencils[i][1] ;
+      sids[i*4+2] = stencils[i][2] ;
+      sids[i*4+3] = stencils[i][3] ;
+    }
+    // get unique referenced ids
+    sort(sids.begin(),sids.end()) ;
+    vector<int>::const_iterator se = std::unique(sids.begin(),sids.end()) ;
+    
+    int nids = se-sids.begin() ;
+    store<int> ids ;
+    entitySet locdom = interval(0,nids-1) ;
+    ids.allocate(locdom) ;
+    // compute mapping from global to local
+    map<int,int> rmap ;
+    cnt = 0 ;
+    for(vector<int>::const_iterator ii=sids.begin();ii!=se;++ii) {
+      ids[cnt] = *ii ;
+      rmap[*ii] = cnt ;
+      cnt++ ;
+    }
+    //remap stencils
+    for(size_t i=0;i<stencils.size();++i)
+      for(int j=0;j<4;++j)
+	stencils[i][j] = rmap[stencils[i][j]] ;
+
+    vector<int> send_info, req_sizes, snd_sizes, access ;
+
+
+    getCommSchedFromStencil(send_info,req_sizes,snd_sizes, access,
+                            stencils,ids,interp_data->distribution) ;
+
+    remapStencil(stencils,access, ids) ;
+
+    const_storeVec<double> tmp ;
+    tmp.setRep(interp_data->data.Rep()) ;
+    int tmpoff= interp_data->domain_offset ;
+    storeVec<double> valx ;
+    sendStencilData2(valx,tmp,tmpoff,send_info,req_sizes,snd_sizes) ;
+
+    int base_size = 7 ;
+    int out_vec_size = base_size+1 ;
+    data.setVecSize(out_vec_size) ;
+
+    int c2 = 0 ;
+    FORALL(dom,cc) {
+      for(int i=0;i<out_vec_size;++i)
+        data[cc][i] = 0 ;
+      for(int i=0;i<base_size;++i) {
+        double dval = 0 ;
+        for(int j=0;j<4;++j) {
+          dval += weights[c2][j]*valx[stencils[c2][j]][i] ;
+        }
+        data[cc][i] = dval ;
+      }
+      c2++ ;
+    } ENDFORALL ;
+    MEMORY_PROFILE(compute_start) ;
+  }
+
+  register_rule<interpolate_DataCell> register_interpolate_DataCell ;
+
+  class interpolate_points {
+  public:
+    Loci::kdTree::KDTree<float> *kd ;
+    store<vector3d<double> > pos ;
+    store<int> posid ;
+    vector<int> distribution ;
+    interpolate_points &operator=(const interpolate_points &in) {
+      cerr << "interpolate_data shouldn't be copied!" << endl ;
+      kd = 0 ;
+      pos.setRep(in.pos.Rep()) ;
+      return *this ;
+    }
+    ~interpolate_points() {
+      if(kd !=0)
+        delete kd ;
+      kd = 0 ;
+      pos.allocate(EMPTY) ;
+      posid.allocate(EMPTY) ;
+    }
+    interpolate_points() {
+      kd = 0 ;
+    }
+  } ;
+
+  class interpolatePoints : public blackbox_rule {
+    const_store<vect3d> pnts ;
+    const_store<byte_t> iblank ;
+    blackbox<interpolate_points> interp_pnts ;
+  public:
+    interpolatePoints() {
+      name_store("PNTS",pnts) ;
+      name_store("MASK",iblank) ;
+      name_store("interpolatePoints(PNTS,MASK)",interp_pnts) ;
+      input("MASK") ;
+      input("PNTS") ;
+      output("interpolatePoints(PNTS,MASK)") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+  } ;
+
+  void interpolatePoints::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+    int r = Loci::MPI_rank ;
+    int p = Loci::MPI_processes ;
+    entitySet odom = pnts.domain()&iblank.domain() ;
+
+    if(p > 1)
+      odom &= Loci::exec_current_fact_db->get_distribute_info()->my_entities ;
+    
+    // Remove any iblanked cells from the interpolation stencil.
+    entitySet dom = EMPTY ;
+    FORALL(odom,ii) {
+      if(iblank[ii] == 0) // Only zero iblanks donate to interpolation
+        dom += ii ;
+    } ENDFORALL ;
+
+    int sz = dom.size() ;
+    
+    vector<int> dist_sizes(p,0) ;
+    MPI_Allgather(&sz,1,MPI_INT,&dist_sizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+    vector<int> offsets(p+1,0) ;
+    for(int i=1;i<p+1;++i)
+      offsets[i] = offsets[i-1]+dist_sizes[i-1] ;
+    interp_pnts->distribution = offsets ;
+    entitySet mydom ;
+    if(sz == 0)
+      mydom = EMPTY ;
+    else
+      mydom = interval(offsets[r],offsets[r]+sz-1) ;
+    
+    MEMORY_PROFILE(before_pos) ;
+    interp_pnts->pos.allocate(mydom) ;
+    interp_pnts->posid.allocate(mydom) ;
+    MEMORY_PROFILE(after_pos) ;
+    
+    int ncnt = offsets[r] ;
+    FORALL(dom,i) {
+      interp_pnts->pos[ncnt] = pnts[i] ;
+      interp_pnts->posid[ncnt] = i ;
+      ncnt++ ;
+    } ENDFORALL ;
+
+    // Create kd_tree
+    MEMORY_PROFILE(before_tree) ;
+    coord3df zero(0,0,0) ;
+    vector<coord3df > pts(mydom.size(),zero) ;
+    vector<int> pt_id(mydom.size(),0) ;
+    MEMORY_PROFILE(before_pack) ;
+
+    int cnt = 0 ;
+    FORALL(mydom,ii) {
+      pt_id[cnt] = ii ;
+      pts[cnt][0] = interp_pnts->pos[ii].x ;
+      pts[cnt][1] = interp_pnts->pos[ii].y ;
+      pts[cnt][2] = interp_pnts->pos[ii].z ;
+      cnt++ ;
+    } ENDFORALL ;
+
+    interp_pnts->kd = new Loci::kdTree::KDTree<float>(pts,pt_id) ;
+
+    MEMORY_PROFILE(compute_end) ;
+  }
+
+  register_rule<interpolatePoints> register_interpolatePoints ;
+
+  class interpolateFaceStencil_Unit: public unit_rule {
+    blackbox<stencil_info> interpolateFaceStencil ;
+  public:
+    interpolateFaceStencil_Unit() {
+      name_store("interpolateFaceStencil",interpolateFaceStencil) ;
+      output("interpolateFaceStencil") ;
+      constraint("UNIVERSE") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+    }
+  } ;
+
+  register_rule<interpolateFaceStencil_Unit> register_interpolateFaceStencil_Unit ;
+
+
+  class interpolateFaceStencil_Apply :
+    public apply_rule<blackbox<stencil_info>, Loci::NullOp<stencil_info> > {
+    const_store<vect3d> facecenter,cellcenter ;
+    const_store<byte_t> iblank ;
+    const_store<Area> area ;
+    const_Map ci ;
+    const_param<double> stencilSize2 ;
+    const_blackbox<StencilSizer> stencilSizer ;
+    const_blackbox<interpolate_points> interp_pnts ;
+    blackbox<stencil_info> interpolateFaceStencil ;
+  public:
+    interpolateFaceStencil_Apply() {
+      name_store("facecenter",facecenter) ;
+      name_store("cellcenter",cellcenter) ;
+      name_store("area",area) ;
+      name_store("ci",ci) ;
+      name_store("iblank",iblank) ;
+      name_store("stencilSize2",stencilSize2) ;
+      name_store("interpolatePoints(cellcenter,iblank)",interp_pnts) ;
+      name_store("stencilSizer",stencilSizer) ;
+      input("stencilSizer") ;
+      input("facecenter,area,ci->cellcenter,ci->iblank") ;
+      input("stencilSize2") ;
+      input("interpolatePoints(cellcenter,iblank)") ;
+      name_store("interpolateFaceStencil",interpolateFaceStencil) ;
+      output("interpolateFaceStencil") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+  } ;
+  
+  using namespace kdTree ;
+  void interpolateFaceStencil_Apply::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+    using Loci::debugout ;
+
+#ifdef REPORT_TIMES
+    Loci::stopWatch s ;
+    s.start() ;
+    MPI_Barrier(MPI_COMM_WORLD) ;
+    //    Loci::debugout << "time to sync: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+
+    entitySet odom = entitySet(seq) ;
+    entitySet dom ;
+    int xclude = 0 ;
+    FORALL(odom,fc) {
+      if(iblank[ci[fc]] > 2) {
+        xclude++ ;
+      } else
+        dom += fc ;
+    } ENDFORALL ;
+
+    // Decompose points into a set of bounding boxes
+    int sz = dom.size() ;
+    vector<Loci::kdTree::KDTree<float>::coord_info> pbox(sz) ;
+    vector<vect3d> ndelta(sz) ;
+    int cnt =0 ;
+    real delta_stencil = 0 ;
+    FORALL(dom,fc) {
+      const vect3d fcenter = facecenter[fc] ;
+      pbox[cnt].coords[0] = fcenter.x ;
+      pbox[cnt].coords[1] = fcenter.y ;
+      pbox[cnt].coords[2] = fcenter.z ;
+      delta_stencil = max(delta_stencil,
+                          real(stencilSizer->getSpacing(pbox[cnt].coords))) ;
+      pbox[cnt].id = fc ;
+      cnt++ ;
+    } ENDFORALL ;
+    //    Loci::debugout << "cnt = " << cnt << "xclude = " <<xclude << endl;
+    //    real delta_stencil  = sqrt(*stencilSize2*2) ;
+    //    delta_stencil *=  1.1 ; // double search depth to make sure to find a point
+    //    delta_stencil *=  4.1 ; // double search depth to make sure to find a point
+#ifdef VERBOSE
+    Loci::debugout << "face delta = " << delta_stencil << endl ;
+#endif
+    delta_stencil *= 4.0 ; // add margin for error
+    
+    // This call breaks the coordinate points into a set of bounding
+    // boxes
+
+    // Compute how big the decomposition chunks should be
+    int tsz = 0 ;
+    MPI_Allreduce(&sz,&tsz,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+
+    // split boxes until each box has no more then split_lim points
+    int p = Loci::MPI_processes ;
+    int split_lim = max(256,tsz/(p)) ;
+#ifdef VERBOSE
+    Loci::debugout << "face split_lim = " << split_lim << endl ;
+#endif
+    // Get bounding boxes
+    vector<bound_info> boxes ;
+    getBoundingBoxes(pbox,boxes,4,delta_stencil*8.0,split_lim) ;
+#ifdef VERBOSE
+    Loci::debugout << "found " << boxes.size() << " bounding boxes:" << endl ;
+    Loci::debugout << "pbox.size() = " << pbox.size() << endl ;
+#endif
+
+    for(size_t i=0;i<pbox.size();++i) {
+      int fc = pbox[i].id ;
+      vect3d fcenter = facecenter[fc] ;
+        
+      vect3d n = area[fc].n ;
+      // compute local stencil distance as either the normal projected
+      // distance from this side of the face to the interior cell, or
+      // to the closest projected point found from the other side,
+      // whichever is largest
+      real locdist = norm(fcenter-cellcenter[ci[fc]]) ;
+      ndelta[i] = n*locdist ;
+    }
+
+    // Adjust bounding boxes by stencil size
+    for(size_t i=0;i<boxes.size();++i) {
+      float spacing = 0  ;
+      for(int j=boxes[i].start;j<=boxes[i].stop;++j)
+        spacing = max(spacing,stencilSizer->getSpacing(pbox[j].coords)) ;
+      spacing *= 6.2 ;
+      Loci::debugout << "boxes[" << i << "], spacing =" << spacing
+                     << ", size = " << boxes[i].stop-boxes[i].start+1
+                     << ", start = " << boxes[i].start
+                     << endl ;
+      boxes[i].bnd.minc[0] -= spacing ;
+      boxes[i].bnd.minc[1] -= spacing ;
+      boxes[i].bnd.minc[2] -= spacing ;
+      boxes[i].bnd.maxc[0] += spacing ;
+      boxes[i].bnd.maxc[1] += spacing ;
+      boxes[i].bnd.maxc[2] += spacing ;
+    }
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to find bounding boxes: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+
+    // Now distribute the bounding boxes to all processors
+    vector<int> box_sp,box_tp,b_sizes,send_block_id,recv_block_id ;
+    
+    boundingBoxDistribution(box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                            boxes,MPI_COMM_WORLD) ;
+
+
+    // ------------------------------------------------------------------------
+    // receive search points
+    vector<vector<Loci::kdTree::KDTree<float>::coord_info>  > loc_pbox ;
+    communicateBoxPoints(loc_pbox,box_sp,box_tp,b_sizes,
+                         send_block_id,recv_block_id,pbox,boxes,
+                         MPI_COMM_WORLD) ;
+    vector<vector<vect3d> > loc_ndelta ;
+    communicateBoxPoints(loc_ndelta,box_sp,box_tp,b_sizes,
+                         send_block_id,recv_block_id,ndelta,boxes,
+                         MPI_COMM_WORLD) ;
+    
+#ifdef REPORT_TIMES
+    Loci::debugout << "face time recv box search points: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+    //-------------------------------------------------------------------------
+    // recieve target points
+
+    // First collect bounding box information for each block
+    vector<bound_info> boxes_g ;
+    allGatherVec(boxes_g,boxes,MPI_COMM_WORLD) ;
+
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time allGatherVec boxes: " << s.stop() << endl ;
+    s.start() ;
+#endif
+    
+    vector<vector<KDTree<float>::coord_info>  > recv_targets ;
+    recieveTargetPoints(recv_targets,interp_pnts->kd,
+                        boxes_g,box_sp,box_tp,b_sizes,
+                        send_block_id,recv_block_id,
+                        MPI_COMM_WORLD) ;
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to receive target points: " << s.stop() << endl ;
+    s.start() ;
+#endif
+    // Now we build the stencils
+    vector< vector<Array<int,4> > >    stencil_block(recv_block_id.size()) ;
+    vector< vector<Array<double,4> > > weights_block(recv_block_id.size()) ;
+
+    int st_error = 0 ;
+    int st_warnings = 0 ;
+    // After sending, we can compute stencils for each block.
+    for(size_t i=0;i<recv_block_id.size();++i) {
+      int bk = recv_block_id[i] ;
+      int ssz = loc_pbox[i].size() ; // Search points for block bk
+
+      store<vect3d> loc ;
+      store<int> ids ;
+      int tsz = recv_targets[bk].size() ;
+      entitySet locdom = interval(0,tsz-1) ;
+      loc.allocate(locdom) ;
+      ids.allocate(locdom) ;
+      for(int ii=0;ii<tsz;++ii) {
+	loc[ii].x = recv_targets[bk][ii].coords[0] ;
+	loc[ii].y = recv_targets[bk][ii].coords[1] ;
+	loc[ii].z = recv_targets[bk][ii].coords[2] ;
+	ids[ii] = recv_targets[bk][ii].id ;
+	recv_targets[bk][ii].id = ii ;
+      }
+
+      KDTree<float> stree(recv_targets[bk]) ;
+#ifdef VERBOSE
+      Loci::debugout << "bk=" << bk << ",bksz=" << tsz<< endl ;
+#endif
+
+      vector<Array<int,4> > tmp1(ssz*2) ;
+      vector<Array<double,4> > tmp2(ssz*2) ;
+      stencil_block[i].swap(tmp1) ;
+      weights_block[i].swap(tmp2) ;
+      for(int j=0;j<ssz;++j) {
+        delta_stencil =max(delta_stencil,
+                           stencilSizer->getSpacing(loc_pbox[i][j].coords)*6.2) ;
+      }
+                           ;
+      for(int j=0;j<ssz;++j) {
+
+        
+	vect3d fcenter(loc_pbox[i][j].coords[0],
+                       loc_pbox[i][j].coords[1],
+                       loc_pbox[i][j].coords[2]) ;
+        double dnorm = norm(loc_ndelta[i][j]) ;
+        double dval = dnorm ;
+        vect3d n = (1./dnorm)*loc_ndelta[i][j] ;
+        int xnd = - 1;
+        {
+          bool invalid_stencil=true ;
+          vector<int> neighbors = get_stencil(stree,fcenter,delta_stencil*2) ;
+          double mdist = 1e33 ;
+          double mind = 1e33 ;
+          for(size_t k=0;k<neighbors.size();++k) {
+            int nd = neighbors[k] ;
+            if(nd > 0) {
+              vect3d pt = loc[nd] ;
+              real dp = dot(pt-fcenter,n) ;
+              if(dp > 0) {
+                invalid_stencil = false ;
+                real d = norm(pt-fcenter) ;
+                if(d < mind) {
+                  mind = d ;
+                  xnd = nd ;
+                  mdist = min(mdist,dp) ;
+                }
+              }
+            }
+          }
+          
+          if(invalid_stencil) {
+            Loci::kdTree::KDTree<float>::bounds box ;
+            coord3df ccenter =fcenter ;
+
+            for(int i=0;i<3;++i) {
+              box.minc[i] = ccenter[i] ;
+              box.maxc[i] = ccenter[i] ;
+              if(n.x > -1e-9)
+                box.maxc[0] += 1e30 ;
+              if(n.x < 1e-9)
+                box.minc[0] -= 1e30 ;
+              if(n.y > -1e-9)
+                box.maxc[1] += 1e30 ;
+              if(n.y < 1e-9)
+                box.minc[1] -= 1e30 ;
+              if(n.z > -1e-9)
+                box.maxc[2] += 1e30 ;
+              if(n.z < 1e-9)
+                box.minc[2] -= 1e30 ;
+            }
+            int id = stree.find_closest_box(ccenter,box) ;
+            if(id >=0) {
+              vect3d pt = loc[id] ;
+              invalid_stencil = false ;
+              real d = norm(pt-fcenter) ;
+              mind = d ;
+              xnd = id ;
+              mdist = min(mdist,d) ;
+            }
+
+            if(invalid_stencil) {
+              Loci::debugout << "Warning: invalid face stencil!" << endl ;
+            }
+          }
+          if(!invalid_stencil)
+            dval = max(dnorm,mdist) ;
+        }
+
+        double locdist = dval*1.05 ; // Saftey factor to ensure proper upwinding
+
+        vect3d prr = fcenter+n*(locdist*3.) ;
+        vect3d pr  = fcenter+n*locdist ;
+        // right stencil
+        {
+          vector<int> ntmp = get_stencil(stree,pr,delta_stencil*2.0) ;
+          vector<int> neighbors ;
+          for(size_t k=0;k<ntmp.size();++k) {
+            //            if(dot(n,loc[ntmp[k]]-fcenter) > 0)
+              neighbors.push_back(ntmp[k]) ;
+          }
+          // compute stencil weights
+          vector<double> w  ;
+          stencil_weights(w,neighbors,loc,pr) ;
+
+          double w_tot = 0 ;
+          for(size_t k=0;k<neighbors.size();++k) {
+            if(dot(n,loc[neighbors[k]]-fcenter) < 0)
+              w_tot += w[k] ;
+          }
+          if(w_tot > .5) { // Too much downwind bias
+            w_tot = 0 ;
+            for(size_t k=0;k<neighbors.size();++k) {
+              if(dot(n,loc[neighbors[k]]-fcenter) < 0)
+                w[k] = 0 ;
+              w_tot += w[k] ;
+            }
+            if(w_tot != 0) {
+              double rw_tot = 1./w_tot ;
+              for(size_t k=0;k<neighbors.size();++k) 
+                w[k] = w[k]*rw_tot ;
+            }
+          }
+
+          w_tot = 0 ;
+          for(size_t k=0;k<w.size();++k)
+            w_tot += w[k] ;
+          if(w_tot <= .5) {
+            w.clear() ;
+            neighbors.clear() ;
+            if(xnd >= 0) {
+              neighbors.push_back(xnd) ;
+              w.push_back(1.0) ;
+            } else {
+              coord3df ccenter = fcenter ; ;
+              neighbors.push_back(stree.find_closest(ccenter)) ;
+              if(neighbors[0]<0)
+                neighbors[0] = 0 ;
+              w.push_back(0.0) ;
+              st_error++ ;
+              Loci::debugout << "face degenerate, delta = " << delta_stencil << endl ;
+            }
+          }
+            
+              
+          if(w.size() < 3) {
+            st_warnings++ ;
+            Loci::debugout << "face cr suboptimal stencil, delta = " << delta_stencil << endl ;
+          }
+          Array<int,4> st ;
+          Array<double,4> wt ;
+          int nsz = neighbors.size() ;
+
+          if(nsz > 0) {
+            for(int k=0;k<nsz;++k) {
+              st[k] = ids[neighbors[k]] ;
+              wt[k] = w[k] ;
+            }
+            for(int k=nsz;k<4;++k) {
+              st[k] = st[nsz-1] ;
+              wt[k] = 0 ;
+            }
+          } else {
+            for(int k=0;k<4;++k) {
+              st[k] = 0 ;
+              wt[k] = 0 ;
+            }
+          }
+          
+          stencil_block[i][j*2+1] = st ;
+          weights_block[i][j*2+1] = wt ;
+        }
+
+        // right right stencil
+        {
+          vector<int> neighbors = get_stencil(stree,prr,delta_stencil*2.0) ;
+          if(neighbors.size() < 1) 
+            st_error++ ;
+          if(neighbors.size() < 1)
+            Loci::debugout << "face degenerate, delta = " << delta_stencil << endl ;
+
+
+          // compute stencil weights
+          vector<double> w  ;
+          stencil_weights(w,neighbors,loc,prr) ;
+
+
+          double w_tot = 0 ;
+          for(size_t k=0;k<neighbors.size();++k) {
+            if(dot(n,loc[neighbors[k]]-fcenter) < 0)
+              w_tot += w[k] ;
+          }
+          if(w_tot > .5) { // Too much downwind bias
+            w_tot = 0 ;
+            for(size_t k=0;k<neighbors.size();++k) {
+              if(dot(n,loc[neighbors[k]]-fcenter) < 0)
+                w[k] = 0 ;
+              w_tot += w[k] ;
+            }
+            if(w_tot == 0) 
+              st_warnings++ ;
+            else  {
+              double rw_tot = 1./w_tot ;
+              for(size_t k=0;k<neighbors.size();++k) 
+                w[k] = w[k]*rw_tot ;
+            }
+          }
+            
+          if(w.size() < 3) {
+            st_warnings++ ;
+            Loci::debugout << "face suboptimal stencil, delta = " << delta_stencil << endl ;
+          }
+
+          Array<int,4> st ;
+          Array<double,4> wt ;
+          int nsz = neighbors.size() ;
+
+          // If degenerate, then switch to first order
+          w_tot = 0 ;
+          for(size_t k=0;k<w.size();++k)
+            w_tot += w[k] ;
+          if(w_tot <= .5) {
+            st = stencil_block[i][j*2+1] ;
+            wt = weights_block[i][j*2+1] ;
+          } else {
+            if(nsz > 0) {
+              for(int k=0;k<nsz;++k) {
+                st[k] = ids[neighbors[k]] ;
+                wt[k] = w[k] ;
+              }
+              for(int k=nsz;k<4;++k) {
+                st[k] = st[nsz-1] ;
+                wt[k] = 0 ;
+              }
+            } else {
+              for(int k=0;k<4;++k) {
+                st[k] = 0 ;
+                wt[k] = 0 ;
+              }
+            }
+          }
+          stencil_block[i][j*2+0] = st ;
+          weights_block[i][j*2+0] = wt ;
+        }
+      }
+#ifdef VERBOSE
+      Loci::debugout << endl ;
+#endif
+
+    }
+
+#ifdef VERBOSE
+    Loci::debugout << "st_error = " << st_error << endl ;
+#endif
+    
+    int tot = 0 ;
+    MPI_Allreduce(&st_error,&tot,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(tot != 0) {
+      if(Loci::MPI_rank == 0) {
+        cerr << "STENCIL ERROR:  Degenerate interface stencil formed, aborting" << endl ;
+        //        Loci::Abort() ;
+      }
+    }
+    
+    MPI_Allreduce(&st_warnings,&tot,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(Loci::MPI_rank == 0 && tot != 0) {
+      cerr << "Warning: Suboptimal interface stencil in reconstruction: " << tot << endl ;
+    }
+      
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to generate stencils: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+    // Then we send the stencils back.
+    {
+      
+      vector<Array<int,4> > stencil_rcv ;
+      returnBlockData(stencil_rcv,stencil_block,2,boxes,
+                      box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                      MPI_COMM_WORLD) ;
+
+      int stsz = stencil_rcv.size() ;
+      vector<int> stmp(stsz*4) ;
+      for(int i=0;i<stsz;++i) {
+	for(int j=0;j<4;++j) {
+	  stmp[i*4+j] = stencil_rcv[i][j] ;
+        }
+      }
+      
+      std::sort(stmp.begin(),stmp.end()) ;
+      
+      vector<int>::const_iterator se = std::unique(stmp.begin(),stmp.end()) ;
+
+      int nids = se-stmp.begin() ;
+      store<int> ids ;
+      entitySet locdom = interval(0,nids-1) ;
+      ids.allocate(locdom) ;
+
+      map<int,int> rmap ;
+      cnt = 0 ;
+      for(vector<int>::const_iterator ii=stmp.begin();ii!=se;++ii) {
+	ids[cnt] = *ii ;
+	rmap[*ii] = cnt ;
+	cnt++ ;
+      }
+
+      for(int i=0;i<stsz;++i)
+	for(int j=0;j<4;++j) {
+	  int srcv = stencil_rcv[i][j] ;
+	  map<int,int>::const_iterator mi = rmap.find(srcv) ;
+	  stencil_rcv[i][j] = (mi==rmap.end())?0:mi->second ;
+	  //rmap[stencil_rcv[i][j]] ;
+	}
+      vector<int> send_info, req_sizes, snd_sizes, access ;
+      
+      
+      getCommSchedFromStencil(send_info,req_sizes,snd_sizes, access,
+			      stencil_rcv,ids,interp_pnts->distribution) ;
+      
+      for(size_t i=0;i<send_info.size();++i)
+	send_info[i] = interp_pnts->posid[send_info[i]] ;
+      remapStencil(stencil_rcv,access, ids) ;
+
+      Map slookup ;
+      slookup.allocate(dom) ;
+      for(size_t i=0;i<pbox.size();++i)
+	slookup[pbox[i].id] = i ;
+
+      interpolateFaceStencil->stencils.swap(stencil_rcv) ;
+      interpolateFaceStencil->send_info.swap(send_info) ;
+      interpolateFaceStencil->snd_sizes.swap(snd_sizes) ;
+      interpolateFaceStencil->req_sizes.swap(req_sizes) ;
+      interpolateFaceStencil->slookup = slookup.Rep() ;
+    }
+
+    // Send weights
+    vector<Array<double,4> > weight_rcv ;
+    //    returnBlockData(weight_rcv,weights_block,3,boxes,
+    returnBlockData(weight_rcv,weights_block,2,boxes,
+                    box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                    MPI_COMM_WORLD) ;
+    
+    interpolateFaceStencil->weights.swap(weight_rcv) ;
+
+    // put stencil blocks into place, renumber to local numbering and set ids
+    // send weights
+
+    // generate stencil communication schedule
+
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time in Face code find stencil: " << s.stop() << endl ;
+    s.start() ;
+#endif
+#ifdef REPORT_TIMES
+    MPI_Barrier(MPI_COMM_WORLD) ;
+    Loci::debugout << "time to sync: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+    MEMORY_PROFILE(compute_end) ;
+    return ;
+  }
+
+  register_rule<interpolateFaceStencil_Apply> register_interpolateFaceStencil_Apply ;
+  
+
+
+  class interpolateCellStencil_Unit: public unit_rule {
+    blackbox<stencil_info> interpolateCellStencil ;
+  public:
+    interpolateCellStencil_Unit() {
+      name_store("interpolateCellStencil",interpolateCellStencil) ;
+      output("interpolateCellStencil") ;
+      constraint("UNIVERSE,iblank") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+    }
+  } ;
+
+  register_rule<interpolateCellStencil_Unit> register_interpolateCellStencil_Unit ;
+
+  class interpolateCellStencil_Apply :
+    public apply_rule<blackbox<stencil_info>, Loci::NullOp<stencil_info> > {
+    const_store<vect3d> cellcenter ;
+    const_store<byte_t> iblank ;
+    const_param<double> stencilSize2 ;
+    const_blackbox<interpolate_points> interp_pnts ;
+    const_blackbox<StencilSizer> stencilSizer ;
+    blackbox<stencil_info> interpolateCellStencil ;
+  public:
+    interpolateCellStencil_Apply() {
+      name_store("cellcenter",cellcenter) ;
+      name_store("stencilSize2",stencilSize2) ;
+      name_store("interpolatePoints(cellcenter,iblank)",interp_pnts) ;
+      name_store("iblank",iblank) ;
+      name_store("stencilSizer",stencilSizer) ;
+      input("stencilSizer") ;
+      input("iblank") ;
+      input("cellcenter") ;
+      input("stencilSize2") ;
+      input("interpolatePoints(cellcenter,iblank)") ;
+      name_store("interpolateCellStencil",interpolateCellStencil) ;
+      output("interpolateCellStencil") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) ;
+  } ;
+
+
+  void interpolateCellStencil_Apply::compute(const sequence &seq) {
+    MEMORY_PROFILE(compute_start) ;
+    using Loci::debugout ;
+
+    MEMORY_PROFILE(buildcellstencil) ;
+#ifdef REPORT_TIMES
+    Loci::stopWatch s ;
+    s.start() ;
+    MPI_Barrier(MPI_COMM_WORLD) ;
+    //    Loci::debugout << "time to sync: " << s.stop() << endl ;
+    s.start() ;
+#endif
+    entitySet odom = entitySet(seq) ;
+    entitySet dom = EMPTY ;
+    FORALL(odom,ii) {
+      if(iblank[ii] == 2)
+        dom += ii ;
+    } ENDFORALL ;
+
+
+    // Decompose points into a set of bounding boxes
+    int sz = dom.size() ;
+    vector<Loci::kdTree::KDTree<float>::coord_info> pbox(sz) ;
+    int cnt =0 ;
+    real delta_stencil = 0 ;
+    FORALL(dom,cc) {
+      pbox[cnt].coords[0] = cellcenter[cc].x ;
+      pbox[cnt].coords[1] = cellcenter[cc].y ;
+      pbox[cnt].coords[2] = cellcenter[cc].z ;
+      delta_stencil = max(delta_stencil,
+                          real(stencilSizer->getSpacing(pbox[cnt].coords))) ;
+      pbox[cnt].id = cc ;
+      cnt++ ;
+    } ENDFORALL ;
+
+    //    real
+    //    delta_stencil  = sqrt(*stencilSize2*2.) ;
+#ifdef VERBOSE
+    Loci::debugout << "delta = " << delta_stencil << endl ;
+#endif
+    delta_stencil *=  4.1 ; // double search depth to make sure to find a point
+
+    // This call breaks the coordinate points into a set of bounding
+    // boxes
+
+    // Compute how big the decomposition chunks should be
+    int tsz = 0 ;
+    MPI_Allreduce(&sz,&tsz,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    MEMORY_PROFILE(pre_split_boxes) ;
+    // split boxes until each box has no more then split_lim points
+    int p = Loci::MPI_processes ;
+    int split_lim = max(256,tsz/(p)) ;
+#ifdef VERBOSE
+    Loci::debugout << "split_lim = " << split_lim << endl ;
+#endif
+    // Get bounding boxes
+    vector<bound_info> boxes ;
+    debugout << "getBoundingBoxes, pbox.size() =" << pbox.size() << endl ;
+    if(pbox.size() < 2) {
+      debugout << "small pbox" << endl ;
+    }
+    getBoundingBoxes(pbox,boxes,4,delta_stencil*8.0,split_lim) ;
+#ifdef VERBOSE
+    Loci::debugout << "found " << boxes.size() << " bounding boxes:" << endl ;
+#endif
+
+
+    // Adjust bounding boxes by stencil size
+    for(size_t i=0;i<boxes.size();++i) {
+      float spacing = 0  ;
+      for(int j=boxes[i].start;j<=boxes[i].stop;++j)
+        spacing = max(spacing,stencilSizer->getSpacing(pbox[j].coords)) ;
+      spacing *= 5.1 ;
+      Loci::debugout << "spacing for box " << i << " is " << spacing
+                     << ", boxes.size="<< boxes[i].stop-boxes[i].start+1
+                     << endl ;
+      boxes[i].bnd.minc[0] -= spacing ;
+      boxes[i].bnd.minc[1] -= spacing ;
+      boxes[i].bnd.minc[2] -= spacing ;
+      boxes[i].bnd.maxc[0] += spacing ;
+      boxes[i].bnd.maxc[1] += spacing ;
+      boxes[i].bnd.maxc[2] += spacing ;
+    }
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to find bounding boxes: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+
+    // Now distribute the bounding boxes to all processors
+    vector<int> box_sp,box_tp,b_sizes,send_block_id,recv_block_id ;
+    
+    boundingBoxDistribution(box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                            boxes,MPI_COMM_WORLD) ;
+    MEMORY_PROFILE(post_distribution) ;
+
+    // ------------------------------------------------------------------------
+    // receive search points
+    vector<vector<Loci::kdTree::KDTree<float>::coord_info>  > loc_pbox ;
+    communicateBoxPoints(loc_pbox,box_sp,box_tp,b_sizes,
+                         send_block_id,recv_block_id,pbox,boxes,
+                         MPI_COMM_WORLD) ;
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time recv box search points: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+
+    MEMORY_PROFILE(post_commBoxPoints) ;
+    //-------------------------------------------------------------------------
+    // recieve target points
+
+    // First collect bounding box information for each block
+    vector<bound_info> boxes_g ;
+    allGatherVec(boxes_g,boxes,MPI_COMM_WORLD) ;
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time allGatherVec boxes: " << s.stop() << endl ;
+    s.start() ;
+#endif
+    
+    vector<vector<KDTree<float>::coord_info>  > recv_targets ;
+    recieveTargetPoints(recv_targets,interp_pnts->kd,
+                        boxes_g,box_sp,box_tp,b_sizes,
+                        send_block_id,recv_block_id,
+                        MPI_COMM_WORLD) ;
+
+    MEMORY_PROFILE(recv_targetPnts) ;
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to receive target points: " << s.stop() << endl ;
+    s.start() ;
+#endif
+
+    // Now we build the stencils
+    vector< vector<Array<int,4> > >    stencil_block(recv_block_id.size()) ;
+    vector< vector<Array<double,4> > > weights_block(recv_block_id.size()) ;
+
+    int st_error = 0 ;
+    int st_warning = 0 ;
+    
+    MEMORY_PROFILE(pre_build_stencils) ;
+    // After sending, we can compute stencils for each block.
+    for(size_t i=0;i<recv_block_id.size();++i) {
+      int bk = recv_block_id[i] ;
+      int ssz = loc_pbox[i].size() ; // Search points for block bk
+
+      store<vect3d> loc ;
+      store<int> ids ;
+      int tsz = recv_targets[bk].size() ;
+      entitySet locdom = interval(0,tsz-1) ;
+      loc.allocate(locdom) ;
+      ids.allocate(locdom) ;
+      for(int ii=0;ii<tsz;++ii) {
+	loc[ii].x = recv_targets[bk][ii].coords[0] ;
+	loc[ii].y = recv_targets[bk][ii].coords[1] ;
+	loc[ii].z = recv_targets[bk][ii].coords[2] ;
+	ids[ii] = recv_targets[bk][ii].id ;
+	recv_targets[bk][ii].id = ii ;
+      }
+
+      KDTree<float> stree(recv_targets[bk]) ;
+#ifdef VERBOSE
+      Loci::debugout << "bk=" << bk <<  ",tsz=" << tsz << endl ;
+#endif
+
+      vector<Array<int,4> > tmp1(ssz) ;
+      vector<Array<double,4> > tmp2(ssz) ;
+      stencil_block[i].swap(tmp1) ;
+      weights_block[i].swap(tmp2) ;
+      delta_stencil = 0 ;
+      for(int j=0;j<ssz;++j) {
+        delta_stencil = max(delta_stencil,
+                            double(stencilSizer->getSpacing(loc_pbox[i][j].coords)));
+      }
+
+      delta_stencil *= 5.1 ;
+      for(int j=0;j<ssz;++j) {
+	vect3d pnt(loc_pbox[i][j].coords[0],
+		   loc_pbox[i][j].coords[1],
+		   loc_pbox[i][j].coords[2]) ;
+        
+	vector<int> neighbors = get_stencil(stree,pnt,delta_stencil) ;
+        
+        if(neighbors.size() < 1) {
+          double scale = 2.0 ;
+          do {
+            neighbors = get_stencil(stree,pnt,delta_stencil*scale) ;
+            scale = scale * 2.0 ;
+          } while (neighbors.size() < 1 && scale < 10.0) ;
+        }
+        if(neighbors.size() < 1) 
+          st_error++ ;
+        if(neighbors.size() < 1)
+          Loci::debugout << "degenerate neighbors, delta=" << delta_stencil
+                         << ",loc="<< pnt
+                         << ",tsz="<< tsz
+                         << ",ssz="<< ssz
+                         << endl ;
+        
+          
+	// compute stencil weights
+	vector<double> w  ;
+	stencil_weights(w,neighbors,loc,pnt) ;
+        if(neighbors.size() ==0) {
+          neighbors.push_back(stree.find_closest(loc_pbox[i][j].coords)) ;
+          if(neighbors[0] < 0)
+            neighbors[0] = 0 ;
+          w.push_back(0.0) ;
+        }
+        if(w.size() < 3) {
+          st_warning++ ;
+          Loci::debugout << "suboptimal stencil, delta = " << delta_stencil << endl ;
+        }
+	int bsz = w.size() ;
+	for(int k=0;k<bsz;++k) {
+	  stencil_block[i][j][k] = ids[neighbors[k]] ;
+	  weights_block[i][j][k] = w[k] ;
+	}
+	for(int k=bsz;k<4;++k) {
+	  stencil_block[i][j][k] = (bsz > 0)?ids[neighbors[bsz-1]]:0 ;
+	  weights_block[i][j][k] = 0.0 ;
+	}
+#ifdef VERBOSE
+	Loci::debugout << ' ' << neighbors.size() ;
+#endif
+	
+      }
+#ifdef VERBOSE
+      Loci::debugout << endl ;
+#endif
+
+    }
+
+    int tot = 0 ;
+    MPI_Allreduce(&st_error,&tot,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(Loci::MPI_rank == 0 && tot != 0) {
+      cerr << "STENCIL ERROR:  Degenerate stencil formed" << endl ;
+      //      Loci::Abort() ;
+    }
+    MPI_Allreduce(&st_warning,&tot,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(Loci::MPI_rank == 0 && tot != 0) {
+      cerr << "Warning: Suboptimal stencil in reconstruction: " << tot << endl ;
+    }
+      
+      
+
+    MEMORY_PROFILE(post_stencil_compute) ;
+#ifdef REPORT_TIMES
+    Loci::debugout << "time to generate stencils: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+    // Then we send the stencils back.
+    {
+      vector<Array<int,4> > stencil_rcv ;
+      returnBlockData(stencil_rcv,stencil_block,1,boxes,
+                      box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                      MPI_COMM_WORLD) ;
+
+      MEMORY_PROFILE(recv_stencil) ;
+      int stsz = stencil_rcv.size() ;
+      vector<int> stmp(stsz*4) ;
+      for(int i=0;i<stsz;++i)
+	for(int j=0;j<4;++j)
+	  stmp[i*4+j] = stencil_rcv[i][j] ;
+      
+      std::sort(stmp.begin(),stmp.end()) ;
+      vector<int>::const_iterator se = std::unique(stmp.begin(),stmp.end()) ;
+
+      int nids = se-stmp.begin() ;
+      store<int> ids ;
+      entitySet locdom = interval(0,nids-1) ;
+      ids.allocate(locdom) ;
+
+      map<int,int> rmap ;
+      int cnt = 0 ;
+
+      for(vector<int>::const_iterator ii=stmp.begin();ii!=se;++ii) {
+	ids[cnt] = *ii ;
+	rmap[*ii] = cnt ;
+	cnt++ ;
+      }
+
+      for(int i=0;i<stsz;++i)
+	for(int j=0;j<4;++j)
+	  stencil_rcv[i][j] = rmap[stencil_rcv[i][j]] ;
+      
+      vector<int> send_info, req_sizes, snd_sizes, access ;
+      
+
+      getCommSchedFromStencil(send_info,req_sizes,snd_sizes, access,
+			      stencil_rcv,ids,interp_pnts->distribution) ;
+      
+      for(size_t i=0;i<send_info.size();++i)
+	send_info[i] = interp_pnts->posid[send_info[i]] ;
+      remapStencil(stencil_rcv,access, ids) ;
+
+      Map slookup ;
+      slookup.allocate(dom) ;
+      for(size_t i=0;i<pbox.size();++i)
+	slookup[pbox[i].id] = i ;
+      
+      interpolateCellStencil->stencils.swap(stencil_rcv) ;
+      interpolateCellStencil->send_info.swap(send_info) ;
+      interpolateCellStencil->snd_sizes.swap(snd_sizes) ;
+      interpolateCellStencil->req_sizes.swap(req_sizes) ;
+      interpolateCellStencil->slookup = slookup.Rep() ;
+    }
+
+    // Send weights
+    vector<Array<double,4> > weight_rcv ;
+    returnBlockData(weight_rcv,weights_block,1,boxes,
+                    box_sp,box_tp,b_sizes,send_block_id,recv_block_id,
+                    MPI_COMM_WORLD) ;
+    
+    interpolateCellStencil->weights.swap(weight_rcv) ;
+
+    // put stencil blocks into place, renumber to local numbering and set ids
+    // send weights
+
+    // generate stencil communication schedule
+
+
+#ifdef REPORT_TIMES
+    Loci::debugout << "time in new code find stencil: " << s.stop() << endl ;
+    s.start() ;
+    MPI_Barrier(MPI_COMM_WORLD) ;
+    Loci::debugout << "time to sync: " << s.stop() << endl ;
+    s.start() ;
+#endif    
+    MEMORY_PROFILE(compute_start) ;
+    return ;
+
+  }
+
+  register_rule<interpolateCellStencil_Apply> register_interpolateCellStencil_Apply ;
+
+  class interpolateFaceScalar : public pointwise_rule {
+    const_store<byte_t> iblank ;
+    const_Map ci ;
+    const_store<real> X ;
+    const_blackbox<stencil_info> interpolateFaceStencil ;
+    store<real> fX ;
+  public:
+    interpolateFaceScalar() {
+      name_store("interpolateFaceStencil",interpolateFaceStencil) ;
+      input("interpolateFaceStencil") ;
+      name_store("ci",ci) ;
+      name_store("X",X) ;
+      name_store("iblank",iblank) ;
+      input("ci->X") ;
+      input("ci->iblank") ;
+      name_store("interpolateFace(X)",fX) ;
+      output("interpolateFace(X)") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      MEMORY_PROFILE(compute_start) ;
+      entitySet odom = entitySet(seq) ;
+      entitySet dom ;
+      FORALL(odom,fc) {
+        if(iblank[ci[fc]] > 2) {
+          fX[fc] = X[ci[fc]] ;
+        } else
+          dom += fc ;
+      } ENDFORALL ;
+      
+      Map slookup ;
+      slookup = interpolateFaceStencil->slookup ;
+      store<real> Xstencil ;
+      sendStencilData(Xstencil,X,
+                      interpolateFaceStencil->send_info,
+                      interpolateFaceStencil->req_sizes,
+                      interpolateFaceStencil->snd_sizes)  ;
+      const vector<Array<double,4> > &weights = interpolateFaceStencil->weights ;
+      const vector<Array<int,4> > &stencils = interpolateFaceStencil->stencils ;
+
+      FORALL(dom,fc) {
+        int cnt = slookup[fc]*2 ;
+        int cll = cnt+0 ;
+        int cl =  cnt+1 ;
+
+        double vll = 0 ;
+        for(int j=0;j<4;++j) {
+          vll += weights[cll][j]*Xstencil[stencils[cll][j]] ;
+        }
+        double vl = 0 ;
+        for(int j=0;j<4;++j) {
+          vl += weights[cl][j]*Xstencil[stencils[cl][j]] ;
+        }
+        double vr = 0 ;
+        vr = X[ci[fc]] ;
+        real dv = (vl-vll) ;
+        if(dv < 0.)
+          dv += -1e-30 ;
+        else
+          dv += 1e-30 ;
+
+        // Use Van Albada limiter to estimate second order upwind
+        // extrapolation to the face
+        const real r = max(0.0,(vr-vl)/dv) ;
+        const real lim = (r+r*r)/(1.+r*r) ;
+        fX[fc] = vl + 0.5*lim*(vl-vll) ;
+
+      } ENDFORALL ;
+      MEMORY_PROFILE(compute_end) ;
+    }
+  } ;
+  register_rule<interpolateFaceScalar> register_interpolateFaceScalar ;
+
+  class interpolateFaceCellConnect : public pointwise_rule {
+    const_store<byte_t> iblank ;
+    const_Map ci ;
+    const_blackbox<stencil_info> interpolateFaceStencil ;
+    store<int> interpolateConnectCell ;
+  public:
+    interpolateFaceCellConnect() {
+      name_store("ci",ci) ;
+      name_store("iblank",iblank) ;
+      input("ci->iblank") ;
+      name_store("interpolateFaceStencil",interpolateFaceStencil) ;
+      input("interpolateFaceStencil") ;
+      name_store("interpolateConnectCell",interpolateConnectCell) ;
+      output("interpolateConnectCell") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      entitySet odom = entitySet(seq) ;
+      entitySet dom ;
+      FORALL(odom,fc) {
+        if(iblank[ci[fc]] > 2) {
+          interpolateConnectCell[fc] = -1 ;
+        } else
+          dom += fc ;
+      } ENDFORALL ;
+      
+      Map slookup ;
+      slookup = interpolateFaceStencil->slookup ;
+      entitySet sendSet ;
+      for(size_t i=0;i<interpolateFaceStencil->send_info.size();++i) {
+	sendSet += interpolateFaceStencil->send_info[i] ;
+      }
+      
+      
+      store<int> sendIds ;
+      sendIds.allocate(sendSet) ;
+      for(size_t i=0;i<interpolateFaceStencil->send_info.size();++i) {
+	int id = interpolateFaceStencil->send_info[i] ;
+	sendIds[id] = id ;
+      }
+      if(Loci::MPI_processes > 1) {
+	Map l2g ;
+	l2g = Loci::exec_current_fact_db->get_distribute_info()->l2g.Rep() ;
+	FORALL(sendSet,ii) {
+	  sendIds[ii] = l2g[ii] ;
+	} ENDFORALL ;
+      }
+      store<int> Ids ;
+      const_store<int> sendIdsc ;
+      sendIdsc = sendIds.Rep();
+      sendStencilData(Ids,sendIdsc,
+                      interpolateFaceStencil->send_info,
+                      interpolateFaceStencil->req_sizes,
+                      interpolateFaceStencil->snd_sizes)  ;
+
+      const vector<Array<double,4> > &weights = interpolateFaceStencil->weights ;
+      const vector<Array<int,4> > &stencils = interpolateFaceStencil->stencils ;
+      store<int> ids ;
+
+      FORALL(dom,fc) {
+        int cnt = slookup[fc]*2 ;
+        int cl =  cnt ;
+	
+	double w=-1 ;
+	interpolateConnectCell[fc] = -1 ;
+	for(int i=0;i<4;++i)
+	  if(weights[cl][i] > w) {
+	    w = weights[cl][i] ;
+	    interpolateConnectCell[fc] = Ids[stencils[cl][i]] ;
+	  }
+
+      } ENDFORALL ;
+    }
+  } ;
+  register_rule<interpolateFaceCellConnect> register_interpolateFaceCellConnect ;
+
+
+
+  class interpolateFacevect3d : public pointwise_rule {
+    const_Map ci ;
+    const_store<byte_t> iblank ;
+    const_store<vect3d> X ;
+    const_blackbox<stencil_info> interpolateFaceStencil ;
+    store<vect3d> fX ;
+  public:
+    interpolateFacevect3d() {
+      name_store("interpolateFaceStencil",interpolateFaceStencil) ;
+      input("interpolateFaceStencil") ;
+      name_store("ci",ci) ;
+      name_store("iblank",iblank) ;
+      name_store("X",X) ;
+      input("ci->X") ;
+      input("ci->iblank") ;
+      name_store("interpolateFace_v3d(X)",fX) ;
+      output("interpolateFace_v3d(X)") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      MEMORY_PROFILE(compute_start) ;
+      entitySet odom = entitySet(seq) ;
+      entitySet dom ;
+      FORALL(odom,fc) {
+        if(iblank[ci[fc]] > 2) {
+          fX[fc] = X[ci[fc]] ;
+        } else
+          dom += fc ;
+      } ENDFORALL ;
+      
+      Map slookup ;
+      slookup = interpolateFaceStencil->slookup ;
+      store<vect3d> Xstencil ;
+      sendStencilData(Xstencil,X,
+                      interpolateFaceStencil->send_info,
+                      interpolateFaceStencil->req_sizes,
+                      interpolateFaceStencil->snd_sizes)  ;
+      const vector<Array<double,4> > &weights 
+	= interpolateFaceStencil->weights ;
+      const vector<Array<int,4> > &stencils 
+	= interpolateFaceStencil->stencils ;
+
+      FORALL(dom,fc) {
+        int cnt = slookup[fc]*2 ;
+
+        int cll = cnt+0 ;
+        int cl =  cnt+1 ;
+
+        vect3d vll = vect3d(0,0,0) ;
+        for(int j=0;j<4;++j) {
+          vll += weights[cll][j]*Xstencil[stencils[cll][j]] ;
+        }
+        vect3d vl = vect3d(0,0,0) ;
+        for(int j=0;j<4;++j) {
+          vl += weights[cl][j]*Xstencil[stencils[cl][j]] ;
+        }
+        vect3d vr = vect3d(0,0,0) ;
+        vr = X[ci[fc]] ;
+        vect3d dv = (vl-vll) ;
+        if(dv.x < 0.)
+          dv.x += -1e-30 ;
+        else
+          dv.x += 1e-30 ;
+
+        if(dv.y < 0.)
+          dv.y += -1e-30 ;
+        else
+          dv.y += 1e-30 ;
+
+        if(dv.z < 0.)
+          dv.z += -1e-30 ;
+        else
+          dv.z += 1e-30 ;
+
+        // Use Van Albada limiter to estimate second order upwind
+        // extrapolation to the face
+        const real rx = (vr.x-vl.x)/dv.x ;
+        const real limx= (rx+rx*rx)/(1.+rx*rx) ;
+        fX[fc].x = vl.x + 0.5*limx*(vl.x-vll.x) ;
+        const real ry = (vr.y-vl.y)/dv.y ;
+        const real limy= (ry+ry*ry)/(1.+ry*ry) ;
+        fX[fc].y = vl.y + 0.5*limy*(vl.y-vll.y) ;
+        const real rz = (vr.z-vl.z)/dv.z ;
+        const real limz= (rz+rz*rz)/(1.+rz*rz) ;
+        fX[fc].z = vl.z + 0.5*limz*(vl.z-vll.z) ;
+      } ENDFORALL ;
+      MEMORY_PROFILE(compute_end) ;
+    }
+  } ;
+  register_rule<interpolateFacevect3d> register_interpolateFacevect3d ;
+
+
+  class interpolateIblankCells : public pointwise_rule {
+    storeVec<real> qpn ;
+    const_store<byte_t> iblank ;
+    const_multiMap upper,lower ;
+    const_Map cl,cr ;
+    const_store<Area> area ;
+
+    const_blackbox<stencil_info> interpolateCellStencil ;
+  public:
+    interpolateIblankCells() {
+      name_store("interpolateCellStencil{n,it}",interpolateCellStencil) ;
+      input("interpolateCellStencil{n,it}") ;
+      name_store("qpn{n,it}",qpn) ;
+      name_store("iblank{n,it}",iblank) ;
+      name_store("upper{n,it}",upper) ;
+      name_store("lower{n,it}",lower) ;
+      name_store("cl{n,it}",cl) ;
+      name_store("cr{n,it}",cr) ;
+      name_store("area{n,it}",area) ;
+      input("(upper{n,it},lower{n,it})->area{n,it}") ;
+      input("upper{n,it}->cr{n,it}->(iblank{n,it},qpn{n,it})") ;
+      input("lower{n,it}->cl{n,it}->(iblank{n,it},qpn{n,it})") ;
+      input("iblank{n,it}") ;
+      input("qpn{n,it}") ;
+      output("iblank::qp{n,it}=qpn{n,it}") ;
+      constraint("iblank{n,it},qpn{n,it},componentGeometry{n,it}") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      MEMORY_PROFILE(useIblankStencil) ;
+      const int vs = qpn.vecSize() ;
+      entitySet odom = entitySet(seq) ;
+      entitySet dom = EMPTY ;
+      FORALL(odom,ii) {
+        if(iblank[ii] == 2)
+          dom += ii ;
+      } ENDFORALL ;
+      
+      Map slookup ;
+      slookup = interpolateCellStencil->slookup ;
+      storeVec<real> qpstencil ;
+      const_storeVec<real> qpn_c ;
+      qpn_c.setRep(qpn.Rep()) ;
+      MEMORY_PROFILE(presend) ;
+      sendStencilData(qpstencil,qpn_c,
+                      interpolateCellStencil->send_info,
+                      interpolateCellStencil->req_sizes,
+                      interpolateCellStencil->snd_sizes)  ;
+      const vector<Array<double,4> > &weights 
+	= interpolateCellStencil->weights ;
+      const vector<Array<int,4> > &stencils 
+	= interpolateCellStencil->stencils ;
+
+      MEMORY_PROFILE(interpolate) ;
+      FORALL(dom,cc) {
+        // lookup cell number
+        int cnt = slookup[cc] ;
+
+        // Get cell stencil info
+        int co = cnt ;
+
+        double wsum = 0 ;
+        for(int j=0;j<4;++j) 
+          wsum += weights[co][j] ;
+        if(wsum > .1) { // sum should be 1, if not stencil is degenerate
+          // Weighted sum interpolation
+          for(int i=0;i<vs;++i) {
+            real v = 0 ;
+            for(int j=0;j<4;++j) {
+              v += weights[co][j]*qpstencil[stencils[co][j]][i] ;
+            }
+            qpn[cc][i] = v/wsum ;
+          }
+        }
+      } ENDFORALL ;
+
+      // Now for all non-participating cells, average appropriately
+      FORALL(odom,ii) {
+        if(iblank[ii] == 3) {
+          tmp_array<real> qpsum(vs) ;
+          int usz = upper[ii].size() ;
+          int lsz = lower[ii].size() ;
+          int imin = 3 ;
+          for(int i=0;i<usz;++i) {
+            int ib = iblank[cr[upper[ii][i]]] ;
+            imin = min(imin,ib) ;
+          }
+          for(int i=0;i<lsz;++i) {
+            int ib = iblank[cl[lower[ii][i]]] ;
+            imin = min(imin,ib) ;
+          }
+          for(int i=0;i<vs;++i) {
+            qpsum[i] = 0 ;
+          }
+          real sum = 0 ;
+          if(imin == 0) {
+            // if 3 type cell next to 0 type cell, reflect
+            const int mi = 1 ;
+            for(int i=0;i<usz;++i) {
+              int crc = cr[upper[ii][i]] ;
+              int ib = iblank[crc] ;
+              if(ib == 0) {
+                real w = area[upper[ii][i]].sada ;
+                const vect3d &n = area[upper[ii][i]].n ;
+                sum += w ;
+                for(int j=0;j<vs;++j)
+                  qpsum[j] += w*qpn[crc][j] ;
+                vect3d vc =vect3d(qpn[crc][mi+0],qpn[crc][mi+1],qpn[crc][mi+2]);
+                vc -= (2.*dot(vc,n))*n ;
+                qpsum[mi+0] += w*vc.x ;
+                qpsum[mi+1] += w*vc.y ;
+                qpsum[mi+2] += w*vc.z ;
+              }
+            }
+            for(int i=0;i<lsz;++i) {
+              int clc = cl[lower[ii][i]] ;
+              int ib = iblank[clc] ;
+              if(ib == 0) {
+                real w = area[lower[ii][i]].sada ;
+                const vect3d &n = area[lower[ii][i]].n ;
+                sum += w ;
+                for(int j=0;j<vs;++j)
+                  qpsum[j] += w*qpn[clc][j] ;
+                vect3d vc =vect3d(qpn[clc][mi+0],qpn[clc][mi+1],qpn[clc][mi+2]);
+                vc -= (2.*dot(vc,n))*n ;
+                qpsum[mi+0] += w*vc.x ;
+                qpsum[mi+1] += w*vc.y ;
+                qpsum[mi+2] += w*vc.z ;
+              }
+            }
+          } else {
+            // otherwise average
+            for(int i=0;i<usz;++i) {
+              int crc = cr[upper[ii][i]] ;
+              int ib = iblank[crc] ;
+              if(ib == imin) {
+                real w = area[upper[ii][i]].sada ;
+                sum += w ;
+                for(int j=0;j<vs;++j)
+                  qpsum[j] += w*qpn[crc][j] ;
+              }
+            }
+            for(int i=0;i<lsz;++i) {
+              int clc = cl[lower[ii][i]] ;
+              int ib = iblank[clc] ;
+              if(ib == imin) {
+                real w = area[lower[ii][i]].sada ;
+                sum += w ;
+                for(int j=0;j<vs;++j)
+                  qpsum[j] += w*qpn[clc][j] ;
+              }
+            }
+          }
+          real rsum = 1./sum ;
+          for(int i=0;i<vs;++i) {
+            qpn[ii][i] = qpsum[i]*rsum ;
+          }
+        }
+      } ENDFORALL ;
+    }
+  } ;
+  register_rule<interpolateIblankCells> register_interpolateIblankCells ;
+
+  class interpolateIblankCells_General : public pointwise_rule {
+    store<real > X ;
+    const_store<byte_t> iblank ;
+    const_blackbox<stencil_info> interpolateCellStencil ;
+    const_multiMap upper,lower ;
+    const_Map cl,cr ;
+    const_store<Area> area ;
+  public:
+    interpolateIblankCells_General() {
+      name_store("interpolateCellStencil{n,it}",interpolateCellStencil) ;
+      input("interpolateCellStencil{n,it}") ;
+      name_store("X_n{n,it}",X) ;
+      name_store("iblank{n,it}",iblank) ;
+      name_store("upper{n,it}",upper) ;
+      name_store("lower{n,it}",lower) ;
+      name_store("cl{n,it}",cl) ;
+      name_store("cr{n,it}",cr) ;
+      name_store("area{n,it}",area) ;
+      input("iblank{n,it}") ;
+      input("X_n{n,it}") ;
+      input("upper{n,it}->cr{n,it}->(iblank{n,it},X_n{n,it})") ;
+      input("lower{n,it}->cl{n,it}->(iblank{n,it},X_n{n,it})") ;
+      input("(upper{n,it},lower{n,it})->area{n,it}") ;
+      output("iblank::X{n,it}=X_n{n,it}") ;
+      constraint("iblank{n,it},X_n{n,it},componentGeometry{n,it},C") ;
+      set_parametric_variable("scalarTransportP(X,C)") ;
+      disable_threading() ;
+    }
+    void compute(const sequence &seq) {
+      MEMORY_PROFILE(compute_start) ;
+      entitySet odom = entitySet(seq) ;
+      entitySet dom = EMPTY ;
+      FORALL(odom,ii) {
+        if(iblank[ii] == 2)
+          dom += ii ;
+      } ENDFORALL ;
+      
+      Map slookup ;
+      slookup = interpolateCellStencil->slookup ;
+      store<real> qstencil ;
+      const_store<real> X_c ;
+      X_c.setRep(X.Rep()) ;
+      sendStencilData(qstencil,X_c,
+                      interpolateCellStencil->send_info,
+                      interpolateCellStencil->req_sizes,
+                      interpolateCellStencil->snd_sizes)  ;
+      const vector<Array<double,4> > &weights 
+	= interpolateCellStencil->weights ;
+      const vector<Array<int,4> > &stencils 
+	= interpolateCellStencil->stencils ;
+
+      FORALL(dom,cc) {
+        // lookup cell number
+        int cnt = slookup[cc] ;
+
+        int co = cnt ;
+
+        // Weighted sum interpolation
+        real v = 0 ;
+        for(int j=0;j<4;++j) 
+          v += weights[co][j]*qstencil[stencils[co][j]] ;
+        X[cc] = v ;
+      } ENDFORALL ;
+
+      // Now for all non-participating cells, average appropriately
+      FORALL(odom,ii) {
+        if(iblank[ii] == 3) {
+          real qpsum ;
+          int usz = upper[ii].size() ;
+          int lsz = lower[ii].size() ;
+          int imin = 3 ;
+          for(int i=0;i<usz;++i) {
+            int ib = iblank[cr[upper[ii][i]]] ;
+            imin = min(imin,ib) ;
+          }
+          for(int i=0;i<lsz;++i) {
+            int ib = iblank[cl[lower[ii][i]]] ;
+            imin = min(imin,ib) ;
+          }
+          qpsum = 0 ;
+          real sum = 0 ;
+
+          for(int i=0;i<usz;++i) {
+            int crc = cr[upper[ii][i]] ;
+            int ib = iblank[crc] ;
+            if(ib == imin) {
+              real w = area[upper[ii][i]].sada ;
+              sum += w ;
+              qpsum += w*X[crc] ;
+            }
+          }
+          for(int i=0;i<lsz;++i) {
+            int clc = cl[lower[ii][i]] ;
+            int ib = iblank[clc] ;
+            if(ib == imin) {
+              real w = area[lower[ii][i]].sada ;
+              sum += w ;
+              qpsum += w*X[clc] ;
+            }
+          }
+
+          real rsum = 1./sum ;
+          X[ii] = qpsum*rsum ;
+        }
+      } ENDFORALL ;
+
+      MEMORY_PROFILE(compute_end) ;
+
+    }
+  } ;
+  register_rule<interpolateIblankCells_General> register_interpolateIblankCells_General ;
+  
+  
+  class getIblankCell : public pointwise_rule {
+    store<int> cell;
+    const_store<byte_t> iblank ;
+    const_blackbox<stencil_info> interpolateCellStencil ;
+    const_multiMap upper,lower ;
+    const_Map cl,cr ;
+    const_store<Area> area ;
+  public:
+    getIblankCell() {
+      name_store("interpolateCellStencil{n,it}",interpolateCellStencil) ;
+      input("interpolateCellStencil{n,it}") ;
+      name_store("iblank{n,it}",iblank) ;
+      name_store("upper{n,it}",upper) ;
+      name_store("lower{n,it}",lower) ;
+      name_store("cl{n,it}",cl) ;
+      name_store("cr{n,it}",cr) ;
+      name_store("area{n,it}",area) ;
+      name_store("iblankCell{n,it}",cell) ;
+      input("iblank{n,it}") ;
+      input("upper{n,it}->cr{n,it}->(iblank{n,it})") ;
+      input("lower{n,it}->cl{n,it}->(iblank{n,it})") ;
+      input("(upper{n,it},lower{n,it})->area{n,it}") ;
+      output("iblankCell{n,it}") ;
+      constraint("iblank{n,it},componentGeometry{n,it}") ;
+
+      disable_threading() ;
+
+    }
+    void compute(const sequence &seq) {
+      MEMORY_PROFILE(compute_start) ;
+      entitySet odom = entitySet(seq) ;
+      entitySet dom = EMPTY ;
+      store<int> gcell ;
+      gcell.allocate(odom) ;
+      if(Loci::MPI_processes > 1) {
+	Map l2g ;
+	l2g = Loci::exec_current_fact_db->get_distribute_info()->l2g.Rep() ;
+	FORALL(odom,ii) {
+	  gcell[ii] = l2g[ii] ;
+	} ENDFORALL ;
+      } else {
+	FORALL(odom,ii) {
+	  gcell[ii] = ii ;
+	} ENDFORALL ;
+      }
+      
+      FORALL(odom,ii) {
+        cell[ii] = 0 ;
+        if(iblank[ii] == 2)
+          dom += ii ;
+      } ENDFORALL ;
+
+      Map slookup ;
+      slookup = interpolateCellStencil->slookup ;
+      store<int> cstencil ;
+      const_store<int> gcell_c ;
+      gcell_c.setRep(gcell.Rep()) ;
+      sendStencilData(cstencil,gcell_c,
+                      interpolateCellStencil->send_info,
+                      interpolateCellStencil->req_sizes,
+                      interpolateCellStencil->snd_sizes)  ;
+      const vector<Array<double,4> > &weights 
+	= interpolateCellStencil->weights ;
+      const vector<Array<int,4> > &stencils 
+	= interpolateCellStencil->stencils ;
+      
+      
+      FORALL(dom,cc) {
+        // lookup cell number
+        int cnt = slookup[cc] ;
+        int co = cnt ;
+
+        // Weighted sum interpolation
+        double w=-1 ;
+        for(int j=0;j<4;++j)
+          if(weights[co][j] > w) {
+            w = weights[co][j] ;
+            cell[cc] = cstencil[stencils[co][j]] ;
+          }
+      } ENDFORALL ;
+
+      MEMORY_PROFILE(compute_end) ;
+
+    }
+  } ;
+  register_rule<getIblankCell> register_getIblankCell ;
+  
+}
+
