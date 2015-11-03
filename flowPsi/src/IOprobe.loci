@@ -330,6 +330,22 @@ namespace flowPsi {
     MPI_Bcast(&($probePosFile[0]),pfile_size*3,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
   }
 
+  $type probePosFileIndex store<int> ;
+
+  $rule pointwise(probePosFileIndex<-probePosFile,cellcenter) {
+    size_t psz = $probePosFile.size() ;
+    $probePosFileIndex = 0 ;
+    real mindist = 1e30 ;
+    for(size_t i=0; i<psz ;++i) {
+      const vect3d dr = $probePosFile[i]-$cellcenter ;
+      const real dist = dot(dr,dr) ;
+      if(dist < mindist) {
+	$probePosFileIndex = i ;
+	mindist = dist ;
+      }
+    }
+  }
+    
   $type probeListData param<probe_list> ;
 
   $rule unit(probeListData<-probePosFile) {
@@ -337,8 +353,9 @@ namespace flowPsi {
     probe_list tmp(sz) ;
     $probeListData = tmp ;
   }
-  
-  $rule apply(probeListData<-cellcenter,probePosFile,
+
+
+  $rule apply(probeListData<-cellcenter,probePosFile,probePosFileIndex,
 	      gagePressure,temperature,u,
 	      grads(temperature),grads(gagePressure),gradv3d(u),
 	      upper->cr->(temperature,gagePressure,u),
@@ -402,29 +419,28 @@ namespace flowPsi {
       umin.z = min(umin.z,ut.z) ;
     }
 
-    for(size_t i=0; i<psz ;++i) {
-      const vect3d dr = $probePosFile[i]-$cellcenter ;
-      const real dist = dot(dr,dr) ;
-      if(dist < $probeListData[i].distance) {
-	real ti = max(min($temperature+dot($grads(temperature),dr),
-			  tmax),tmin) ;
-	real pgi = max(min($gagePressure+dot($grads(gagePressure),dr),
-			   pgmax),pgmin) ;
-	vect3d ui ;
-	ui.x = max(min($u.x+dot($gradv3d(u).x,dr),
-		       umax.x),umin.x) ;
-	ui.y = max(min($u.y+dot($gradv3d(u).y,dr),
-		       umax.y),umin.y) ;
-	ui.z = max(min($u.z+dot($gradv3d(u).z,dr),
-		       umax.z),umin.z) ;
-	probe_values pv ;
-	pv.distance = dist ;
-	pv.position = $probePosFile[i] ;
-	pv.velocity = ui ;
-	pv.gagepressure = pgi ;
-	pv.temperature = ti ;
-	$probeListData[i] = pv ;
-      }
+    int i= $probePosFileIndex ;
+    const vect3d dr = $probePosFile[i]-$cellcenter ;
+    const real dist = dot(dr,dr) ;
+    if(dist < $probeListData[i].distance) {
+      real ti = max(min($temperature+dot($grads(temperature),dr),
+			tmax),tmin) ;
+      real pgi = max(min($gagePressure+dot($grads(gagePressure),dr),
+			 pgmax),pgmin) ;
+      vect3d ui ;
+      ui.x = max(min($u.x+dot($gradv3d(u).x,dr),
+		     umax.x),umin.x) ;
+      ui.y = max(min($u.y+dot($gradv3d(u).y,dr),
+		     umax.y),umin.y) ;
+      ui.z = max(min($u.z+dot($gradv3d(u).z,dr),
+		     umax.z),umin.z) ;
+      probe_values pv ;
+      pv.distance = dist ;
+      pv.position = $probePosFile[i] ;
+      pv.velocity = ui ;
+      pv.gagepressure = pgi ;
+      pv.temperature = ti ;
+      $probeListData[i] = pv ;
     }
   }
   

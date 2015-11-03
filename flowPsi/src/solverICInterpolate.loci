@@ -17,6 +17,7 @@ using std::endl ;
 using std::ifstream ;
 
 namespace flowPsi {
+  extern void broadcast_storeRep(Loci::storeRepP rep) ;
 
   typedef vector3d<float> coord3df ;
   void read_puT_file_serial(std::string filename,
