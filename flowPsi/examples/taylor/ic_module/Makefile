@@ -12,9 +12,9 @@
 # Set OBJS to list '.o' files that will be compiled into your module
 
 
-FLOWPSI_BASE?=/home/lush/FlowPsiCode/flowPsi
+FLOWPSI_BASE?=/Users/lush/Work/flowPsi
 
-MODULE_NAME=taylorGreenIC
+MODULE_NAME=taylorGreenICFPSI
 
 # Put objects in the module here
 OBJS =\
