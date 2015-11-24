@@ -355,7 +355,6 @@ namespace flowPsi {
 
   $rule pointwise(probePosFileIndex<-probePosFile,cellcenter) {
     size_t psz = $probePosFile.size() ;
-    $probePosFileIndex = 0 ;
     real mindist = 1e30 ;
     for(size_t i=0; i<psz ;++i) {
       const vect3d dr = $probePosFile[i]-$cellcenter ;
@@ -365,6 +364,7 @@ namespace flowPsi {
 	mindist = dist ;
       }
     }
+    
   }
     
   $type probeListData param<probe_list> ;
