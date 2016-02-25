@@ -333,5 +333,30 @@ class output_restart_grid: public pointwise_rule {
   register_rule<output_restart_grid> register_output_restart_grid ;
 
 
+  $rule pointwise(OUTPUT<-area,facecenter,plot_postfix,modelName),
+  constraint(ci->vol),conditional(do_boundary_plot),
+  option(disable_threading) ,prelude {
+    ostringstream oss ;
+
+    oss << "output/bc_geom." << *$plot_postfix << "_" << *$modelName ;
+    string filename = oss.str() ;
+
+    entitySet set(seq) ;
+    hid_t file_id = Loci::createUnorderedFile(filename.c_str(),set) ;
+    Loci::writeUnorderedStore(file_id,$area,set,"area") ;
+    Loci::writeUnorderedStore(file_id,$facecenter,set,"facecenter") ;
+    Loci::closeUnorderedFile(file_id) ;
+  } ;
+
 }
+
+
+
+
+
+
+
+
+
+
 
