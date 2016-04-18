@@ -1,0 +1,167 @@
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+#include "flowPsiIO.h"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+
+  class fixedMassOutflow_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "fixedMassOutflow" ; }
+    std::string variablesChecked() { return "mdot,massFlux,massRelax"; }
+    bool checkOptions(const options_list &bc_options) {
+      error_message = "" ;
+
+      bool check = true ;
+      if(!(bc_options.optionExists("mdot")||bc_options.optionExists("massFlux"))) {
+        error_message = "'mdot' or 'massFlux' is a required input for fixedMassOutflow BC" ;
+        check = false ;
+      }
+
+      if(bc_options.optionExists("mdot")) {
+        if(!check_scalar_units(bc_options,"mdot","kg/s")) {
+          error_message= "Units are incompatible for 'mdot' in fixedMassOutflow BC" ;
+          check = false ;
+        }
+      }
+
+      if(bc_options.optionExists("massFlux")) {
+        if(!check_scalar_units(bc_options,"massFlux","kg/s/m/m")) {
+          error_message= "Units are incompatible for 'massFlux' in fixedMassOutflow BC" ;
+          check = false ;
+        }
+      }
+
+      return check ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+
+  register_BC<fixedMassOutflow_check> register_fixedMassOutflow_check ;
+
+  $type massRelax_BC store<real> ;
+  $rule pointwise(massRelax_BC<-BC_options) {
+    $massRelax_BC = 1.0 ;
+    if($BC_options.optionExists("massRelax")) {
+      $BC_options.getOptionUnits("massRelax"," ",$massRelax_BC) ;
+    }
+  }
+
+  $type areaMassFlow store<real> ;
+  $type bcMassFlux store<real> ;
+  $type massFluxBoundary store<real> ;
+
+  $rule unit(areaMassFlow),constraint(UNIVERSE) {
+    $areaMassFlow = 0 ;
+  }
+
+  $rule apply(ref->areaMassFlow<-area,ci->(rho,u))[Loci::Summation],constraint(ref,ci) {
+    const real un = dot($ci->$u,$area.n) ;
+    join($ref->$areaMassFlow,$area.sada*$ci->$rho*un) ;
+  }
+
+  $rule pointwise(bcMassFlux<-areaMassFlow,boundary_area) {
+    $bcMassFlux = $areaMassFlow/$boundary_area ;
+  }
+
+  $rule pointwise(massFluxBoundary<-area,massFluxRef,ref->bcMassFlux,ref->massRelax_BC,ci->(rho,u)) {
+    const real un = dot($ci->$u,$area.n) ;
+    const real mdotflow = $ci->$rho*un ;
+    real t = $ref->$massRelax_BC ;
+    $massFluxBoundary = (1.-t)*mdotflow + t*$massFluxRef ;
+  }
+
+  void mflux_outflow_bc (vect3d &ub, real &Tb, real &Pb,
+			 const real rhoin, const real pin, const real Tin,
+			 const vect3d uin, const real gam, const real cin, 
+			 const real massflux, const real Pambient,
+			 const Loci::Area &area) {
+
+    const vect3d n = area.n ;
+
+    const real M2 = dot(uin,uin)/pow(cin,2) ;
+    real fm = 1.+0.5*(gam-1.)*M2 ;
+    const real p0 = pin*pow(fm,gam/(gam-1.)) ;
+    const real T0 = Tin*fm ;
+    const real rho0 = rhoin*pow(fm,1./(gam-1.)) ;
+    const real rhos = rho0*pow(2./(gam+1.),1./(gam-1.)) ;
+    real cstar = cin*sqrt(2.*fm/(gam+1.)) ;
+
+    const real mf_target = min(massflux,rhos*cstar) ;
+    real u = mf_target/rhoin ;
+
+    fm = 1.+0.5*(gam-1.)*pow(u/cin,2) ;
+    cstar = cin*sqrt(2.*fm/(gam+1.)) ;
+    u = min(u,cstar) ;
+    const real lambda = u/cstar ;
+    const real fl = 1.-((gam-1.)/(gam+1.))*lambda*lambda ;
+    const real p = p0*pow(fl,gam/(gam-1.)) ;
+
+    if(u<cin) {
+      ub = uin+(u-dot(uin,n))*n ;
+      Tb = T0*fl ;
+      Pb = p-Pambient ;
+    } else {
+      ub = uin ;
+      Tb = Tin ;
+      Pb = pin-Pambient ;
+    }
+  }
+
+  $rule pointwise(u_f,temperature_f,gagePressure_f<-Pambient,area,
+                  ci->(gagePressure,temperature,rho,u,soundSpeed),
+		  gamma,Rtilde,
+		  rigid_u,massFluxBoundary),
+    constraint(fixedMassOutflow_BC) {
+    const vect3d uin = $ci->$u ;
+    const real rhoin = $ci->$rho ;
+    const real pin = $ci->$gagePressure+$Pambient ;
+    const real Tin = $ci->$temperature ;
+    const real gam = $gamma ;
+    const real cin = $ci->$soundSpeed ;
+
+    mflux_outflow_bc ($u_f,$temperature_f,$gagePressure_f,
+                      rhoin,pin,Tin,uin,gam,cin,$massFluxBoundary,
+                      $Pambient,$area) ;
+
+    $u_f += $rigid_u ;
+  } 
+
+  $rule pointwise(iflux<-area,Pambient,gamma,Rtilde,us_n,
+		  temperature_f,gagePressure_f,u_f),
+    constraint(fixedMassOutflow_BC) {
+    inviscidFlux($iflux,$gagePressure_f,$temperature_f,$u_f,
+		 $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(fixedMassOutflow_BC)  {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+
+}
+
