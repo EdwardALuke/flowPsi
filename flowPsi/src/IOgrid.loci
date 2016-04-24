@@ -147,11 +147,14 @@ namespace flowPsi {
   void output_grid_topology::compute(const sequence &seq) {
     string basename = *modelName + ".topo" ;
     string filename = "output/"+basename ;
-    
-    string topolink = string("output/topo_file.") +
-      *plot_postfix + string("_") + *modelName ;
-    ofstream file(topolink.c_str(),ios::trunc) ;
-    file << basename << endl ;
+
+    if(Loci::MPI_rank==0) {    
+      string topolink = (string("output/topo_file.") +
+			 *plot_postfix + string("_") + *modelName ) ;
+      ofstream file(topolink.c_str(),ios::trunc) ;
+      file << basename << endl ;
+      file.close() ;
+    }
     //    if(*firstPlot) {
     if(Loci::MPI_rank == 0)
       cout << "writing grid topology file: " << basename << endl ;
