@@ -1321,7 +1321,11 @@ namespace lagrangianP {
                       const char* element_name, std::vector<T>& v) {
     if(Loci::MPI_rank == 0) {
       // first figure out the size that each process will receive
+#ifdef H5_USE_16_API
       hid_t dataset = H5Dopen(group_id, element_name) ;
+#else
+      hid_t dataset = H5Dopen(group_id, element_name, H5P_DEFAULT) ;
+#endif
       hid_t dataspace = H5Dget_space(dataset);
       
       typedef data_schema_traits<T> traits_type ;
