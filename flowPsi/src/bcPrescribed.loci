@@ -1,0 +1,695 @@
+//#############################################################################
+//#
+//# Copyright 2015, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "interpolate_file.h"
+#include "bcTools.h"
+#include "flowPsiIO.h"
+$include "flowPsi.lh"
+
+
+using std::vector ;
+using std::string ;
+using std::ifstream ;
+
+namespace flowPsi {
+
+  typedef vector3d<float> coord3df ;
+  extern   void read_puT_file_serial(std::string filename,
+				     store<vect3d> &loc,
+				     store<real> &p,
+				     store<real> &T,
+				     store<vect3d> &vel,
+				     store<real> &k,
+				     store<real> &mu_t
+				     ) ;
+  void read_scalar_file_serial(std::string filename,
+                               store<vect3d> &loc,
+                               store<real> &val) {
+
+    ifstream bf(filename.c_str(),ios::in) ;
+    if(bf.fail()) {
+      cerr << "open failed on '" << filename <<"'"<< endl ;
+      Loci::Abort() ;
+    }
+
+    Loci::parse::kill_white_space(bf) ;
+    int np ;
+    bf >> np ; // read in number of points on the inflow boundary.
+
+    entitySet dom = interval(0,np-1) ;
+    
+    loc.allocate(dom) ;
+    val.allocate(dom) ;
+    
+    Loci::parse::kill_white_space(bf) ;
+    
+    for(int i=0;i<np;++i) {
+      bf >> loc[i]  // read in position of sample
+	 >> val[i] ; //  for this point value
+    }
+  }
+
+  void read_massFlux_file_serial(std::string filename,
+				 store<vect3d> &loc,
+				 store<vect3d> &mf,
+				 store<real> &T0,
+				 store<real> &k,
+				 store<real> &mu_t) {
+
+    ifstream bf(filename.c_str(),ios::in) ;
+      if(bf.fail()) {
+        cerr << "open failed on '" << filename <<"'"<< endl ;
+        Loci::Abort() ;
+      }
+
+      Loci::parse::kill_white_space(bf) ;
+      Loci::parse::kill_white_space(bf) ;
+      int np ;
+      bf >> np ; // read in number of points on the inflow boundary.
+
+      entitySet dom = interval(0,np-1) ;
+
+      loc.allocate(dom) ;
+      mf.allocate(dom) ;
+      T0.allocate(dom) ;
+      k.allocate(dom) ;
+      mu_t.allocate(dom) ;
+
+      Loci::parse::kill_white_space(bf) ;
+
+      for(int i=0;i<np;++i) {
+        bf >> loc[i]  // read in position of sample
+           >> mf[i]   // mass flux vector
+           >> T0[i]   // total temperature
+           >> k[i]    // turbulent kinetic energy
+           >> mu_t[i] // turbulent eddy viscosity
+          ;
+      }
+  }
+
+  class prescribedInflow_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,farfield,fixedMass" ; }
+    std::string variablesChecked() { return "prescribed" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      string filename  ;
+      bc_options.getOption("prescribed",filename) ;
+      ifstream file(filename.c_str()) ;
+      if(file.fail()) {
+        error_message = "unable to open " + filename ;
+        return false ;
+      }
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<prescribedInflow_check> register_BC_prescribedInflow_check ;
+
+
+  class scalableprescribedInflow_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,farfield,fixedMass" ; }
+    std::string variablesChecked() { return "scalablePrescribed" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<scalableprescribedInflow_check> register_BC_scalableprescribedInflow_check ;
+
+  class frameInflow_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,farfield,fixedMass" ; }
+    std::string variablesChecked() { return "absoluteFrame" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<frameInflow_check> register_BC_frameInflow_check ;
+
+  $type componentVectorRotation_X param<tens3d> ;
+
+  $type prescribe_u store<vect3d> ;
+  $type prescribed_u_xform store<vect3d> ;
+
+
+  $rule pointwise(prescribed_u_xform{n,it}<-prescribe_u,ci->u{n,it}),constraint(area,prescribe_u) {
+    $prescribed_u_xform{n,it} = $prescribe_u ;
+  }
+// was a priority rule
+  $rule pointwise(componentRotation::prescribed_u_xform{n,it}<-prescribe_u,us{n,it},
+                  componentVectorRotation_X{n,it}),
+    constraint(prescribe_u,ci->volumeTag(X)),parametric(volumeTag(X)) {
+    
+    $prescribed_u_xform{n,it} =
+      $prescribe_u.x*$componentVectorRotation_X{n,it}.x +
+      $prescribe_u.y*$componentVectorRotation_X{n,it}.y +
+      $prescribe_u.z*$componentVectorRotation_X{n,it}.z + $us{n,it} ;
+  }
+
+  $type prescribe_T store<real> ;
+  $type prescribe_pg store<real> ;
+  
+  $rule pointwise(prescribe::temperatureRef{n,it}<-prescribe_T),
+    constraint(prescribe_T,area{n,it},ci{n,it}->u{n,it}) {
+    $temperatureRef{n,it} = $prescribe_T ;
+  }
+
+  $rule pointwise(absolute::prescribe::temperatureRef{n,it}<-prescribe_T{n,it}),
+    constraint(prescribe_T{n,it},area{n,it},ci{n,it}->u{n,it},ref{n,it}->absoluteFrame_BCoption{n,it}) {
+    $temperatureRef{n,it} = $prescribe_T{n,it} ;
+  }
+
+  $rule pointwise(prescribe::gagePressureRef{n,it}<-prescribe_pg),
+    constraint(prescribe_pg,area{n,it},ci{n,it}->u{n,it}) {
+    $gagePressureRef{n,it} = $prescribe_pg ;
+  }
+
+  $rule pointwise(absolute::prescribe::gagePressureRef{n,it}<-prescribe_pg{n,it}),
+    constraint(prescribe_pg{n,it},area{n,it},ci{n,it}->u{n,it},ref{n,it}->absoluteFrame_BCoption{n,it}) {
+    $gagePressureRef{n,it} = $prescribe_pg{n,it} ;
+  }
+
+  $rule pointwise(prescribe::uRef<-prescribed_u_xform),constraint(prescribed_u_xform,area,ci->u) {
+    $uRef = $prescribed_u_xform ;
+  }
+
+  $rule pointwise(absolute::prescribe::uRef<-prescribe_u),
+    constraint(prescribe_u,ref->absoluteFrame_BCoption) {
+    $uRef = $prescribe_u ;
+  }
+                  
+  class get_prescribe_bc : public pointwise_rule {
+    const_store<vect3d> facecenter ;
+    const_store<std::string> prescribed_BC ;
+    const_Map ref ;
+    const_param<real> Pambient ;
+    store<real> prescribe_pg,prescribe_T ;
+    store<vect3d>  prescribe_u ;
+    
+    //    storeVec<real> prescribe_bc ;
+    store<vec<2> > prescribe_turb_ref ;
+  public:
+    get_prescribe_bc() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  get_prescribe_bc::get_prescribe_bc() {
+    name_store("Pambient",Pambient) ;
+    name_store("prescribed_BC",prescribed_BC) ;
+    name_store("ref",ref) ;
+    name_store("facecenter",facecenter) ;
+    name_store("prescribe_pg",prescribe_pg) ;
+    name_store("prescribe_T",prescribe_T) ;
+    name_store("prescribe_u",prescribe_u) ;
+    name_store("prescribe_turb_ref",prescribe_turb_ref) ;
+    input("facecenter") ;
+    input("ref->prescribed_BC") ;
+    constraint("ref->prescribed_BCoption") ;
+    output("prescribe_pg,prescribe_T,prescribe_u") ;
+    output("prescribe_turb_ref") ;
+    input("Pambient") ;
+    disable_threading() ;
+  }
+
+  $type prescribe_turb_ref store<vec<2> > ;
+  $type prescribe_turbulence store<vec<2> > ;
+
+  $rule pointwise(absolute::prescribe_turb_ref<-prescribe_turbulence),constraint(ref->absolute_frame,prescribe_turbulence) {
+    $prescribe_turb_ref = $prescribe_turbulence ;
+  }
+  $rule pointwise(prescribe_turb_ref{n,it}<-prescribe_turbulence),constraint(ci{n,it}->u{n,it},prescribe_turbulence) {
+    $prescribe_turb_ref{n,it} = $prescribe_turbulence ;
+  }
+  
+  void get_prescribe_bc::compute(const sequence &seq) {
+    if(Loci::GLOBAL_OR((seq != EMPTY))) {
+
+      std::map<int, Loci::entitySet> bcmap ;
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        bcmap[ref[*si]] += *si ;
+      }
+
+      bool error_found = false ;
+      std::map<int,Loci::entitySet>::iterator bci ;
+      for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
+        store<vect3d> loc,vel ;
+        store<real> p,T,k,mu_t ;
+        
+        string filename = prescribed_BC[bci->first] ;
+        Loci::debugout << "reading " << filename << endl ;
+        read_puT_file_serial(filename,loc,p,T,vel,k,mu_t) ;
+        
+
+        int npnts = loc.domain().Max()+1 ;
+        vector<coord3df > pnts(npnts) ;
+        vector<int> pnt_id (npnts) ;
+        for(int i=0;i<npnts;++i) {
+          pnts[i][0] = loc[i].x ;
+          pnts[i][1] = loc[i].y ;
+          pnts[i][2] = loc[i].z ;
+          pnt_id[i] = i ;
+        }
+
+        Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
+        
+        
+        double dist = 1e30 ;
+        sequence sgroup = sequence(bci->second) ; 
+        for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
+          vect3d fcenter = facecenter[*si] ;
+          vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
+          vector<double> w ;
+          stencil_weights(w,neighbors,loc,fcenter) ;
+
+          // Compute Interpolated values
+          vect3d ur(0,0,0) ;
+          real pr = 0, Tr = 0 ;
+          real kr = 0 ;
+          real mu_tr = 0 ;
+          
+          for(unsigned int i=0;i<neighbors.size();++i) {
+            int pt = neighbors[i] ;
+            
+            ur += w[i]*vel[pt] ;
+            pr += w[i]*p[pt] ;
+            Tr += w[i]*T[pt] ;
+            kr += w[i]*k[pt] ;
+            mu_tr += w[i]*mu_t[pt] ;
+              
+          }
+
+          prescribe_pg[*si] = pr-*Pambient ;
+          prescribe_T[*si] = Tr ;
+          prescribe_u[*si] = ur ;
+          
+          prescribe_turb_ref[*si][0] = kr ;
+          prescribe_turb_ref[*si][1] = mu_tr ;
+        } 
+      }
+      if(error_found)
+        Loci::Abort() ;
+    }
+  }
+
+  register_rule<get_prescribe_bc> register_get_prescribe_ref ;  
+  
+// prescribed mass flux boundary condition
+  class prescribe_massFlux_faces : public pointwise_rule {
+    const_store<Loci::Area> area ;
+    const_store<real> prescribe_T0 ;
+    const_store<vect3d>  prescribe_mf ;
+    store<real> T0Ref ;
+    store<real> massFluxRef ;
+    store<vect3d>  flow_direction ;
+  public:
+    prescribe_massFlux_faces() {
+      name_store("area",area) ;
+      name_store("prescribe_T0",prescribe_T0) ;
+      name_store("prescribe_mf",prescribe_mf) ;
+      name_store("mf::prescribe::T0Ref",T0Ref) ;
+      name_store("mf::prescribe::massFluxRef",massFluxRef) ;
+      name_store("mf::prescribe::flow_direction",flow_direction) ;
+      input("area,prescribe_T0,prescribe_mf") ;
+      output("mf::prescribe::T0Ref") ;
+      output("mf::prescribe::massFluxRef") ;
+      output("mf::prescribe::flow_direction") ;
+      constraint("fixedMass_BC,ref->prescribed_BCoption") ;
+    }
+    void calculate(Entity e) {
+      T0Ref[e] = prescribe_T0[e] ;
+      const real mfmag = norm(prescribe_mf[e]) ;
+      massFluxRef[e] = mfmag ;
+      if(mfmag>0) {
+        flow_direction[e] = prescribe_mf[e]/mfmag ;
+      } else {
+        flow_direction[e] = -1.*area[e].n ;
+      }
+    }
+    void compute(const sequence &seq) {
+      if(seq.size() != 0) {
+        do_loop(seq,this) ;
+      }
+    }
+  } ;
+  
+  register_rule<prescribe_massFlux_faces> register_prescribe_massFlux_faces ;
+
+
+  class get_prescribed_mf : public pointwise_rule {
+    const_store<vect3d> facecenter ;
+    const_store<std::string> prescribed_BC ;
+    const_Map ref ;
+    store<real> prescribe_T0 ;
+    store<vect3d> prescribe_mf ;
+    store<vec<2> > prescribe_turb_ref ;
+  public:
+    get_prescribed_mf() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  get_prescribed_mf::get_prescribed_mf() {
+    name_store("prescribed_BC",prescribed_BC) ;
+    name_store("ref",ref) ;
+    name_store("facecenter",facecenter) ;
+    name_store("mf::prescribe_mf",prescribe_mf) ;
+    name_store("mf::prescribe_T0",prescribe_T0) ;
+    name_store("mf::prescribe_turb_ref",prescribe_turb_ref) ;
+    input("facecenter") ;
+    input("ref->prescribed_BC") ;
+    constraint("fixedMass_BC,ref->prescribed_BCoption") ;
+    output("mf::prescribe_turb_ref") ;
+    output("mf::prescribe_mf,mf::prescribe_T0") ;
+    disable_threading() ;
+  }
+
+  
+  
+  void get_prescribed_mf::compute(const sequence &seq) {
+    if(Loci::GLOBAL_OR((seq != EMPTY))) {
+
+      std::map<int, Loci::entitySet> bcmap ;
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        bcmap[ref[*si]] += *si ;
+      }
+
+      bool error_found = false ;
+      std::map<int,Loci::entitySet>::iterator bci ;
+      for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
+
+
+
+        store<vect3d> loc,mf ;
+        store<real> T0,k,mu_t ;
+        
+        string filename = prescribed_BC[bci->first] ;
+        Loci::debugout << "reading " << filename << endl ;
+        read_massFlux_file_serial(filename,loc,mf,T0,k,mu_t) ;
+        
+
+        int npnts = loc.domain().Max()+1 ;
+        vector<coord3df > pnts(npnts) ;
+        vector<int> pnt_id (npnts) ;
+        for(int i=0;i<npnts;++i) {
+          pnts[i][0] = loc[i].x ;
+          pnts[i][1] = loc[i].y ;
+          pnts[i][2] = loc[i].z ;
+          pnt_id[i] = i ;
+        }
+
+        Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
+        
+        double dist = 1e30;
+        sequence sgroup = sequence(bci->second) ; 
+        for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
+          vect3d fcenter = facecenter[*si] ;
+          vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
+          vector<double> w ;
+          stencil_weights(w,neighbors,loc,fcenter) ;
+
+          // Compute Interpolated values
+          vect3d mfr(0,0,0) ;
+          real T0r = 0 ;
+          real kr = 0 ;
+          real mu_tr = 0 ;
+          
+          for(unsigned int i=0;i<neighbors.size();++i) {
+            int pt = neighbors[i] ;
+            
+            mfr += w[i]*mf[pt] ;
+            T0r += w[i]*T0[pt] ;
+            kr += w[i]*k[pt] ;
+            mu_tr += w[i]*mu_t[pt] ;
+              
+
+          }
+
+          prescribe_mf[*si] = mfr ;
+          prescribe_T0[*si] = T0r ;
+          
+          prescribe_turb_ref[*si][0] = kr ;
+          prescribe_turb_ref[*si][1] = mu_tr ;
+        } 
+      }
+      if(error_found)
+        Loci::Abort() ;
+    }
+  }
+
+  register_rule<get_prescribed_mf> register_get_prescribed_mf ;  
+
+  class get_wall_prescribe_bc : public pointwise_rule {
+    const_store<vect3d> facecenter ;
+    const_store<std::string> prescribed_BC ;
+    const_Map ref ;
+    store<real> Twall  ;
+  public:
+    get_wall_prescribe_bc() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  get_wall_prescribe_bc::get_wall_prescribe_bc() {
+    name_store("prescribed_BC",prescribed_BC) ;
+    name_store("ref",ref) ;
+    name_store("facecenter",facecenter) ;
+    name_store("file::Twall_prescribed",Twall) ;
+    input("facecenter") ;
+    input("ref->prescribed_BC") ;
+    output("file::Twall_prescribed") ;
+    constraint("AllViscousBCs,ref->prescribed_BCoption") ;
+    disable_threading() ;
+  }
+
+  
+  
+  void get_wall_prescribe_bc::compute(const sequence &seq) {
+    if(Loci::GLOBAL_OR((seq != EMPTY))) {
+
+      std::map<int, Loci::entitySet> bcmap ;
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        bcmap[ref[*si]] += *si ;
+      }
+
+      std::map<int,Loci::entitySet>::iterator bci ;
+      for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
+
+        store<real> T ;
+        store<vect3d> loc ;
+        
+        string filename = prescribed_BC[bci->first] ;
+        Loci::debugout << "reading " << filename << endl ;
+        read_scalar_file_serial(filename,loc,T) ;
+        
+        int npnts = loc.domain().Max()+1 ;
+        vector<coord3df > pnts(npnts) ;
+        vector<int> pnt_id (npnts) ;
+        for(int i=0;i<npnts;++i) {
+          pnts[i][0] = loc[i].x ;
+          pnts[i][1] = loc[i].y ;
+          pnts[i][2] = loc[i].z ;
+          pnt_id[i] = i ;
+        }
+
+        Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
+        sequence sgroup = sequence(bci->second) ; 
+        double dist = 1e30 ;
+        for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
+          vect3d fcenter = facecenter[*si] ;
+          vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
+          vector<double> w ;
+          stencil_weights(w,neighbors,loc,fcenter) ;
+
+          // Compute Interpolated values
+          real Tr = 0 ;
+
+          for(unsigned int i=0;i<neighbors.size();++i) {
+            int pt = neighbors[i] ;
+            
+            Tr += w[i]*T[pt] ;
+          }
+
+          Twall[*si] = Tr ;
+        } 
+        
+      }
+    }
+  }
+
+  register_rule<get_wall_prescribe_bc> register_get_wall_prescribe_ref ;
+
+  $type scalablePrescribedFile param<std::string> ;
+
+  $rule default(scalablePrescribedFile) {
+    $scalablePrescribedFile="BC_input.bin" ;
+  }
+  
+  class get_wall_prescribe_q_bc : public pointwise_rule {
+    const_store<vect3d> facecenter ;
+    const_store<std::string> prescribed_qwall_BC ;
+    const_Map ref ;
+    store<real> qwall  ;
+  public:
+    get_wall_prescribe_q_bc() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  get_wall_prescribe_q_bc::get_wall_prescribe_q_bc() {
+    name_store("prescribed_qwall_BC",prescribed_qwall_BC) ;
+    name_store("ref",ref) ;
+    name_store("facecenter",facecenter) ;
+    name_store("file::qwall_prescribed",qwall) ;
+    input("facecenter") ;
+    input("ref->prescribed_qwall_BC") ;
+    output("file::qwall_prescribed") ;
+    constraint("AllViscousBCs,ref->prescribed_qwall_BCoption") ;
+    disable_threading() ;
+  }
+
+  
+  
+  void get_wall_prescribe_q_bc::compute(const sequence &seq) {
+    if(Loci::GLOBAL_OR((seq != EMPTY))) {
+
+      std::map<int, Loci::entitySet> bcmap ;
+      for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
+        bcmap[ref[*si]] += *si ;
+      }
+
+      std::map<int,Loci::entitySet>::iterator bci ;
+      for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
+
+        store<real> qdot ;
+        store<vect3d> loc ;
+        
+        string filename = prescribed_qwall_BC[bci->first] ;
+        Loci::debugout << "reading " << filename << endl ;
+        read_scalar_file_serial(filename,loc,qdot) ;
+        
+        int npnts = loc.domain().Max()+1 ;
+        vector<coord3df > pnts(npnts) ;
+        vector<int> pnt_id (npnts) ;
+        for(int i=0;i<npnts;++i) {
+          pnts[i][0] = loc[i].x ;
+          pnts[i][1] = loc[i].y ;
+          pnts[i][2] = loc[i].z ;
+          pnt_id[i] = i ;
+        }
+
+        Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
+        sequence sgroup = sequence(bci->second) ; 
+
+        double dist = 1e30 ;
+        for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
+          vect3d fcenter = facecenter[*si] ;
+          vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
+          vector<double> w ;
+          stencil_weights(w,neighbors,loc,fcenter) ;
+
+          // Compute Interpolated values
+          real qr = 0 ;
+
+          for(unsigned int i=0;i<neighbors.size();++i) {
+            int pt = neighbors[i] ;
+            
+            qr += w[i]*qdot[pt] ;
+          }
+
+          qwall[*si] = qr ;
+        } 
+        
+      }
+    }
+  }
+
+  register_rule<get_wall_prescribe_q_bc> register_get_wall_prescribe_q_ref ;
+
+  class scalable_prescribe_bc : public pointwise_rule {
+    const_storeVec<real> data ;
+    store<real> prescribe_pg,prescribe_T ;
+    store<vect3d>  prescribe_u ;
+    store<vec<2> > prescribe_turb_ref ;
+  public:
+    scalable_prescribe_bc() ;
+    void calculate(Entity cc) {
+            int base_size = 7 ;
+      real Tr = data[cc][0] ;
+      real pr = data[cc][1] ;
+      vect3d ur(data[cc][2],data[cc][3],data[cc][4]) ;
+      prescribe_pg[cc] = pr ;
+      prescribe_T[cc] = Tr ;
+      prescribe_u[cc] = ur ;
+      prescribe_turb_ref[cc][0] = data[cc][5] ;
+      prescribe_turb_ref[cc][1] = data[cc][6] ;
+    }
+
+        
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  scalable_prescribe_bc::scalable_prescribe_bc() {
+    name_store("prescribe_pg",prescribe_pg) ;
+    name_store("prescribe_T",prescribe_T) ;
+    name_store("prescribe_u",prescribe_u) ;
+    name_store("prescribe_turb_ref",prescribe_turb_ref) ;
+    name_store("interpolateData(interpolateFile(scalablePrescribedFile),facecenter)",data) ;
+    input("interpolateData(interpolateFile(scalablePrescribedFile),facecenter)");
+    constraint("ref->scalablePrescribed_BCoption") ;
+    output("prescribe_pg,prescribe_T,prescribe_u") ;
+    output("prescribe_turb_ref") ;
+  }
+
+  
+  void scalable_prescribe_bc::compute(const sequence &seq) {
+    do_loop(seq,this) ;
+  }
+
+  register_rule<scalable_prescribe_bc> register_scalable_prescribe_ref ;  
+
+}
+        
+void fprescribe() {
+}
+ 
