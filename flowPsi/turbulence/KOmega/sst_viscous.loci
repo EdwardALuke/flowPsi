@@ -105,23 +105,24 @@ namespace flowPsi {
     }
   } 
 
+  $type prescribe_turb_ref store<vec<2> > ;
 
-  // $rule pointwise(prescribe::k_f,prescribe::w_f<-area,
-  // 		  u_f,us_n,
-  //                 ci->(k,w),prescribe_turb_ref,rho_f),
-  //   constraint(SST_BSL_KW,area,ci->u,prescribe_turb_ref) {
-  //   const vect3d n = $area.n ;
+  $rule pointwise(prescribe::k_f,prescribe::w_f<-area,
+		  u_f,us_n,
+		  ci->(k,w),prescribe_turb_ref,rho_f),
+    constraint(SST_BSL_KW,area,ci->u,prescribe_turb_ref) {
+    const vect3d n = $area.n ;
     
-  //   $k_f = $prescribe_turb_ref[0] ;
-  //   real muut = $prescribe_turb_ref[1] ;
+    $k_f = $prescribe_turb_ref[0] ;
+    real muut = $prescribe_turb_ref[1] ;
     
-  //   $w_f = max($k_f*$rho_f/(muut+1e-10),1e-10) ;
+    $w_f = max($k_f*$rho_f/(muut+1e-10),1e-10) ;
     
-  //   if(dot($u_f,n)+$us_n >= -0.0){ 
-  //     $k_f = $ci->$k ;
-  //     $w_f = $ci->$w ;
-  //   }
-  // } 
+    if(dot($u_f,n)+$us_n >= -0.0){ 
+      $k_f = $ci->$k ;
+      $w_f = $ci->$w ;
+    }
+  } 
 
   $rule pointwise(lam_tau_w<-gradv3d_f(u),muu_f,area),
     constraint(viscousWall_BC){
