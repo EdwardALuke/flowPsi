@@ -61,7 +61,7 @@ LOCI_FILES = $(wildcard *.loci)
 LOCI_LPP_FILES = $(LOCI_FILES:.loci=.cc)
 
 distclean: 
-	rm $(DEPEND_FILES)
+	rm -fr $(DEPEND_FILES)
 	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(JUNK) $(LOCI_LPP_FILES)
 
 DEPEND_FILES=$(subst .o,.d,$(OBJS))
