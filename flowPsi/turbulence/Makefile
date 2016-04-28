@@ -1,19 +1,21 @@
 all: SA KOmega
 
 SA: FRC
-	cd SA; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" all; cd ..     
-	cd SA; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" install; cd ..     
+	$(MAKE) -C SA FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+	$(MAKE) -C FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 KOmega: FRC
-	cd KOmega; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" all; cd ..     
-	cd KOmega; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" install; cd ..     
+	$(MAKE) -C KOmega FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+	$(MAKE) -C KOmega FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 clean: FRC
-	cd SA; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
-	cd KOmega; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" clean; cd ..
+	$(MAKE) -C SA -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
+	$(MAKE) -C KOmega -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 
 distclean: FRC
-	cd SA; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
-	cd KOmega; $(MAKE) FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean; cd ..
+	$(MAKE) -C SA -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
+	$(MAKE) -C KOmega -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 
 FRC: 
+
+.PHONY: all SA KOmega clean distclean FRC
