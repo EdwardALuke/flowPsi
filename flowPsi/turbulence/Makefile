@@ -2,7 +2,7 @@ all: SA KOmega
 
 SA: FRC
 	$(MAKE) -C SA FLOWPSI_BASE="$(FLOWPSI_BASE)" all
-	$(MAKE) -C FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C SA FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 KOmega: FRC
 	$(MAKE) -C KOmega FLOWPSI_BASE="$(FLOWPSI_BASE)" all
