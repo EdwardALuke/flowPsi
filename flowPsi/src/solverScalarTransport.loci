@@ -129,7 +129,6 @@ namespace flowPsi {
   $type X_f store<real> ;
   $type X_bc store<real> ;
   $type X_ic store<real> ;
-  $type X_ico store<real> ;
   $type X_n store<real> ;
   
   $type scalarTransportName_X param<std::string> ;
@@ -154,15 +153,15 @@ namespace flowPsi {
   }
 
   //*************************************************************************
-  class X_ic_from_file : public pointwise_rule {
+  class X_ic_from_fileP : public pointwise_rule {
     const_param<std::string> icfile,modelName,scalarTransportName_X ;
     store<real> X_ic ;
   public:
-    X_ic_from_file() ;
+    X_ic_from_fileP() ;
     virtual void compute(const sequence &seq) ;
   } ;
 
-  X_ic_from_file::X_ic_from_file() {
+  X_ic_from_fileP::X_ic_from_fileP() {
     name_store("icfile",icfile) ;
     name_store("modelName",modelName) ;
     name_store("scalarTransportName_X",scalarTransportName_X) ;
@@ -175,7 +174,7 @@ namespace flowPsi {
     disable_threading() ;
   }
 
-  void X_ic_from_file::compute(const sequence &seq) {
+  void X_ic_from_fileP::compute(const sequence &seq) {
     if(Loci::GLOBAL_AND(seq==EMPTY))
       return ;
 
@@ -211,69 +210,7 @@ namespace flowPsi {
       } ENDFORALL ;
     }
   }
-  register_rule<X_ic_from_file> register_X_ic_from_file ;
-  class X_ico_from_file : public pointwise_rule {
-    const_param<std::string> icfile,modelName,scalarTransportName_X ;
-    const_store<real> X_ic ;
-    store<real> X_ico ;
-  public:
-    X_ico_from_file() ;
-    virtual void compute(const sequence &seq) ;
-  } ;
-
-  X_ico_from_file::X_ico_from_file() {
-    name_store("icfile",icfile) ;
-    name_store("modelName",modelName) ;
-    name_store("scalarTransportName_X",scalarTransportName_X) ;
-    name_store("priority::ic_file::X_ico",X_ico) ;
-    name_store("X_ic",X_ic) ;
-    input("X_ic") ;
-    input("icfile,scalarTransportName_X") ;
-    input("modelName") ;
-    constraint("geom_cells,icfile,C") ;
-    output("priority::ic_file::X_ico") ;
-    set_parametric_variable("scalarTransportP(X,C)") ;
-    disable_threading() ;
-  }
-
-  void X_ico_from_file::compute(const sequence &seq) {
-    if(Loci::GLOBAL_AND(seq==EMPTY))
-      return ;
-
-    string filename = *icfile+ *scalarTransportName_X+ string("Prev_") + *modelName ;
-
-    int file_exists = 1 ;
-    if(Loci::MPI_rank == 0) {
-      struct stat buf ;
-      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
-        file_exists = 0 ;
-    }
-    MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
-    if(file_exists==1) {
-      if(Loci::MPI_rank == 0)
-	cout << "reading " << *scalarTransportName_X << " initial conditions from " << filename << endl ;
-      
-      
-      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
-					 H5F_ACC_RDONLY, H5P_DEFAULT);
-      entitySet read_set = entitySet(seq) ;
-      Loci::readContainer(file_id,*scalarTransportName_X,X_ico.Rep(),read_set) ;
-      
-      Loci::hdf5CloseFile(file_id) ;
-    } else {
-      entitySet read_set = entitySet(seq) ;
-      FORALL(read_set,ii) {
-	X_ico[ii] = X_ic[ii] ;
-      } ENDFORALL ;
-    }
-  }
-
-  register_rule<X_ico_from_file> register_X_ico_from_file ;
-
-  $rule pointwise(X_ico<-X_ic),constraint(geom_cells,X_ic,C),
-  parametric(scalarTransportP(X,C)) {
-    $X_ico = $X_ic ;
-  }
+  register_rule<X_ic_from_fileP> register_X_ic_from_fileP ;
     
   $rule pointwise(X{n=0}<-X_ic),constraint(geom_cells,C),
   parametric(scalarTransportP(X,C)) {
@@ -661,7 +598,8 @@ namespace flowPsi {
 
   // add in GCL term
   $rule apply(X_src<-gcl_sum,X,rho)[Loci::Summation],
-  constraint(X,C,geom_cells) {
+    constraint(X,C,geom_cells),
+    parametric(scalarTransportP(X,C)) {
     join($X_src,-1.*$gcl_sum*$X*$rho) ;
   }
 
@@ -713,6 +651,523 @@ namespace flowPsi {
               X_nu_f,area)[Loci::Summation],
     constraint(X_nu_f,ci->vol,C),
     parametric(scalarTransportP(X,C)) {  
+    const real C = $X_nu_f*$area.sada ;
+    const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
+
+    join($ci->$X_srcJ, -C/d) ;
+  }
+
+//-----------++ non positive scalar transport
+  $rule singleton(scalarTransportName_X),constraint(UNIVERSE),
+    parametric(scalarTransport(X,C)),option(disable_threading) {
+    const Loci::rule_impl::info &info = get_info() ;
+    Loci::variableSet outset = info.output_vars() ;
+    Loci::variable out=*outset.begin() ;
+    const Loci::variable::info vinfo = out.get_info() ;
+    string name ;
+    // Scan forward for first underscore
+    int sz = vinfo.name.size() ;
+    int i=0 ;
+    while(i < sz && vinfo.name[i] != '_')
+      ++i ;
+    i++ ;
+    while(i<sz) {
+      name += vinfo.name[i] ;
+      i++ ;
+    }
+    $scalarTransportName_X = name ;
+  }
+
+  //*************************************************************************
+  class X_ic_from_file : public pointwise_rule {
+    const_param<std::string> icfile,modelName,scalarTransportName_X ;
+    store<real> X_ic ;
+  public:
+    X_ic_from_file() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  X_ic_from_file::X_ic_from_file() {
+    name_store("icfile",icfile) ;
+    name_store("modelName",modelName) ;
+    name_store("scalarTransportName_X",scalarTransportName_X) ;
+    name_store("priority::ic_file::X_ic",X_ic) ;
+    input("icfile,scalarTransportName_X") ;
+    input("modelName") ;
+    constraint("geom_cells,icfile,C") ;
+    output("priority::ic_file::X_ic") ;
+    set_parametric_variable("scalarTransport(X,C)") ;
+    disable_threading() ;
+  }
+
+  void X_ic_from_file::compute(const sequence &seq) {
+    if(Loci::GLOBAL_AND(seq==EMPTY))
+      return ;
+
+    string filename = *icfile+ *scalarTransportName_X+ string("_") + *modelName ;
+
+    if(Loci::MPI_rank == 0)
+      cout << "reading " << *scalarTransportName_X 
+	   << " initial conditions from " << filename << endl ;
+    struct stat buf ;
+    int has_file = 0 ;
+    if(Loci::MPI_rank == 0) {
+      if(stat(filename.c_str(),&buf)==0) {
+	if(buf.st_size != 0 && S_ISREG(buf.st_mode))
+	  has_file = 1 ;
+	else
+	  has_file = 2 ;
+      }
+    }
+    MPI_Bcast(&has_file,1,MPI_INT,0,MPI_COMM_WORLD) ;
+
+    if(has_file == 1) {
+      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+					 H5F_ACC_RDONLY, H5P_DEFAULT);
+      entitySet read_set = entitySet(seq) ;
+      Loci::readContainer(file_id,*scalarTransportName_X,X_ic.Rep(),read_set) ;
+      
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      cerr << "Unable to open restart file '" << filename << "'" << endl ;
+      entitySet dom = entitySet(seq) ;
+      FORALL(dom,ii) {
+	X_ic[ii] = 1e-19; 
+      } ENDFORALL ;
+    }
+  }
+  register_rule<X_ic_from_file> register_X_ic_from_file ;
+    
+  $rule pointwise(X{n=0}<-X_ic),constraint(geom_cells,C),
+  parametric(scalarTransport(X,C)) {
+    $X{n=0} = $X_ic ;
+  }
+  
+  $rule pointwise(OUTPUT{n}<-X{n},ncycle{n},stime{n},restart_modulo{n},
+                  restart_directory{n},restart_postfix{n},modelName{n},
+		  scalarTransportName_X),
+    conditional(do_restart{n}),
+    constraint(geom_cells{n},C{n}), 
+    parametric(scalarTransport(X,C)),  prelude {
+    if(*$ncycle{n} == 0)
+      return ;
+    
+    string filename = *$restart_directory{n} + *($scalarTransportName_X)+ string("_") + *$modelName{n} ;
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,*$scalarTransportName_X,$X{n}.Rep()) ;
+   Loci::hdf5CloseFile(file_id) ;
+
+   if(Loci::MPI_rank == 0)
+     cout << *$scalarTransportName_X << " ncyc = " << *$ncycle{n} << endl ;
+  } ;
+
+  $rule pointwise(X_n{n,it=0}<-X{n}),constraint(geom_cells{n},C),
+    parametric(scalarTransport(X,C)) {
+    $X_n{n,it=0} = $X{n} ;
+  }
+  $rule pointwise(X{n,it}<-X_n{n,it}),constraint(X_n{n,it},C),
+    inplace(X{n,it}|X_n{n,it}),
+    parametric(scalarTransport(X,C)), prelude {} ;
+
+  $rule pointwise(X{n+1}<-X_n{n,it}),
+     conditional(newtonFinished{n,it}),
+    constraint(geom_cells{n,it},timeStepSteadyState,C),
+     inplace(X{n+1}|X_n{n,it}),
+     parametric(scalarTransport(X,C)), prelude {} ;
+
+  $type plot param<int> ;
+
+  $rule pointwise(X{n,plot}<-X{n},plot{n,plot}),
+    constraint(geom_cells,X{n}),
+    parametric(scalarTransport(X,C)) {
+    $X{n,plot} = $X{n} ;
+  }
+
+  $rule pointwise(X{n+1}<-X_n{n,it},X{n}),
+    conditional(newtonFinished{n,it}),
+    constraint(geom_cells{n,it},timeStepAccurate{n,it},C),
+    inplace(X{n+1}|X_n{n,it}),
+    parametric(scalarTransport(X,C)) {
+    real Xstar = $X_n{n,it} ;
+    real dXstar = (Xstar-$X{n})/Xstar ;
+    $X{n+1} = Xstar*(1. + dXstar) ;
+  }
+  
+  $type X_dq store<real> ;
+  $type X_next store<real> ;
+
+  $type X_np1 store<real> ;
+  $rule pointwise(X_np1{n,it}<-X{n,it},X{n}),constraint(timeStepAccurate{n,it},X{n},geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    real Xstar = $X{n,it} ;
+    real dXstar = (Xstar-$X{n})/Xstar ;
+    $X_np1{n,it} = Xstar*(1. + dXstar) ;
+  }
+
+  $rule pointwise(X_next<-urelax,X_dq,X),
+    constraint(X,X_dq,C),
+    parametric(scalarTransport(X,C)) {
+    $X_next = $X + $X_dq ;
+  }
+  
+  $rule pointwise(X_next<-X),
+    constraint(X,X_dq,time_frozen,C), 
+    parametric(scalarTransport(X,C)) {
+    $X_next = $X ;
+  }
+
+  $rule pointwise(X_n{n,it+1}<-X_next{n,it},X_dq{n,it}),
+    constraint(geom_cells{n,it},C{n,it}),
+    parametric(scalarTransport(X,C)) {
+      $X_n{n,it+1} = $X_next{n,it} ;
+  }
+
+  $rule pointwise(cr->X<-pmap->cl->X),constraint(pmap->cl->X,C),
+    parametric(scalarTransport(X,C)) {
+    $cr->$X = $pmap->$cl->$X ;
+  }
+
+  // hack to make sure things work if all boundary conditions periodic
+  $rule pointwise(X_f),constraint(ci->X,geom_cells,C),
+    parametric(scalarTransport(X,C)) { }
+
+  // Default boundary definitions for reflecting walls and interfaces
+  $rule pointwise(impermeable::X_f<-ci->X),
+    constraint(C,symmetry_BC),
+    parametric(scalarTransport(X,C)) {
+    $X_f = $ci->$X ;
+  }
+  $rule pointwise(impermeable::X_f<-ci->X),
+    constraint(C,reflecting_BC),
+    parametric(scalarTransport(X,C)) {
+    $X_f = $ci->$X ;
+  }
+  $rule pointwise(impermeable::X_f<-ci->X),
+    constraint(C,impermeable_BC),
+    parametric(scalarTransport(X,C)) {
+    $X_f = $ci->$X ;
+  }
+
+  $type interpolateFace(X) store<real> ;
+  $rule pointwise(interface::X_f<-interpolateFace(X)),
+    constraint(C,interface_BC),
+    parametric(scalarTransport(X,C)) {
+    $X_f = $interpolateFace(X) ;
+  }
+  $type interpolateTurboScalar(X) store<real> ;
+  $rule pointwise(interface::X_f<-interpolateTurboScalar(X)),
+    constraint(C,turboInterface_BC),
+    parametric(scalarTransport(X,C)) {
+    $X_f = $interpolateTurboScalar(X) ;
+  }
+
+  $rule pointwise(X_f<-ci->X,area,u_f,us_n,X_bc),constraint(ci->X,C),
+	parametric(scalarTransport(X,C)) {
+    real uit = dot($area.n,$u_f)-$us_n ;
+    if(uit >= -0.0) 
+      $X_f = $ci->$X ;
+    else
+      $X_f = $X_bc ;
+  }
+    
+  $type X_src store<real> ;
+  $type X_rhs store<real> ;
+  $rule unit(X_src),constraint(geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    $X_src = 0.0 ;
+  }
+   
+  $type X_fjm store<real> ;
+  $type X_fjp store<real> ;
+  $type X_srcJ store<real> ;
+  $type X_D store<real> ;
+  $type X_B store<real> ;
+  $type X_L store<real> ;
+  $type X_U store<real> ;
+
+  $rule unit(X_fjm),constraint((cr,cl)->vol,C),
+    parametric(scalarTransport(X,C)) {
+    $X_fjm = 0.0 ;
+  }
+  $rule unit(X_fjp),constraint((cr,cl)->vol,C),
+    parametric(scalarTransport(X,C)) {
+    $X_fjp = 0.0 ;
+  }
+  $rule unit(X_srcJ),constraint(geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    $X_srcJ = 0.0 ;
+  }
+  $type inviscid_flux(X) store<real> ;
+  $rule apply(cl->X_src<-inviscid_flux(X))[Loci::Summation],
+    constraint(cl->(geom_cells,X),C),
+    parametric(scalarTransport(X,C)) {
+    $cl->$X_src -= $inviscid_flux(X) ;
+  }
+  $rule apply(cr->X_src<-inviscid_flux(X))[Loci::Summation],
+    constraint(cr->(geom_cells,X),C),
+    parametric(scalarTransport(X,C)) {
+    $cr->$X_src += $inviscid_flux(X) ;
+  }
+  // Compute continuity term (sans time derivative)
+  $type X_rhodot store<real> ;
+
+  // Add stabilizing term that comes from substracting the continuity eqn.
+  $rule apply(X_src<-X_rhodot,X)[Loci::Summation],
+    constraint(geom_cells,X,timeStepSteadyState,C),
+    parametric(scalarTransport(X,C)) {
+    $X_src -= $X*$X_rhodot ;
+  }
+  $rule apply(X_src<-X_rhodot,X_np1)[Loci::Summation],
+    constraint(geom_cells,X,implicit_scheme,timeStepAccurate,C),
+    parametric(scalarTransport(X,C)) {
+    $X_src -= $X_np1*$X_rhodot ;
+   }
+
+  // Jacobian of stabilization term
+  $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
+    constraint(geom_cells,X,timeStepSteadyState,C),
+    parametric(scalarTransport(X,C)) {
+    double factor = -$X_rhodot ; 
+    $X_srcJ += factor ;
+  }  
+
+  $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
+     constraint(geom_cells,timeStepAccurate,X,C),
+     parametric(scalarTransport(X,C)) {
+     double factor = -2.*$X_rhodot ; 
+     $X_srcJ += factor ;
+  }
+
+  // Jacobians of convective transport
+  $rule apply(X_fjp<-X_mdot_f)[Loci::Summation],
+    constraint((cl,cr)->vol,C),
+    parametric(scalarTransport(X,C)) {
+    real jdiff = max($X_mdot_f,0.0) ;
+    $X_fjp += jdiff;
+  }    
+  $rule apply(X_fjm<-X_mdot_f)[Loci::Summation],
+    constraint((cl,cr)->vol,C),
+    parametric(scalarTransport(X,C)) {
+    real jdiff = min($X_mdot_f,0.0) ;
+    $X_fjm += jdiff;
+  }    
+  
+  $rule apply(ci->X_srcJ<-X_mdot_f)[Loci::Summation],
+    constraint(ci->X,C),
+    parametric(scalarTransport(X,C)) {
+    real jdiff = max($X_mdot_f,0.0) ;
+    $ci->$X_srcJ -= jdiff ;
+  }
+
+  $type rhon store<real> ;
+
+  $rule pointwise(X_rhs{n,it}<-vol{n,it},dtau{n,it},X_src{n,it},
+                  X{n},X{n,it},rhon{n,it}),
+    constraint(X_src{n,it},geom_cells{n,it},C,timeStepSteadyState),
+    parametric(scalarTransport(X,C)) {
+    real factor = $vol{n,it}/$dtau{n,it} ;
+    $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$rhon{n,it} - $X_src{n,it} ; 
+  }
+
+   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
+                   X{n},X{n,it},X_np1{n,it},rhon{n,it}),
+    constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,C),
+    parametric(scalarTransport(X,C)) {
+     const real factor = $vol{n,it}/$dtmax{n,it} ;
+    
+     const real rn = $rhon{n,it} ;
+     $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
+   }
+
+
+  $type X_B store<real> ;
+  $rule pointwise(X_B<-X_rhs,iblank),
+    constraint(X_rhs,C),
+    parametric(scalarTransport(X,C)) {
+    $X_B = -$X_rhs ;
+    if($iblank > 1) 
+      $X_B = 0 ;
+  }
+
+  $type SGSScalarSolve(X) store<real> ;
+  $rule pointwise(X_dq<-SGSScalarSolve(X)),
+    constraint(geom_cells,fluidLinearSolverSGS,C),
+    inplace(X_dq|SGSScalarSolve(X)), 
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $type LSGSScalarSolve(X) store<real> ;
+  $rule pointwise(X_dq<-LSGSScalarSolve(X)),
+    constraint(geom_cells,fluidLinearSolverLSGS,C),
+    inplace(X_dq|LSGSScalarSolve(X)), 
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $type FSGSScalarSolve(X) store<real> ;
+  $rule pointwise(X_dq<-FSGSScalarSolve(X)),
+    constraint(geom_cells,fluidLinearSolverFSGS,C),
+    inplace(X_dq|FSGSScalarSolve(X)), 
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $type petscScalarSolve(X) store<real> ;
+  $rule pointwise(X_dq<-petscScalarSolve(X)),
+    constraint(geom_cells,fluidLinearSolverPETSC,C),
+    inplace(X_dq|petscScalarSolve(X)), 
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $rule pointwise(X_dq<-petscScalarSolve(X)),
+    constraint(geom_cells,fluidLinearSolverGMRES,C),
+    inplace(X_dq|petscScalarSolve(X)),
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $rule pointwise(X_L<-X_fjp,(cl,cr)->iblank), inplace(X_L|X_fjp),
+    parametric(scalarTransport(X,C)) {
+    $X_L = -$X_fjp ;
+    if($cl->$iblank > 1 || $cr->$iblank > 1)
+      $X_L = 0 ;
+  }
+  $rule pointwise(X_U<-X_fjm,(cl,cr)->iblank), inplace(X_U|X_fjm),
+    parametric(scalarTransport(X,C)) {
+    $X_U = $X_fjm ;
+    if($cl->$iblank > 1 || $cr->$iblank > 1)
+      $X_U = 0 ;
+  }
+
+
+  //adds flux Jacobians into the srcJ
+  $rule apply(X_srcJ<-upper->X_fjp,lower->X_fjm)[Loci::Summation],
+	       constraint(geom_cells,gauss_seidel_iter,C),
+    parametric(scalarTransport(X,C)) {
+    for(const int *ui = $upper.begin();ui!=$upper.end();++ui)
+      $X_srcJ -= ui->$X_fjp ; //the normal vector of the face where fjp is
+    //                       //located is pointing outwards, so by
+    //                       //convention, fjp should be added to srcJ. But
+    //                       //remember that the sign of source terms (src)
+    //                       //changes due to the removal to RHS, so the
+    //                       //sign of srcJ also changes.
+    for(const int *li = $lower.begin();li!=$lower.end();++li)
+      $X_srcJ += li->$X_fjm ;
+  }
+
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
+    parametric(scalarTransport(X,C)) {
+
+    // compute diagonal block d from srcJ (input in d) time step
+    const real sd = $rhon{n,it}*($vol{n,it}/$dtau{n,it}) ;
+
+    $X_D{n,it} = -$X_srcJ{n,it} + sd ;
+    if($iblank{n,it} > 1) 
+      $X_D{n,it} = 1 ;
+  }
+
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(timeStepAccurate{n,it},X_srcJ{n,it},C),
+     parametric(scalarTransport(X,C)) {
+
+    // compute diagonal block d from srcJ (input in d) time step
+    const real sd = (2.*$rhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
+
+    $X_D{n,it} = -$X_srcJ{n,it} + sd ;
+    if($iblank{n,it} > 1) 
+      $X_D{n,it} = 1 ;
+  }
+
+  // Residue Output
+  $type X_residual param<double> ;
+  $rule unit(X_residual),constraint(geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    $X_residual = 0 ;
+  } 
+
+  $type grid_vol_iblank param<real> ;
+  
+  $type X_resid store<real> ;
+
+  $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    $X_resid = 0 ;
+    if($iblank < 2)
+      $X_resid = $X_src ;
+  }
+
+  $rule apply(X_residual<-X_resid,vol,grid_vol_iblank)[Loci::Summation],constraint(geom_cells,C),
+    parametric(scalarTransport(X,C)) {
+    double weight = $vol/$grid_vol_iblank ;
+    double rvol = 1./$vol ;
+    double sq0 = (rvol*$X_resid)*(rvol*$X_resid) ;
+    
+    join($X_residual,weight*sq0) ;
+  } 
+
+  $rule pointwise(OUTPUT{n,it}<-scalarTransportName_X, X_residual{n,it},ncycle{n},integratedOutputFileManager{n,it}), 
+//    conditional(do_report{n,it}),
+    parametric(scalarTransport(X,C)), prelude {
+    if(Loci::MPI_rank == 0) {
+      string varname = *$scalarTransportName_X ;
+      real sarms = sqrt(*$X_residual{n,it}) ;
+      printf("SR:%3d |%s|=%7.1e\n", *$ncycle{n},varname.c_str(),sarms) ;
+      fflush(stdout) ;
+      string filename = "output/" + varname + "_resid.dat" ;
+      ofstream *ofile = getStreamFluxFile(filename, *$ncycle{n}==0) ;
+      if(!ofile->fail()) 
+        (*ofile) << *$ncycle{n} << ' ' << sarms << endl ;
+    }
+  } ;
+
+  // add in GCL term
+  $rule apply(X_src<-gcl_sum,X,rho)[Loci::Summation],
+  constraint(X,C,geom_cells), parametric(scalarTransport(X,C)) {
+    join($X_src,-1.*$gcl_sum*$X*$rho) ;
+  }
+
+  $rule apply(X_srcJ<-gcl_sum,X,rho)[Loci::Summation],
+    constraint(geom_cells,X,gauss_seidel_iter,C),
+    parametric(scalarTransport(X,C)) {
+    join($X_srcJ,-$gcl_sum*$rho) ;
+  }
+  
+  $type X_nu_f store<real> ;
+  $type X_diff_f store<real> ;
+  $rule pointwise(X_diff_f<-X_nu_f,grads_f(X),area),
+    constraint(X_nu_f,area,C),
+    parametric(scalarTransport(X,C)) {
+    $X_diff_f = $X_nu_f*dot($grads_f(X),$area.n)*$area.sada ;
+  }
+
+  $rule apply(cl->X_src<-X_diff_f)[Loci::Summation],
+    constraint(cl->geom_cells,X_nu_f,C),
+    parametric(scalarTransport(X,C)) {  
+    join($cl->$X_src,$X_diff_f) ;
+  }
+  
+  $rule apply(cr->X_src<-X_diff_f)[Loci::Summation],
+    constraint(cr->geom_cells,X_nu_f,C),
+    parametric(scalarTransport(X,C)) {  
+    join($cr->$X_src,-$X_diff_f) ;
+  }
+
+  $rule apply(X_fjp<-(cl,cr)->cellcenter,X_nu_f,area)[Loci::Summation],
+                    constraint(X_nu_f,(cl,cr)->vol,C),
+    parametric(scalarTransport(X,C)) {  
+      const real C = $X_nu_f*$area.sada ;
+      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+      join($X_fjp, +C/d);
+  }
+  
+  $rule apply(X_fjm<-(cl,cr)->cellcenter,X_nu_f,area)[Loci::Summation],
+    constraint(X_nu_f,(cl,cr)->vol,C),
+    parametric(scalarTransport(X,C)) {  
+      const real C = $X_nu_f*$area.sada ;
+      const real d = dot($cr->$cellcenter-$cl->$cellcenter,$area.n) ;
+
+      join($X_fjm, -C/d) ;
+  }
+
+  $rule apply(ci->X_srcJ<-(ci->cellcenter),facecenter,
+              X_nu_f,area)[Loci::Summation],
+    constraint(X_nu_f,ci->vol,C),
+    parametric(scalarTransport(X,C)) {  
     const real C = $X_nu_f*$area.sada ;
     const real d = dot($facecenter-$ci->$cellcenter,$area.n) ;
 
