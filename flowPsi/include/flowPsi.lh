@@ -212,3 +212,6 @@ $type localPBias_next store<float> ;
 $type timeSteppingMode param<int> ;
 
 $type gravityAccel param<flowPsi::vect3d> ;
+
+$type scalarTransportP(X,C) store<flowPsi::real> ;
+$type scalarTransport(X,C) store<flowPsi::real> ;
