@@ -257,6 +257,15 @@ plane (away from the normal) are included in this geometry.
 
 \end{itemize}
 
+\item {\tt inviscidFlux}
+
+  Select flux formulation for the inviscid flux in the solver.  The
+  selection can be ``hllc'', ``kec'', or ``ssf''.  The ``hllc'' is the
+  default upwind scheme.  The ``kec'' is a second order low
+  dissipation flux, and ``ssf'' is based on a fourth order skew
+  symmetric scheme.  Select the ``ssf'' for LES style simulations.
+
+
 \item {\tt flowRegime }
 
 This sets the type of flow model we will be using.  This will be set
@@ -385,6 +394,48 @@ maximumRunTime: 23.5 hour
   When this variable is set to zero, the linear solver reduces to a
   block Jacobi iteration.  Typical values are between 5-20.  Usually a
   value of 5-8 is useful for parallel simulations.
+
+% \item {\tt LDS\_dissipationLimit} 
+
+%   This variable limits the maximum value of the uwind blending factor.
+%   The maximum value should not exceed 1 in which case the blending
+%   will be fully upwind.  The Default setting of this option is 1.
+
+% \item {\tt LDS\_ducrosFactor}
+
+% This variable sets how much of the Ducro
+
+\item {\tt LDS\_compFactor}
+
+  When using the low dissipation fluxes 'kec' or 'ssf' it is necessary
+  to switch to the upwind scheme around compressible features such as
+  shocks.  This is input sets the sensitivity of the factor to switch
+  to upwind when compressible flow conditions are detected.  The
+  default value for this is 5.0.  This value is typically set
+  somewhere between 1-100.  Set it to zero if these compressible
+  features should not be encountered.
+
+\item {\tt LDS\_useUpwind}
+
+  This input will set the lower limit for the upwind blending.
+  Setting this to a small positive value such as 0.2 can be used for a
+  MILES type of LES subgrid model.  The default value is 0.0.
+
+\item {\tt LDS\_nonSymmetricCoeff}
+
+  For unstructured meshes some upwinding is needed to to stabilize the
+  scheme.  Heuristic methods are used to increase the upwinding
+  blending parameter when mesh cells depart form symmetric stencils.
+  The larger this factor the more robust the scheme will be to poor
+  mesh quality at the expense of increased dissipation. The default
+  value is 2.
+
+\item {\tt LDS\_nonSymmetricFactor}
+
+  For unstructured meshes this controls the rate at the scheme adds
+  upwinding at small angles.  A larger number will increase robustness
+  at the expense of added dissipation.  the default value is 1.
+
 \item {\tt LSGSMaxIter} 
 
   The maximum number of line Gauss-Seidel steps
