@@ -1,0 +1,81 @@
+// Include Loci system 
+#include <Loci.h>
+// defines types used by flowPsi
+#include "flowTypes.h"
+// defines Loci types for flowPsi variables
+$include "flowPsi.lh"
+
+using std::endl ;
+using std::cout ;
+// This is an example of how to perform custom integrations of values over 
+// all boundary surfaces in the code.  In this example we will find the 
+// average temperature over all boundary surfaces
+
+namespace flowPsi {
+  
+  // boundaryName is created by the FVM grid reader.  The boundary name
+  // is a string parameter that is defined over all facets of the
+  // boundary face and contains a string with the name of the boundary
+  // surface
+  $type boundaryName(X) param<string>  ;
+
+  // We will output the area integrated temperature so we will need to know
+  // the total area for each boundary...  So lets add up the boundary facet
+  // area.
+
+  // First we need to compute the area of each boundary.  We use the
+  // parametric rule facility to create a family of rules that will do
+  // the integration for each boundary surface  
+  $type boundaryArea_X param<real> ;
+
+  // This sets up the initial value of the boundary area before summing over
+  // faces.  This needs to be set to zero as this is the indentity of the
+  // summation operator
+  $rule unit(boundaryArea_X<-boundaryName(X)),parametric(boundaryName(X))  {
+    $boundaryArea_X = 0 ;
+  }
+  
+  // Add the areas from each face.  In some cases, for example when
+  // running in axisymmetric mode the area might be zero, so the max
+  // function is there to keep that case from generating a divide by zero
+  // condition.
+  $rule apply(boundaryArea_X<-area,boundaryName(X))[Loci::Summation],
+    parametric(boundaryName(X)) {
+    // note, the area is the sada component of the area input, the n component
+    // is the normal vector
+    join($boundaryArea_X,max($area.sada,1e-13)) ;
+  }
+  
+  // Now we will compute the area weighted average temperature
+  $type boundaryMeanTemp_X param<real> ;
+
+  // set the initial value for the mean temp
+  $rule unit(boundaryMeanTemp_X<-boundaryName(X)),parametric(boundaryName(X))  {
+    $boundaryMeanTemp_X = 0 ;
+  }
+  
+  // Now compute the weighted sum of the of the temperature.  The temperature
+  // at the boundary face is given by temperature_f
+  $rule apply(boundaryMeanTemp_X<-area,temperature_f,boundaryArea_X,boundaryName(X))[Loci::Summation],
+    parametric(boundaryName(X)) {
+    double weight = max($area.sada,1e-13)/$boundaryArea_X ;
+    join($boundaryMeanTemp_X,weight*$temperature_f) ;
+  }
+  
+  // Now output to stdout the average temperature.  Do this output only
+  // when the code is outputting boundary plot files.
+  // Note, since this is only output once, we use the prelude and
+  // because we are in the prelude we must use the dereference operatpr
+  // '*' to access the computed parameters.  The $[Once] tells Loci that
+  // you only want to output this once even when running in parallel where
+  // there would be multiple instances of execution
+  $rule pointwise(OUTPUT<-boundaryMeanTemp_X,boundaryName(X)),
+    conditional(do_boundary_plot),
+    parametric(boundaryName(X)), prelude {
+    $[Once] {
+      cout << "Boundary " << *$boundaryName(X) << " has mean temperature of " << *$boundaryMeanTemp_X << " Kelvin" << endl ;
+    }
+  } ;
+  //^ This semicolon is needed because we are not following the prelude
+  //  section with a compute section.
+}

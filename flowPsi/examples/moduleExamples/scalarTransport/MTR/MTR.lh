@@ -1,0 +1,16 @@
+$include "flowPsi.lh"
+
+// Menter 1 Eq Model Variables
+$type menter param<MTR1eq_param> ;
+
+// turbulent kinematic viscosity
+$type nuTM             store<flowPsi::real> ; // Menter's nu tilde
+$type nuTM_f           store<flowPsi::real> ;
+$type nuTM_bc          store<flowPsi::real> ;
+// Baldwin-Barth destruction term
+$type Ebb               store<flowPsi::real> ;
+// convection, diffusion, and source terms
+$type nuTM_src           store<flowPsi::real> ;
+// diagonal jacobian term
+$type nuTM_srcJ          store<flowPsi::real> ;
+// right hand side of newton method

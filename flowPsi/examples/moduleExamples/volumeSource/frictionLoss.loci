@@ -1,0 +1,100 @@
+#include <Loci.h>
+#include "flowTypes.h"
+$include "flowPsi.lh"
+
+
+//----------------------------------------------------------------------------
+// This is an example of adding a source term to flowPsi.  In this case
+// we are adding a volumetric momentum source for the purpose of performing
+// compressible channel flow simulations.  In this case we wish to add the 
+// x component of the momentum that was lost due to the losses at the viscous
+// walls.  Note, this code assumes that the added fluid kinetic energy will be
+// dissipated and conducted to the viscous walls.
+//----------------------------------------------------------------------------
+
+namespace flowPsi {
+
+  //--------------------------------------------------------------------------
+  // To compute the source term we first integrate the momentum flux through
+  // the viscous walls
+
+  $type viscousWallMomentumFlux param<vect3d> ;
+  $rule unit(viscousWallMomentumFlux),constraint(UNIVERSE) {
+    $viscousWallMomentumFlux = vect3d(0,0,0) ;
+  }
+  // Note viscous and inviscid flux have already been integrated over the 
+  // boundary facet area.  We just need to sum up their contributions
+  $rule apply(viscousWallMomentumFlux<-iflux)[Loci::Summation],
+    constraint(AllViscousBCs) {
+    const int mi = 1 ; // first entry of inviscid flux is mass flux	
+    // extract inviscid momentum flux
+    vect3d mflux($iflux[mi+0],$iflux[mi+1],$iflux[mi+2]) ; 
+    join($viscousWallMomentumFlux,mflux) ;
+  }
+  $rule apply(viscousWallMomentumFlux<-vflux)[Loci::Summation],
+    constraint(AllViscousBCs) {
+    const int mi = 0 ; // Viscous flux starts with momentum term
+    // extract viscous momentum flux
+    vect3d mflux($vflux[mi+0],$vflux[mi+1],$vflux[mi+2]) ; 
+    join($viscousWallMomentumFlux,mflux) ;
+  }
+  
+  //--------------------------------------------------------------------------
+  // We also need to know the total mass in the simulation, so we perform a 
+  // volume integration over all cells in the domain and add up the total
+  // mass
+  $type massSum param<real> ;
+  //compute total mass
+  $rule unit(massSum), constraint(UNIVERSE) {
+    $massSum=0.0 ;
+  }
+  $rule apply(massSum<-rho, vol)[Loci::Summation],constraint(geom_cells) {
+    join($massSum,$rho*$vol) ; // rho*vol is the mass in any given cell
+  }
+
+  //--------------------------------------------------------------------------
+  // The dragAccel is the amount of force we need to give to each unit of 
+  // mass to return the momentum distributed evenly by mass over the domain
+  $type dragAccel param<vect3d> ;
+  $rule singleton(dragAccel<-viscousWallMomentumFlux,massSum) {
+    $dragAccel = $viscousWallMomentumFlux/$massSum ;
+  }
+
+  //add friction loss to the source term
+  $rule apply(src<-dragAccel,rho,vol,cellcenter,u)[Loci::Summation] {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4 ;
+    $src[mi] += $dragAccel.x*$rho*$vol ;
+    $src[mj] += $dragAccel.y*$rho*$vol ;
+    $src[mk] += $dragAccel.z*$rho*$vol ;
+    $src[ei] += $dragAccel.x*$u.x*$rho*$vol ;
+  }
+
+  $rule apply(srcJ<-rho,gagePressure,temperature,Pambient,u,dragAccel,vol)[Loci::Summation],
+    constraint(vol) {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4 ;
+
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    real coefP = drdp*$vol ;
+    real coefT = drdt*$vol ;
+    real rho_vol = $rho*$vol ;
+    $srcJ[mi][4] += $dragAccel.x*coefP ;
+    $srcJ[mj][4] += $dragAccel.y*coefP ;
+    $srcJ[mk][4] += $dragAccel.z*coefP ;
+    $srcJ[ei][4] += dot($dragAccel,$u)*coefP ;
+    $srcJ[mi][0] += $dragAccel.x*coefT ;
+    $srcJ[mj][0] += $dragAccel.y*coefT ;
+    $srcJ[mk][0] += $dragAccel.z*coefT ;
+    $srcJ[ei][0] += dot($dragAccel,$u)*coefT ;
+    $srcJ[ei][mi] += $dragAccel.x*rho_vol ;
+    $srcJ[ei][mj] += $dragAccel.y*rho_vol ;
+    $srcJ[ei][mk] += $dragAccel.z*rho_vol ;
+  }
+  
+}

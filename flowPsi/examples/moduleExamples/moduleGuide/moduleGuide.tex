@@ -1,0 +1,1149 @@
+\documentclass[letterpaper,twoside]{article}
+\title { {\it flowPsi} Module Guide }
+\setlength{\textheight}{8.3in}
+\setlength{\textwidth}{5.7in}
+\setlength{\parskip}{3mm}
+\setlength{\parindent}{0.0in}
+
+\setlength{\topmargin}{5mm}
+%% %\setlength{\bottommargin}{5mm}
+\setlength{\headheight}{5mm}
+\setlength{\headsep}{5mm}
+\setlength{\oddsidemargin}{2cm}
+\setlength{\evensidemargin}{0cm}
+\unitlength=1in
+
+\usepackage{graphicx}
+\usepackage{amsmath} % used for extended formula formatting tools
+\usepackage{amssymb}
+\usepackage{theorem}
+\usepackage{euscript}
+\usepackage{longtable}
+
+\def\V{\mathcal{V}}
+\def\A{\mathcal{A}}
+
+\begin{document}
+\maketitle
+%\small
+\tableofcontents
+%\Listoffigures
+\thispagestyle{empty}
+\pagestyle{empty}
+\cleardoublepage
+\pagestyle{plain}
+
+\setcounter{page}{1}
+
+
+\section{Introduction}
+
+This module guide provides a set of tutorials for creating add on
+modules for the {\it flowPsi} solver.  It is assumed that the reader has
+some basic understanding of the Loci programming model.  To gain that
+understanding please work through the tutorial provided with the Loci
+framework.  This document and examples will extend that tutorial to
+describe how to create common types of extensions to the {\it flowPsi}
+solver.  In general modules are loaded into {\it flowPsi} by first making
+sure that the directory that contains the module is either in the {\tt
+  LD\_LIBRARY\_PATH} or the {\tt LOCI\_MODULE\_PATH} environment
+variable.  Then the modules can be loaded into your {\it flowPsi} case by
+adding a {\tt loadModule:} followed by the module name at the top of
+the {\tt vars} file.  The {\tt Makefile} provided in these example
+directories are easy to use and can be copied for your module
+development.  The {\tt Makefile} is designed such that all files that
+end in with the {\tt .loci} postfix will be compiled into a module.
+The file only needs to be edited to provide the module name and the
+{\tt FLOWPSI\_BASE} directory that points to where the {\it flowPsi} solver
+is installed.
+
+
+\subsection{Loci FVM Module Facilities}
+
+Before we begin discussing building modules for {\it flowPsi} lets review some
+of the basic facilities that Loci provides for finite volume solvers
+that {\it flowPsi} utilizes.  First, {\it flowPsi} uses the face based data-structure
+that includes the {\tt face2node} map that provides an ordered listing of
+the nodes that form each face in the mesh as well as the {\tt cl} and
+{\tt cr} maps that provide the maps from the face to the left and
+right cells.  Faces on the boundary always have normals pointing out
+of the domain and therefore the {\tt cl} map points to the cell next
+to the boundary while the {\tt cr} cell may point to a ghost cell (in
+{\it flowPsi}, ghost cells are only used to implement periodic boundary
+conditions).  The {\tt ci} and {\tt ref} maps are only defined for
+boundary faces where {\tt ci} refers to the adjacent cell inside the
+mesh and {\tt ref} refers to the reference surface that forms the
+facets of that boundary.  The {\tt pmap} map associates the periodic
+boundary face with its periodic pair.  The cell to face maps {\tt
+  upper}, {\tt lower}, and {\tt boundary\_map} is used to form
+matrices that are based on the face connectivity where upper refers
+to the faces that form the upper and lower triangular matrix entries
+and the boundary map identifies boundary faces of the cell.
+
+
+In addition to these data structure elements, the Loci FVM module
+provides some generic rules for computing grid metrics such as face
+areas and cell volumes.  Additionally the module provides some basic
+facilities for computing gradients and interpolating solutions from
+cells to nodes for plot output.  These facilities generally will need
+the cell center values and the boundary face values.  The boundary
+face values will have the naming convention of having a {\tt \_f}
+postfix annotation denoting that it is a face value.  A table that
+summarizes that facilities provided by the FVM module are provided in
+table \ref{tab:LociFacilities}.
+
+
+\begin{table}
+\begin{center}
+\caption{Table of Loci FVM provided utilities}
+\label{tab:LociFacilities}
+\begin{tabular}{|c|c|c|}
+\hline
+\multicolumn{3}{|c|}{ Supplied by Loci FVM facilities}\\
+\hline
+Variable & Type & Description\\
+\hline\hline
+\multicolumn{3}{|l|}{Mesh Data Structures}\\
+\hline
+{\tt ci} & map & cell next to boundary face\\
+{\tt cl} & map & cell on left side of face\\
+{\tt cr} & map & cell on right side of face\\
+{\tt ref} & map & map from boundary faces to surface\\
+{\tt face2node} & multiMap & map from face to nodes\\
+{\tt pmap} & map & periodic matching face\\
+{\tt upper} & multiMap & map from cell to upper faces\\
+{\tt lower} & multiMap & map from cell to lower faces\\
+{\tt boundary\_map} &multiMap & map from cell to boundary faces\\
+\hline
+\multicolumn{3}{|l|}{Mesh Metrics}\\
+\hline
+{\tt pos} & vector & node positions\\
+{\tt cellcenter} & vector & cell centroid location\\
+{\tt facecenter} & vector & face centroid location\\
+{\tt area} & composite & face area and normal\\
+{\tt vol} & scalar & cell volume\\
+{\tt gridvol} & parameter & total grid volume\\
+\hline
+\multicolumn{3}{|l|}{Parametric Rules}\\
+\hline
+{\tt grads(X)} & vector & gradient of scalar variable {\tt X}\\
+{\tt gradv3d(X)} & tensor & gradient of vector variable {\tt X}\\
+{\tt gradv(X)} & generic vector & gradient of mixture vector {\tt X}\\
+{\tt grads\_f(X)} & vector & face gradient of scalar {\tt X}\\
+{\tt gradv3d\_f(X)} & tensor & face gradient of vector {\tt X}\\
+{\tt gradv\_f(X)} & generic vector & gradient of mixture vector {\tt X}\\
+{\tt cell2node(X)} & scalar & cell to node interpolation for scalar {\tt X}\\
+{\tt cell2node\_v3d(X)} & vector &cell to node interpolation for vector {\tt X}\\
+{\tt cell2nodeMax(X)} & scalar & nodal maximum of {\tt X} for connected cells\\
+{\tt cell2nodeMin(X)} & scalar & nodal minimum of {\tt X} for connected cells\\
+{\tt L1Norm(X)} & parameter & volume integrated $L_1$ norm of cell variable {\tt X}\\
+{\tt L2Norm(X)} & parameter & volume integrated $L_2$ norm of cell variable {\tt X}\\
+{\tt LinfNorm(X)} & parameter & volume integrated $L_\infty$ norm of cell variable {\tt X}\\
+{\tt fileNumber(X)} & integer & file numbering for variable {\tt X}\\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+\clearpage
+\subsection{{\it flowPsi} facilities and variables}
+
+When {\it flowPsi} runs the only the conservative variables (and gage
+pressure) are carried from time-step to time-step.  All other
+variables that are derived from these conservative variables are only
+computed during the Newton iteration.  Thus most of the computations
+in {\it flowPsi} happen as part of the Newton iteration step.  This section
+outlines some of the facilities that are available during that step.
+Table \ref{tab:flowPsiFluid} gives that generic fluid properties that are
+available.  Solver specific variables that can be replaced through
+priority rules or used in control are shown in table
+\ref{tab:flowPsiSolver} while the parametric utilities are described in
+table \ref{tab:flowPsiParam}.  These tables are provided to give a brief
+survey of the kinds of data that is available for interfacing to {\it flowPsi}
+modules.
+
+\begin{table}
+\caption{Table of {\it flowPsi} Fluid Properties}
+\label{tab:flowPsiFluid}
+\begin{center}
+\begin{tabular}{|c|c|c|}
+\hline
+\multicolumn{3}{|c|}{ {\it flowPsi} fluid properties variables}\\
+\hline
+Variable & Type & Description\\
+\hline\hline
+{\tt rho} & scalar & fluid density\\
+{\tt rho\_f} & scalar & fluid density at face\\
+{\tt temperature} & scalar & fluid temperature\\
+{\tt temperature\_f} & scalar & fluid temperature at face\\
+{\tt gagePressure} & scalar & fluid pressure reference to Pambient\\
+{\tt gagePressure\_f} & scalar & fluid gage pressure at face\\
+{\tt Pambient} & parameter & reference pressure\\
+{\tt pressure} & scalar & fluid pressure\\
+{\tt u} & vector & fluid velocity in cell\\
+{\tt u\_f} & vector & fluid velocity at face\\
+{\tt divu} & scalar & divergence of u\\
+{\tt vort} & vector & fluid vorticity\\
+{\tt vortMag} & scalar & fluid vorticity magnitude\\
+{\tt strainRate} & scalar & strain rate magnitude, $S$\\
+{\tt tau} & symmetric tensor & fluid stress\\
+{\tt mu} & scalar & fluid laminar viscosity\\
+{\tt mu\_f} & scalar & fluid laminar viscosity at face\\
+{\tt kconduct} & scalar & fluid laminar conductivity\\
+{\tt kconduct\_f} & scalar & fluid laminar conductivity at face\\
+{\tt us\_n} & scalar & face grid velocity dot normal\\
+{\tt us} & vector & face grid velocity\\
+{\tt Cp} & parameter & fluid $C_p$\\
+{\tt gamma} & parameter & fluid isentropic index, $\gamma$\\
+{\tt Rtilde} & parameter & fluid gas constant\\
+{\tt tmu} & scalar & turbulent viscosity\\
+{\tt soundSpeed} & scalar & local speed of sound\\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}
+\caption{Table of {\it flowPsi} solver specific variables}
+\label{tab:flowPsiSolver}
+\begin{center}
+\begin{tabular}{|c|c|c|}
+\hline
+\multicolumn{3}{|c|}{ {\it flowPsi} solver specific variables}\\
+\hline
+Variable & Type & Description\\
+\hline\hline
+{\tt p0Ref} & scalar & total pressure BC input\\
+{\tt T0Ref} & scalar & total temperature BC input\\
+{\tt massFluxRef}& scalar & mass flux BC input\\
+{\tt temperatureRef} & scalar& temperature BC input\\
+{\tt gagePressureRef} & scalar & gagePressure BC input\\
+{\tt uRef} & vector & fluid velocity BC input\\
+{\tt Twall} & scalar & viscous wall BC temperature\\
+{\tt qwall} & scalar & viscous wall BC heat flux\\
+{\tt wallVelocity} & vector & viscous wall tangential velocity\\
+{\tt src} & general vector & source array for mass, momentum, and
+energy\\
+{\tt iflux} & Array(5) & inviscid flux\\
+{\tt vflux} &  Array(4) & viscous flux\\
+{\tt scalar\_mdot} & scalar & mass flux through face\\
+{\tt srcJ} & matrix block & diagonal jacobian term of {\tt
+  src}\\
+{\tt fjp} & matrix block & jacobian of flux from left\\
+{\tt fjm} & matrix block & jacobian of flux from right\\ 
+{\tt min\_cell2noslip} & map & Map from cell to closest viscous wall\\
+{\tt dist\_noslip} & scalar & distance from cell to nonslip wall\\
+{\tt dt} & parameter & timestep value in seconds\\
+{\tt stime} & parameter& simulation time in seconds\\
+{\tt ncycle} & parameter & simulation step \\
+{\tt newtonFinished} & conditional & Newton iteration complete\\
+{\tt do\_restart} & conditional & output restart files\\
+{\tt do\_output} & conditional & text output\\
+{\tt do\_plot} & conditional & plot file output\\
+{\tt do\_boundary\_plot} & conditional & boundary plot file output\\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+\begin{table}
+\caption{Table of {\it flowPsi} parametric variables}
+\label{tab:flowPsiParam}
+\begin{center}
+\begin{tabular}{|c|c|c|}
+\hline
+\multicolumn{3}{|c|}{ {\it flowPsi} parametric variables}\\
+\hline
+Variable & Type & Description\\
+\hline\hline
+{\tt scalarTransport(X,C)} & generic & build transport of scalar {\tt X},
+enabled by {\tt C}\\
+{\tt scalarTransportP(X,C)} & generic & like above for positive scalar
+{\tt X}\\
+{\tt  scalarMean(X) }& scalar & time averaged cell value {\tt X}\\
+{\tt  scalarMean\_f(X) }& scalar & time averaged boundary face value {\tt X\_f}\\
+{\tt  scalarVariance(X) }& scalar & time variance of variable {\tt X}\\
+{\tt  vect3dMean(X)} & vector & time averaged vector mean\\
+{\tt  vect3dMean\_f(X) }& vector & time averaged boundary vector mean\\
+{\tt  vect3dVariance(X) }& vector & time variance of vector {\tt X}\\
+{\tt  vect3dVariance\_f(X) }& vector & time variance of boundary vector\\
+{\tt  vect3dCoVariance(X) }& vector & co-variance of vector {\tt X}\\
+{\tt  vect3dCoVariance\_f(X)} & vector & co-variance of boundary vector
+  {\tt x}\\  
+{\tt  scalarFavreMean(X) }& scalar & Favre average of variable {\tt X}\\
+{\tt  scalarFavreMean\_f(X) }& scalar & Favre average of boundary variable \\
+{\tt  scalarFavreVar(X) }& scalar & Favre weighted variance\\
+{\tt  vect3dFavreMean(X) }& vector & vector Favre weighted mean\\
+{\tt  vect3dFavreMean\_f(X) }& vector & vector Favre weighted boundary mean\\
+{\tt  vect3dFavreVar(X) }& vector & vector Favre weighted variance\\
+{\tt  vect3dFavreVar\_f(X)} & vector & vector Favre weighted variance boundary\\
+{\tt  vect3dFavreCoVar(X)} & vector & vector Favre weighted co-variance\\
+{\tt  vect3dFavreCoVar\_f(X)} & vector & vector Favre weighted
+  co-variance boundary\\
+\hline
+\end{tabular}
+\end{center}
+\end{table}
+
+\clearpage
+\section{Custom Output}
+
+One of the more common needs for add-on modules is the development of
+derived variable computations.  While it is possible to compute
+derived variables directly in post-processing software, these
+computations can sometimes be misleading due to the fact that they are
+performed on interpolated data which may introduce errors in the
+derived computations.  So it is sometimes useful to perform
+computations directly on the cell values before interpolation in order
+to get more satisfactory results.  For this example we will consider
+the output of a variable that can be used for numerical schlieren
+imaging.  This is done by computing the logarithm of the density
+gradient.  So in this example we will show how one goes about
+computing and outputting such a variable in a module.
+
+The first step to this is to copy the Makefile provided in the
+examples which will automatically compile all {\tt .loci} files in the
+directory.  The only change that is needed is to set the {\tt
+  MODULE\_NAME} variable in the Makefile to the name that you wish to
+use in the {\tt loadModule} line of the vars file.  In this case we
+will call the module {\tt schlieren}, or 
+\begin{verbatim}
+# What is the name of the module given to loadModule
+MODULE_NAME = schlieren
+\end{verbatim}
+
+At this point we can begin editing our Loci program which we will
+conveniently name {\tt schlieren.loci}.  At the beginning of the file
+we need to include some files that will be needed to access the
+facilities we will be using.  This is accomplished with the following 
+includes:
+\begin{verbatim}
+// Include Loci system 
+#include <Loci.h>
+// defines types used by flowPsi
+#include "flowTypes.h"
+// imports flowPsi IO functionality
+#include "flowPsiIO.h"
+// defines Loci types for flowPsi variables
+$include "flowPsi.lh"
+\end{verbatim}
+
+It is convenient but not necessary to add the code in the C++
+namespace called {\tt flowPsi}.  Alternatively, we can add the code in our own
+namespace but add code to tell C++ to use variables from the {\tt
+  flowPsi} namespace such as:
+\begin{verbatim}
+namespace schlieren {
+  using namespace flowPsi ;
+\end{verbatim}
+
+We now need to compute the variable that we are going to plot.  Since
+{\it flowPsi} computes unknowns at cell centers this will be where we perform
+the computations.  However, to improve nodal interpolation accuracy we
+also need to compute the target variables for all boundary faces as
+well.  Since these variables are not part of the {\it flowPsi} infrastructure
+we will need to define their types first:
+\begin{verbatim}
+  // define types for cell and boundary face values
+  $type loggradrho store<double> ;
+  $type loggradrho_f store<double> ;
+\end{verbatim}
+Then write rules to define how to compute these variables as well.
+These computations will use the scalar gradient parametric rules
+provided by Loci's FVM module.  The rules will be defined as:
+\begin{verbatim}
+  // To interpolate to the nodal values we need both cell values and boundary
+  // face values.  Thus we have two rules to compute the value of interest
+  $rule pointwise(loggradrho<-grads(rho)) {
+    $loggradrho = log10(max(norm($grads(rho)),1e-4)) ;
+  }
+  $rule pointwise(loggradrho_f<-grads_f(rho)) {
+    $loggradrho_f = log10(max(norm($grads_f(rho)),1e-4)) ;
+  }
+\end{verbatim}
+
+At this point we have defined the variable that we wish to compute but
+as they are defined now they will not be computed because {\it flowPsi} will
+never request these variables.  Instead we will want to tell {\it flowPsi} that
+these variables are ones that we need plot files.  For this, {\it flowPsi}
+provides a macro called {\tt OUTPUT\_SCALAR} that interfaces with the
+{\it flowPsi} plotting facilities.  It will allow this variable to be written
+out when requested by placing the given variable name in the {\tt
+  plot\_output} variable in the {\tt vars} file.  This is accomplished
+with the line:
+\begin{verbatim}
+  OUTPUT_SCALAR("cell2node(loggradrho)", schlieren) ;
+\end{verbatim}
+This line tells the code to write out the variable {\tt
+  cell2node(loggradrho)} as a variable named {\tt schlieren}.  Note
+that the variable that we wrote out is not the variable that we
+computed.  This is because volume data is plotted from nodal values
+and since {\it flowPsi} computes its degrees of freedom at the cells, an
+interpolation function is needed to compute the nodal values.  The
+{\tt cell2node} parametric rules provided by the Loci FVM module
+performs this function.  This parametric rule will access the
+variables that we defined earlier.  Also this macro will enable
+requesting this variable on cutting plane and isosurface output from
+{\it flowPsi} as well.
+
+In addition to volume data, we can also output boundary facet data.
+This is provided with the macro {\tt OUTPUT\_BNDRY\_SCALAR}.  So if we
+wish to output the schlieren variable for the boundary facets we can
+add the following line to or loci file:
+\begin{verbatim}
+  OUTPUT_BNDRY_SCALAR("loggradrho_f",schlierenb,"ci") ;
+\end{verbatim}
+The first argument of this macro is the variable that we wish to plot,
+while the second is the name of the variable (hear with a b appended
+to differentiate boundary facet data from the nodal data).  Finally,
+the last argument defines the set of boundaries that we wish to write
+this data.  Since all boundary faces have the attribute {\tt ci} this
+will write out for all boundary faces.  Also not, for outputting 3D
+vector data replace the {\tt SCALAR} with {\tt VECTOR} in the above
+macros.
+\clearpage
+\section{Custom Boundary Condition Input}
+
+Most of the boundary conditions provided by {\it flowPsi} can be customized.
+Typically the inputs for each boundary face are assigned to a {\tt
+  Ref} variables that can be overridden by modules to change the basic
+behavior.   For this example we will demonstrate this in a simple
+boundary condition where the pressure is perturbed by a sinusoidal
+signal.  In this particular case we will override the definition of
+the $gagePressureRef$ variable so that instead of being the constant
+defined in the boundary condition, it will instead be a time varying
+value.  Note, it is possible to also change the boundary condition to
+be reactive to the solution itself.  However, in these cases the
+stability of the resulting boundary condition cannot be guaranteed.
+
+To add this capability to an inflow boundary condition we want to be
+able to add a specification to each boundary where we want to add the
+perturbation that will give the amplitude and frequency of the
+disturbance.  By default the {\it flowPsi} boundary condition checking
+code will not allow these parameters to be added without generating
+error messages. Therefore it is necessary to register these new
+boundary condition arguments with {\it flowPsi}.  This checker for the
+boundary conditions are defined in the {\tt read\_grid.h} header file
+which will need to be included.  The checker for these two new
+variables is added through the following code:
+\begin{verbatim}
+  // Here we create a checking class that inherits from BC_Check that is defined
+  // in readGrid.h
+  class pwave_check : public BC_Check {
+    string error_message ;
+  public:
+    // List which boundary conditions this checker is for
+    std::string boundaryConditions() { return "inflow,supersonicInflow,farfield" ; }
+    // List which variables this checker will verify
+    std::string variablesChecked() { return "amplitude,frequency" ; }
+    // Check for the existence of amplitude and frequency
+    // in our implementation these are optional, but if amplitude is
+    // given then frequency must also be given
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      bool check = true ;
+      if(bc_options.optionExists("amplitude")) {
+        if(!check_scalar_units(bc_options,"amplitude","Pa")) {
+          error_message += "Pressure units needed for 'amplitude' " ;
+          check = false ;
+        }
+        if(!bc_options.optionExists("frequency")) {
+          error_message += "'amplitude' must also specify 'frequency' " ;
+          check = false ;
+        }
+      }
+      return check ;
+    }
+    // Print out error messsage.  Used if checker fails to generate error
+    // message to the user.  Usually the error message is remembered from 
+    // when the checker was run.
+    std::ostream &ErrorMessage(std::ostream &s) {
+    }
+  } ;
+  // The register_BC template registers this object in the boundary checker
+  // database.  The names are not important only that we create the object
+  // so that it is registered.
+  register_BC<pwave_check> register_BC_pwave_check ;
+\end{verbatim}
+
+Next we will need to extract the values for amplitude and pressure
+from the {\tt BC\_options} variable that is defined for each boundary
+surface.  For this we will use the constraint that is created by the
+FVM grid reader that indicates what parameter are defined in the {\tt
+  BC\_options} variable.  This will ensure that the variables will
+only be extracted for the boundary conditions where these arguments
+are specified.  The rules that extract these variables are as follows:
+\begin{verbatim}
+  $type amplitude_BC store<real> ;
+  $rule pointwise(amplitude_BC<-BC_options),constraint(amplitude_BCoption) {
+    $BC_options.getOptionUnits("amplitude","Pa",$amplitude_BC) ;
+  }
+  $type frequency_BC store<real> ;
+  $rule pointwise(frequency_BC<-BC_options),constraint(frequency_BCoption) {
+    $BC_options.getOption("frequency",$frequency_BC) ;
+  }
+\end{verbatim}
+ 
+We can now compute the time varying prescribed pressure and override
+the {\tt gagePressureRef} variable that will be used by the inflow
+boundary condition.
+\begin{verbatim}
+  $type pgDelta_BC store<real> ;
+
+  $rule pointwise(pgDelta_BC<-stime,amplitude_BC,frequency_BC) {
+    $pgDelta_BC = $amplitude_BC*sin($stime*$frequency_BC*2.*M_PI) ;
+  }
+
+  // Override the reference condtions for the faces that adds in the
+  // perturbation.  This will be used instead of the default settings
+  $rule pointwise(distrbance::gagePressureRef<-
+		  ref->(gagePressureRef_BC,pgDelta_BC)) { 
+    $gagePressureRef = $ref->$gagePressureRef_BC + $ref->$pgDelta_BC ;
+  }
+\end{verbatim}
+
+Other variables can also be overridden using a similar process.  For a
+complete list of the {\tt Ref} variables that can be overridden see
+table \ref{tab:flowPsiSolver}.
+
+\clearpage
+\section{Custom Initial Conditions}
+\begin{verbatim}
+  // For the initial conditons we define temperature_ic, gagePressure_ic, and
+  // initial velocity (u_ic)
+  $rule pointwise(temperature_ic,gagePressure_ic,u_ic<-
+                  Rtilde,cellcenter,Pambient),constraint(geom_cells) {
+    const double x = $cellcenter.x ;
+    const double y = $cellcenter.y ;
+    double coef = 3.5 ;
+    double u = -1.*coef*cos(x)*sin(y) ;
+    double v =  coef*sin(x)*cos(y) ;
+    double Pref = $Pambient ;
+    if(Pref < 10)
+      Pref = 1e5 ;
+    double rho = 1.0 ;
+    double p0 = Pref-$Pambient ;
+    double pg = p0-rho*0.25*coef*coef*(cos(2.*x)+cos(2.*y)) ;
+
+    double P = pg+$Pambient ;
+    double T = P/($Rtilde*rho) ;
+    $gagePressure_ic = pg ;
+    $temperature_ic = T ;
+    $u_ic = vect3d(u,v,0.0) ; ;
+  }
+\end{verbatim}
+\clearpage
+\section{Surface Integration}
+In this example we consider how to add a module that can integrate a
+function over the boundary surfaces of the mesh.  In this example we
+will compute the area averaged temperature over all of the boundary
+surfaces of the mesh.  In general, Loci is quite flexible and will
+allow a wide range of possible strategies for this.  In effect, an
+integration is simply a reduction with the summation operator over
+some set of entities that defines the surface of interest.  How does
+one identify the set of interest?  Actually one could identify the set
+of interest in many different ways.  First, one could use the assigned
+boundary condition type.  For example, one could integrate over the
+set defined by the constraint {\tt viscousWall\_BC} which would
+include all boundaries that were assigned the {\tt viscousWall}
+boundary condition.  Alternatively, the user could define a new
+boundary condition argument that would allow a user to mark that
+boundary with a special integrate flag (say integrate) and then use a
+constraint of {\tt ref->integrate\_BCoption} to determine the set.  In
+this example we use the parametric facility to integrate over each
+boundary surface separately.  To do this we use the fact that for each
+boundary a parametric variable will be created in by the grid reader
+of the form {\tt boundaryName(X)} where {\tt X} is replaced by each
+boundary surface name.  This is a string parameter which is defined
+over the set of faces that form that boundary surface.  For our mean
+temperature we will use an area weighted average, so at first we will
+compute the total area for each boundary with the rule:
+\begin{verbatim}
+  // This sets up the initial value of the boundary area before summing over
+  // faces.  This needs to be set to zero as this is the indentity of the
+  // summation operator
+  $rule unit(boundaryArea_X<-boundaryName(X)),parametric(boundaryName(X))  {
+    $boundaryArea_X = 0 ;
+  }
+  
+  // Add the areas from each face.  In some cases, for example when
+  // running in axisymmetric mode the area might be zero, so the max
+  // function is there to keep that case from generating a divide by zero
+  // condition.
+  $rule apply(boundaryArea_X<-area,boundaryName(X))[Loci::Summation],
+    parametric(boundaryName(X)) {
+    // note, the area is the sada component of the area input, the n component
+    // is the normal vector
+    join($boundaryArea_X,max($area.sada,1e-13)) ;
+  }
+\end{verbatim}
+
+In this set of parametric rules the {\tt boundaryArea\_X} variable will be
+created for each boundary condition with the {\tt X} replaced by each
+boundary name.  Now we can compute the weighted temperature with the
+following rules:
+\begin{verbatim}
+  // Now we will compute the area weighted average temperature
+  $type boundaryMeanTemp_X param<real> ;
+
+  // set the initial value for the mean temp
+  $rule unit(boundaryMeanTemp_X<-boundaryName(X)),parametric(boundaryName(X))  {
+    $boundaryMeanTemp_X = 0 ;
+  }
+  
+  // Now compute the weighted sum of the of the temperature.  The temperature
+  // at the boundary face is given by temperature_f
+  $rule apply(boundaryMeanTemp_X<-area,temperature_f,boundaryArea_X,boundaryName(X))[Loci::Summation],
+    parametric(boundaryName(X)) {
+    double weight = max($area.sada,1e-13)/$boundaryArea_X ;
+    join($boundaryMeanTemp_X,weight*$temperature_f) ;
+  }
+\end{verbatim}
+
+Now we can output the integrated value.  Note, that although this
+appears to be one rule, one will be instantiated for each boundary
+surface.  In the end this will generate output for each boundary.
+\begin{verbatim}
+  // Now output to stdout the average temperature.  Do this output only
+  // when the code is outputting boundary plot files.
+  // Note, since this is only output once, we use the prelude and
+  // because we are in the prelude we must use the dereference operatpr
+  // '*' to access the computed parameters.  The $[Once] tells Loci that
+  // you only want to output this once even when running in parallel where
+  // there would be multiple instances of execution
+  $rule pointwise(OUTPUT<-boundaryMeanTemp_X,boundaryName(X)),
+    conditional(do_boundary_plot),
+    parametric(boundaryName(X)), prelude {
+    $[Once] {
+      cout << "Boundary " << *$boundaryName(X) << " has mean temperature of " 
+           << *$boundaryMeanTemp_X << " Kelvin" << endl ;
+    }
+  } ;
+  //^ This semicolon is needed because we are not following the prelude
+  //  section with a compute section.
+\end{verbatim}
+\clearpage
+\section{Volume Integration}
+In this example we will show how to perform a volume integration over
+each named component of the mesh.  This will work similarly to the
+surface integration except that we will use the {\tt volumeTag(X)}
+parametric variable instead.  For this example we will compute the
+integrated fluid kinetic energy by simply adding up the kinetic energy
+integrated over each cell.  The basic approach is as follows:
+\begin{verbatim}
+  // KEComponent_X is the integrated kinetic energy for component X.  This
+  // rule is parametric so one of these variables will be created for each
+  // component.
+  $type KEComponent_X param<double> ;
+  $rule unit(KEComponent_X),constraint(volumeTag(X)),
+    parametric(volumeTag(X)) {
+    $KEComponent_X = 0 ;
+  }
+  // Here we integrate the kinetic energy over each cell which by use
+  // of the midpoint rule is simply vol*rho*0.5*dot(u,u), then the sum
+  // is the total kinetic energy
+  $rule apply(KEComponent_X<-vol,rho,u)[Loci::Summation],
+    constraint(volumeTag(X)),parametric(volumeTag(X)) {
+    double kecell = 0.5*$vol*$rho*dot($u,$u) ;
+    join($KEComponent_X,kecell) ;
+  }
+\end{verbatim}
+Then {\tt KEComponent\_X} can be written out to the screen in a similar
+fashion as the previous example.
+
+
+\clearpage
+\section{Adding a Volume Source}
+
+Another common type of addition to the solver is to add a new source
+term to the equations.  In this example we add a body force to return
+momentum that is lost to viscous walls for the purpose of computing
+channel flow type of simulations.  When using the implicit solver a
+jacobian may need to also be computed depending on the stiffness of
+the source term.  In {\it flowPsi} there are two different possible
+jacobian types that will need to be supported to support all implicit
+formulations.  By default the code uses jacobians with respect to the
+primitive variables density and gage pressure, but in modes using the
+local preconditioner it will use temperature and gage pressure
+instead.  If you want to support both modes of operation you will need
+to define both types of jacobians.
+
+For the channel flow case we first need to find out how much momentum
+was lost through the fluid interaction with the viscous walls.  For
+this we utilize a convenience variable ({\tt AllViscousBCs}) that
+contains all viscous boundary conditions including {\tt viscousWall}
+and {\tt wallLaw}.  For the integration of the momentum flux we
+consider both the inviscid flux, {\tt iflux}, and the viscous flux
+{\tt vflux}.  Since these variables contain mass, momentum, and energy
+fluxes, we need to extract just the part that we are going to use.
+For the inviscid flux we skip the first item as this is the mass flux.
+For the viscous flux the first item is the momentum flux as there is
+no mass flux in the variable {\tt vflux}
+
+\begin{verbatim}
+  $type viscousWallMomentumFlux param<vect3d> ;
+  $rule unit(viscousWallMomentumFlux),constraint(UNIVERSE) {
+    $viscousWallMomentumFlux = vect3d(0,0,0) ;
+  }
+  // Note viscous and inviscid flux have already been integrated over the 
+  // boundary facet area.  We just need to sum up their contributions
+  $rule apply(viscousWallMomentumFlux<-iflux)[Loci::Summation],
+    constraint(AllViscousBCs) {
+    const int mi = 1
+    // extract inviscid momentum flux
+    vect3d mflux($iflux[mi+0],$iflux[mi+1],$iflux[mi+2]) ; 
+    join($viscousWallMomentumFlux,mflux) ;
+  }
+  $rule apply(viscousWallMomentumFlux<-vflux,qvi)[Loci::Summation],
+    constraint(AllViscousBCs) {
+    const int mi = 0 ;
+    // extract viscous momentum flux
+    vect3d mflux($vflux[mi+0],$vflux[mi+1],$vflux[mi+2]) ; 
+    join($viscousWallMomentumFlux,mflux) ;
+  }
+\end{verbatim}
+
+Now we can compute the total force that we need to add back into the
+system to restore the lost momentum. To do this we also integrate the
+total mass in the volume using a similar unit/apply rule combination
+to compute the variable {\tt massSum}.  The body force is then
+computed for each cell based on the local density.  We also add a term
+to the energy equation to account for the energy added to the system
+due to this addition (since we do not wish this energy to be deducted
+from the internal energy of the fluid).  Adding the resulting body
+force to the solver then is implemented as:
+\begin{verbatim}
+  //add friction loss to the source term
+  $rule apply(src<-dragAccel,rho,vol,cellcenter,u)[Loci::Summation] {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4 ;
+    $src[mi] += $dragAccel.x*$rho*$vol ;
+    $src[mj] += $dragAccel.y*$rho*$vol ;
+    $src[mk] += $dragAccel.z*$rho*$vol ;
+    $src[ei] += $dragAccel.x*$u.x*$rho*$vol ;
+  }
+\end{verbatim}
+
+The jacobians in {\it flowPsi} are computed with respect to the
+primitive variables gage pressure, temperature, and velocity.  The
+jacobians for the diagonal blocks are stored in the variable {\tt
+  srcJ}.  For this simple source term the jacobians are
+straightforward to implement which is shown below:
+\begin{verbatim}
+  $rule apply(srcJ<-rho,gagePressure,temperature,Pambient,u,dragAccel,vol)[Loci::Summation],
+    constraint(vol) {
+    const int mi = 1 ;
+    const int mj = mi + 1 ;
+    const int mk = mi + 2 ;
+    const int ei = 4 ;
+
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    real coefP = drdp*$vol ;
+    real coefT = drdt*$vol ;
+    real rho_vol = $rho*$vol ;
+    $srcJ[mi][4] += $dragAccel.x*coefP ;
+    $srcJ[mj][4] += $dragAccel.y*coefP ;
+    $srcJ[mk][4] += $dragAccel.z*coefP ;
+    $srcJ[ei][4] += dot($dragAccel,$u)*coefP ;
+    $srcJ[mi][0] += $dragAccel.x*coefT ;
+    $srcJ[mj][0] += $dragAccel.y*coefT ;
+    $srcJ[mk][0] += $dragAccel.z*coefT ;
+    $srcJ[ei][0] += dot($dragAccel,$u)*coefT ;
+    $srcJ[ei][mi] += $dragAccel.x*rho_vol ;
+    $srcJ[ei][mj] += $dragAccel.y*rho_vol ;
+    $srcJ[ei][mk] += $dragAccel.z*rho_vol ;
+  }
+\end{verbatim}
+\clearpage
+\section{Scalar Transport}
+
+The {\it flowPsi} code provides an infrastructure that makes it simple to
+add new variables that will be transported with the fluid flow.  These
+variables makes it simple to add new models to accompany the basic
+fluid flow.  In this section we will discuss two examples.  First the
+development of a simple tracer variable that can inject spatially
+distributed sine waves that can be convected with the flow and a
+second which goes through the implementation of a simple one equation
+turbulence model.  One advantage of using the scalar transport
+facilities is that these facilities include interfaces with the
+restart, overset, and time integration facilities of the {\it flowPsi}
+solver.  Thus the scalar transport facilities gives a comprehensive way
+of adding new variables to the flow solver.
+
+Before we begin, we will have a quick review of the implementation of
+the scalar transport equations. The scalar transport equation in
+conservative form is written for a convected scalar, $\phi$ as
+\begin{equation}
+\frac{\partial \rho \phi}{\partial t} + \nabla \cdot (\rho u \phi) = \nabla\cdot(\lambda \nabla \phi) + S_\phi,
+\end{equation}
+where $\rho$ is the fluid density, $u$ is the fluid velocity vector,
+$\lambda$ is a diffusion coefficient, and $S_\phi$ is a prescribed
+source term.  We note that by substituting $\phi=1$ into the above
+equation one recovers the global continuity equation.  We discretize
+the above equation in time and space to arrive at the expression
+\begin{eqnarray}
+\frac{\V}{\Delta t} \left[ (1+\psi)(\phi^{n+1}\rho^{n+1}-\phi^n\rho^n) + \psi(\phi^n\rho^n-\phi^{n-1}\rho^{n-1})\right ] = \\\nonumber
+ -\sum\phi^{n+1}_u\dot{m}_f + \sum{D_\phi}_f + S_\phi,
+\label{eq:scalar1}
+\end{eqnarray}
+where $\phi_u$ is an upwinded extrapolation of $\phi$ based on the
+sign of the face mass flux $\dot{m}$ and ${D_\phi}_f$ is the numerical
+diffusion flux for scalar $\phi$.  Note that the discrete continuity equation is given by
+\begin{equation}
+\frac{\V}{\Delta t} \left[ (1+\psi)(\rho^{n+1}-\rho^n) + \psi(\rho^n-\rho^{n-1})\right ] = - \sum\dot{m}_f.
+\label{eq:continuityN}
+\end{equation}
+
+To improve the diagonal dominance of the scheme we employ a trick
+where we recognize that Eq. (\ref{eq:continuityN}) is zero when
+the system of equation is solved, thus we multiply Eq.
+(\ref{eq:continuityN}) by $\phi^{n+1}$ and subtract it from Eq.
+(\ref{eq:scalar1}) to arrive at the following expression:
+\begin{eqnarray}
+\frac{\V}{\Delta t} \left[ \left(1+\psi\right)\left(\phi^{n+1}-\phi^n\right)\rho^n + \left(\phi^n\rho^n-\phi^{n-1}\rho^{n-1}\right)\psi-\left(\rho^n-\rho^{n-1}\right)\phi^{n+1}\psi\right ] - \\\nonumber
+\left[\phi^{n+1}\sum\dot{m}_f-\sum\phi^{n+1}_u\dot{m}_f + \sum{D_\phi}_f + S_\phi\right] =L_\phi(\phi^{n+1}) = 0.
+\label{eq:scalar2}
+\end{eqnarray}
+The above operator, $L_\phi$, is solved using a Newton method
+concurrently with the fluid equations.  
+
+These facilities can be enable to track the convection and diffusion of
+any arbitrary scalar.  The facility is provided by the parametric
+variables {\tt scalarTransport(X,C)} or {\tt scalarTransportP(X,C)}
+where the first version is for variables that can be of any sign while
+the second is for variables that are always positive.  The first {\tt
+  X} argument to the parameter is the name of the scalar to be
+transported, while the second {\tt C} argument is a constraint that
+can be used to activate/deactivate the scalar integration.  Accessing
+this variable causes an entire iterative infrastructure to be
+constructed that solves the scalar transport equations which can then
+be augmented with additional source terms to create a wide variety of
+models.  An arbitrary number of scalar transport equations can be
+constructed.
+
+\subsection{Tracer Variable Example}
+
+The first example that we have is simply the convection of a tracer
+variable that will simply be convected with the flow.  This will allow
+us to show how to set up the boundary and initial conditions are
+setup.  For this we will create the scalar transport for the variable
+{\tt tracer}.  To setup {\it flowPsi} to transport the variable  we first need
+to instantiate the scalar transport equations.  This is accomplished
+with the line:
+\begin{verbatim}
+  $rule pointwise(OUTPUT<-scalarTransport(tracer,UNIVERSE)) { }
+\end{verbatim}
+Note that this rule will never actually execute.  Instead, the
+existence of this rule will cause the parametric {\tt scalarTransport}
+variable to be instantiated for the variable {\tt tracer}.  Setting
+the second argument to {\tt UNIVERSE} ensures that this scalar
+transport model will be always active.
+
+To complete the scalar transport equations we need to provide the
+state of the tracer variable at the boundaries.  For this we define
+the boundary variable {\tt tracer\_bc}.  In general we will define the
+variable for whatever our scalar name is followed by the {\tt \_bc}
+postfix.  In this case we will use a spatially sinusoidal function for
+boundaries that we mark as having the tracer and set the function to
+zero otherwise.  By default the boundary condition will use simple
+upwinding to determine the value of {\tt tracer\_f}.  To define this
+we simply use the rules:
+\begin{verbatim}
+  $type tracer_bc store<real> ;
+  
+  $rule pointwise(tracer_bc),constraint(ref->BC_options) {
+    $tracer_bc = 0 ;
+  }
+  
+  $rule pointwise(marker::tracer_bc<-facecenter,tracerNormal,tracerPt,tracerInterval),constraint(ref->tracer_BCoption) {
+    real r = 2.*M_PI*dot($facecenter-$tracerPt,$tracerNormal)/$tracerInterval ;
+    $tracer_bc = cos(r) ;
+  }
+\end{verbatim}
+
+
+Finally we need to output the tracer so that we can see where the
+tracer advected in the simulation.  This is accomplished with the line:
+\begin{verbatim}
+  OUTPUT_SCALAR("cell2node(tracer)",tracer) ;
+\end{verbatim}
+That is all that is needed to add the most basic type of scalar
+transport equation.  Next we will show how to develop a model with
+more comprehensive set of parts: a turbulence model.
+
+\subsection{The Menter one equation turbulence model}
+
+The Menter one equation turbulence model\cite{Menter.97} is formally
+derived from the $k-\epsilon$ model after eliminating $k$ and
+$\epsilon$ from the equations by using the definition of the eddy
+viscosity and by assuming that the turbulent shear stress is
+proportional to the turbulent kinetic energy.  The model solves the
+following single equation for the undamped eddy viscosity
+$\tilde{\nu}_t$:
+
+\begin{equation}
+\frac{\partial \rho \tilde{\nu}_t}{\partial t} + \nabla \cdot \left (\rho \vec{u} \tilde{\nu}_t\right) =
+\nabla \cdot \left[ \rho \left( \nu + \frac{\tilde{\nu}_t}{\sigma} \right) \nabla \tilde{\nu}_t \right] +
+\rho c_1 D_1 \tilde{\nu}_t S - \rho c_2 E_{1e} 
+\label{eq:MTR}
+\end{equation}
+
+\noindent
+where $S$ is the strain rate defined by:
+
+\begin{equation}
+S = \sqrt { \left(\nabla \vec{u}\right) \cdot \left( \nabla \vec{u} + \nabla \vec{u}^{T} \right)}
+\end{equation}
+
+
+\noindent
+The modified destruction term $E_{1e}$ is defined as:
+
+\begin{equation}
+E_{1e} = c_3 E_{BB} \tanh {\left ( \frac{E_{k-\epsilon}}{c_3 E_{BB}} \right )} \ ,
+\end{equation}
+
+\noindent
+where
+\begin{equation}
+E_{k-\epsilon} = {\tilde{\nu}_t}^2 \left ( \frac{1}{L_{VK}} \right )^2 = 
+{\tilde{\nu}_t}^2 \left ( \frac{\nabla S \cdot \nabla S}{S^2} \right )
+\end{equation}
+
+\noindent
+involves the inverse of the von Karman length scale, and $E_{BB}$ is
+the Baldwin-Barth destruction term:
+\begin{equation}
+E_{BB} = \nabla \tilde{\nu}_t \cdot \nabla \tilde{\nu}_t .
+\end{equation}
+
+The damping terms $D_1$ and $D_2$ are defined as:
+\begin{equation}
+D_1 = \frac{\nu_t + \nu}{\tilde{\nu}_t + \nu}
+\end{equation}
+
+\begin{equation}
+D_2 = 1 - e^{-(\tilde{\nu}_t/A^{+} \kappa \nu)^2} \ ,
+\end{equation}
+
+\noindent
+and the model constants are:
+\begin{equation}
+c_1 = 0.144, ~c_2 = 1.86, ~c_3 = 7, ~\kappa = 0.41, ~\sigma = 1, ~A^{+} = 13 \ .
+\end{equation}
+
+The damped eddy viscosity is obtained from:
+
+\begin{equation}
+\nu_t = D_2 \tilde{\nu}_t \ .
+\end{equation}
+
+The boundary conditions for $\tilde{\nu}_t$ at a solid wall are
+$\tilde{\nu}_t = 0$.  The initial and free-stream conditions are
+$\tilde{\nu}_{t \infty} \leq \nu_\infty$.  The default initial and
+free-stream value for $\tilde{\nu}_t$ is 5 x $10^{-9} \, m^2/s$.  Note
+that the boundary conditions are given in terms of the undamped eddy
+viscosity ($\tilde{\nu}_t$) rather than $\nu_t$.
+
+\subsubsection{Implementation}
+
+Examining equation (\ref{eq:MTR}) we note that the scalar transport
+will implement the first three terms.  We will need to define the
+diffusion coefficient and the last two terms to implement the
+turbulence model.  First we invoke the scalar transport of the
+variable {\tt nuTM} which represents the $\tilde{\nu}_t$ in the
+equations.  This is accomplished with the following code:
+\begin{verbatim}
+  $rule pointwise(OUTPUT<-scalarTransportP(nuTM,menter)) { }
+\end{verbatim}
+Here we constraint the model by the variable {\tt menter} which will
+be defined as part of the model as the set of constants that are used
+in the model.  For the initial conditions we will extract {\tt nu\_t}
+from the initial conditions.    This is extracted with the following
+rules:
+\begin{verbatim}
+  $type nuTM_ic store<real> ;
+  $type icRegionInfo blackbox<ICparsedInitRegion> ;
+
+  $rule pointwise(nuTM_ic<-icRegionInfo,cellcenter),
+    constraint(geom_cells,menter) {
+    double nu_tm ;
+    
+    $icRegionInfo.defaultState.get_nu_t(nu_tm) ;
+    $nuTM_ic = nu_tm ;
+  }
+\end{verbatim}
+
+To complete the basic transport of {\tt nuTM} we need to setup the
+boundary conditions for the model  For this we define:
+\begin{verbatim}
+  $type nuTM_bcVal store<real> ;
+  // extract the boundary condition from BC_options
+  $rule pointwise(nuTM_bcVal<-BC_options) {
+    real nuTM = 5e-9 ;
+    if($BC_options.optionExists("nu_t")) 
+      $BC_options.getOption("nu_t",nuTM) ;
+    $nuTM_bcVal = nuTM ;
+  }
+  // set boundary condition
+  $rule pointwise(nuTM_bc<- ref->nuTM_bcVal) {
+    $nuTM_bc = $ref->$nuTM_bcVal ;
+  }
+\end{verbatim}
+
+This does not complete the boundary condition however, as the default
+is to use upwinding to define the boundary face values.  However for a
+boundary such as a viscous wall the boundary value for {\tt nuTM\_f}
+must be set explicitly.  This is accomplished with the priority
+override rule that will replace the upwind definition with this
+Dirichlet one:
+\begin{verbatim}
+  $rule pointwise(noslip::nuTM_f),constraint(viscousWall_BC) {
+    $nuTM_f = 0.0 ;
+  }
+\end{verbatim}
+
+Now we need to define the scalar diffusion term which is the third
+term in equation (\ref{eq:MTR}).  This will be defined by a face value
+for the diffusion coefficient which will have a name derived from the
+scalar variable name by appending {\tt \_nu\_f}.  The diffusion term
+is thus implemented with the following rules:
+\begin{verbatim}
+  $type nuTM_nu_f store<real> ;
+  $rule pointwise(nuTM_nu_f<-rho_f,nuTM_f,mu_f,menter) {
+    const real sigma = $menter.sigma ;
+    $nuTM_nu_f = ($mu_f+$rho_f*$nuTM_f/sigma) ;
+  }
+  // The diffusion coefficient needs nuTM_f at all faces, but the
+  // infrastructure only defines them at the boundary.  
+  // For interior faces we set the face value to be simply the 
+  // reciprocal volume weighted average of the cell values
+  $rule pointwise(nuTM_f<-(cr,cl)->(vol,nuTM)) {
+    real vrvl = 1.0/($cr->$vol+$cl->$vol) ;
+    $nuTM_f = ($cr->$vol*$cl->$nuTM+$cl->$vol*$cr->$nuTM)*vrvl ;
+  }
+\end{verbatim}
+Now we have completely defined the first three terms of equation
+(\ref{eq:MTR}).  Now what remains is to define the destruction and
+production terms.  To add these terms we will use a unit rule to
+combine them with the previous terms in the variable {\tt nuTM\_src}.
+First lets consider the production term which which can be added using
+the rules:
+\begin{verbatim}
+  $type nuTM_prod store<real> ;
+  $rule pointwise(nuTM_prod<-nuTM,D1,rho,strainRate,vol,menter) {
+    const real c1 = $menter.c1 ;
+    const real P_k = $rho*c1*$D1*$nuTM*$strainRate ;
+    $nuTM_prod = P_k ;
+  }
+  //=======================================
+  // add integrated production term to rhs
+  //=======================================
+  $rule apply(nuTM_src<-nuTM_prod,vol)[Loci::Summation] {
+    $nuTM_src += $nuTM_prod*$vol ;
+  }
+\end{verbatim}
+where {\tt strainRate} is provide by the solver and {\tt D1} is the
+production damping function which is defined by the rule:
+\begin{verbatim}
+  $type D1 store<real> ;
+  $rule pointwise(D1<-nuTM,tmu,mu,rho) {
+    const real nut = $tmu/$rho ;
+    const real nu = $mu/$rho ;
+    $D1 = (nut+nu)/($nuTM+nu) ;
+  }
+\end{verbatim}
+Note, the turbulent viscosity ({\tt tmu}) has not yet been defined
+but will be shortly.  The order that rules appear in the file do not
+matter.  Note, we have not considered the jacobian of the production
+term.  In general the sign of the production jacobian is destabilizing
+and as a general rule it is desirable to leave this term out of an
+implicit implementation.
+
+Next we will consider the last destruction term.  This can be
+implemented using the following rules:
+\begin{verbatim}
+  $rule pointwise(nuTM_dest<-nuTM,strainRate,grads(nuTM),grads(strainRate),rho,menter) {
+    const real c3 = $menter.c3 ;
+    const real Ebb = dot($grads(nuTM),$grads(nuTM)) ;
+    const real Sdot = dot($grads(strainRate),$grads(strainRate)) ;
+    const real S2 = $strainRate*$strainRate ;
+    const real Eke = pow($nuTM,2)*Sdot/(S2+EPSILON) ;
+    real E1e = c3*Ebb*tanh(Eke/(c3*Ebb+EPSILON)) ;
+    const real c2 = $menter.c2 ;
+    $nuTM_dest = $rho*c2*E1e ;
+  }
+
+  //======================================
+  // Add integrated destruction term rhs
+  //======================================
+  $rule apply(nuTM_src<-nuTM_dest,vol)[Loci::Summation] {
+    join($nuTM_src, -$nuTM_dest*$vol) ;
+  }
+\end{verbatim}
+One point to note on this is that we need the gradient of {\tt strainRate}
+to implement this term.  For this implementation we are simply using
+the least squares gradient provided by the FVM module to compute
+this.  However, we will run into a problem here because the gradient
+computation will require a value for {\tt strainRate} at the face which is
+not provided by the solver.  For expediency we will assume that 
+{\tt strainRate} is relatively constant at the boundaries and just
+copy from the cell to the face.  This is accomplished with the rule
+\begin{verbatim}
+  $rule pointwise(strainRate_f<-ci->strainRate) {
+    $strainRate_f = $ci->$strainRate ;
+  }
+\end{verbatim}
+This implementation is OK in a pinch, but more sophisticated methods
+for computing this would be suggested for a production level
+implementation.  In particular the recursive application of least
+squares gradients can be sensitive to numerical noise and the
+treatment of the boundary values may lead to spurious results.  For
+our limited tests this implementation seems to produce satisfactory
+results.
+
+For the destruction term it can be helpful to include a jacobian
+term.  However, due to the gradients of {\tt nuTM} used in the
+destruction term, the exact jacobian can be expensive and tedious to
+derive.  For this reason we use a diagonalized approximation that can
+stabilize the solver with a reasonable cost.  The diagonal term of the
+jacobian is in the variable {\tt nuTM\_srcJ}.  Our approximation is
+implemented using the following rule
+\begin{verbatim}
+  //=================================================
+  // Apply an approximate destruction term jacobian
+  //=================================================
+  $type nuTM_srcJ store<real> ;
+  $rule apply(nuTM_srcJ<-nuTM_dest,vol,nuTM)[Loci::Summation] {
+    join($nuTM_srcJ, -$vol*2.*$nuTM*($nuTM_dest/pow($nuTM,2))) ;
+  }
+\end{verbatim}
+
+Now all that remains is defining the turbulent viscosity which is
+computed from the scalar variable we are solving combined with a
+the damping term $D_2$.  This is defined using the rules:
+\begin{verbatim}
+  // nuTM damping function
+  $type D2 store<real> ;
+  $rule pointwise(D2<-nuTM,rho,mu,menter) {
+    const real aplus = $menter.aplus ;
+    const real kappa = $menter.kappa ;
+    const real nu = $mu/$rho ;
+    const real a1 = pow($nuTM/(aplus*kappa*nu),2) ;
+    $D2 = 1.-exp(-a1) ;
+  }
+  //=========================================================
+  // Define turbulent viscosity for mean flow solver to use
+  //=========================================================
+  $rule pointwise(menter::tmu<-nuTM,rho,D2) {
+    $tmu = $rho*$D2*$nuTM ;
+  }
+\end{verbatim}
+
+And with this we complete the implementation of the turbulence model.
+
+\bibliographystyle{plain}
+\bibliography{turbulence}
+\end{document}

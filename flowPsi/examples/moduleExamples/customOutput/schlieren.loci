@@ -1,0 +1,52 @@
+// Include Loci system 
+#include <Loci.h>
+// defines types used by flowPsi
+#include "flowTypes.h"
+// Include IO infrastructure
+#include "flowPsiIO.h"
+// defines Loci types for flowPsi variables
+$include "flowPsi.lh"
+
+// This example shows how to add derived variables to the output of flowPsi
+// In this case we are outputing a variable that can be used for numerical
+// sclieren imaging which is visualized as the log10 of the magnitude of
+// the density gradient
+
+namespace schlieren {
+  using namespace flowPsi ;
+  // compute numerical schleren as log of gradient magnitude
+
+  // define types for cell and boundary face values
+  $type loggradrho store<double> ;
+  $type loggradrho_f store<double> ;
+
+  // To interpolate to the nodal values we need both cell values and boundary
+  // face values.  Thus we have two rules to compute the value of interest
+  $rule pointwise(loggradrho<-grads(rho)) {
+    $loggradrho = log10(max(norm($grads(rho)),1e-4)) ;
+  }
+  $rule pointwise(loggradrho_f<-grads_f(rho)) {
+    $loggradrho_f = log10(max(norm($grads_f(rho)),1e-4)) ;
+  }
+
+  // This tells the code how to output the schlieren, we will need to add
+  // 'schlieren' to the plot_output variable to get plot outputs from the code
+  // Note: cell2node is a parametric rule provided by the FVM module that 
+  // performs interpolation from the cell values computed in flowPsi to the
+  // nodal values used by plot programs.  The second argument to this macro
+  // is the variable name that will be output to the plot directory
+  // The type of the data output on the nodes is a store<float> not a 
+  // store<real>.  The cell2node rule is defined as a store<float> and expects
+  // cell and face values to be store<double>
+  OUTPUT_SCALAR("cell2node(loggradrho)", schlieren) ;
+
+  // This is used to output the schlerin values on the boundary facets, to get
+  // this output data put schlierenb in the plot_output variable.
+  // The first argument to this macro is the variable that will be output
+  // while the second argument is the name of the variable output.
+  // The third argument for this boundary is defines the constraint of the
+  // subset of boundary faces that will be output.  Since all boundary faces
+  // have the "ci" map, this will output for all boundary faces.
+  OUTPUT_BNDRY_SCALAR("loggradrho_f",schlierenb,"ci") ;
+}
+    

@@ -1,0 +1,229 @@
+//----------------------------------------------------------------------------
+// Example of building scalar equation solver
+// Menter's 1 equation turbulence model implementation
+#include <Loci.h>
+#include <Tools/stream.h>
+#include <string>
+#include "flowTypes.h"
+// This include is needed to setup boundary condition checks for the
+// boundary inputs for the turbulence variable used by this model
+#include "readGrid.h"
+// This include is needed to add output for the turbulence model scalar
+#include "flowPsiIO.h"
+// This include is needed to access the initial conditions input for
+// setting up initial conditions
+#include "initialConditions.h"
+
+#include <vector>
+using std::vector ;
+
+// Special include files for the Menter model
+#include "MTR_param.h"
+$include "MTR.lh"
+
+namespace flowPsi {
+  //===========================================================================
+  // This is a special set of checks needed to add nu_t to the possible inputs
+  // for inflow boundary conditions
+  //===========================================================================
+  class turbulencenu_tm_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+    std::string variablesChecked() { return "nu_t" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+  register_BC<turbulencenu_tm_check> register_BC_turbulencenu_tm_check ;
+
+  //===========================================================================
+  // Setup the default parameters for this turbulence model so users can
+  // tune if necessary.  The parameters are defined by the constructor
+  // of the class.  Look in MTR_param.h for definition
+  //===========================================================================
+  $type menter param<MTR1eq_param> ;
+  $rule default(menter),
+    comments("Parameters used in the definition of the Menter 1 Eq turbulence model."){}
+
+  //===========================================================================
+  // Setting up scalar transport of nuTM variables with the mean flow.
+  // This rule actually never executes, but the rule causes the instantiation
+  // of flowPsi's scalar transport infrastructure.  This handles the convection
+  // terms of the scalar nuTM.  The second argument to scalar transport is
+  // what constrains the application of the scalar transport.  In this case
+  // we want it enabled whenever the module is loaded so the constraint
+  // is set to the menter model parameters which will always be defined.
+  //===========================================================================
+  $type scalarTransportP(X,C) store<real> ;
+  $rule pointwise(OUTPUT<-scalarTransportP(nuTM,menter)) { }
+
+  //===========================================================================
+  // Initial conditions extracted from the icRegionInfo
+  //===========================================================================
+  $type nuTM_ic store<real> ;
+  $type initialConditionsTurbnuTilde param<vector<real> > ;
+
+  $rule singleton(initialConditionsTurbnuTilde<-
+		  icRegionInfo) {
+    const int sz = $icRegionInfo.size() ;
+    vector<real> nut_list ;
+    for(int i=0;i<sz;++i) {
+      real nut = 5e-9 ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("nu_t")) {
+	finput.getOption("nu_t",nut) ;
+      }
+      if(finput.optionExists("nuTilde")) {
+	finput.getOption("nuTilde",nut) ;
+      }
+      nut_list.push_back(nut) ;
+
+    }
+    $initialConditionsTurbnuTilde.swap(nut_list) ;
+  }
+
+  $rule pointwise(nuTM_ic<-initialConditionsTurbnuTilde,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $nuTM_ic = $initialConditionsTurbnuTilde[$icRegionId] ;
+  }
+
+  //===========================================================================
+  // The diffusion terms are also provided by the scalar transport setup.
+  // To utilize the diffusion term we need to define the diffusion coefficient
+  // at the faces of the mesh.  The diffusion coefficient name will be the
+  // transported variable name followed by _nu_f
+  //===========================================================================
+  $type nuTM_nu_f store<real> ;
+  $rule pointwise(nuTM_nu_f<-rho_f,nuTM_f,mu_f,menter) {
+    const real sigma = $menter.sigma ;
+    $nuTM_nu_f = ($mu_f+$rho_f*$nuTM_f/sigma) ;
+  }
+
+  //===========================================================================
+  // Setup boundary conditions for model.  The default value for nuTM will be 
+  // 5e-9 (no turbulence).  If the boundary conditions set nu_t, then this
+  // will be used instead.
+  //===========================================================================
+  $type nuTM_bcVal store<real> ;
+  // extract the boundary condition from BC_options
+  $rule pointwise(nuTM_bcVal<-BC_options) {
+    real nuTM = 5e-9 ;
+    if($BC_options.optionExists("nu_t")) 
+      $BC_options.getOption("nu_t",nuTM) ;
+    $nuTM_bcVal = nuTM ;
+  }
+  // set boundary condition
+  $rule pointwise(nuTM_bc<- ref->nuTM_bcVal) {
+    $nuTM_bc = $ref->$nuTM_bcVal ;
+  }
+
+  // For the viscous wall we override the default and set nuTM to zero
+  $rule pointwise(noslip::nuTM_f),constraint(viscousWall_BC) {
+    $nuTM_f = 0.0 ;
+  }
+  // for interior faces we set the face value to be simply the reciprocal
+  // volume weighted average of the cell values
+  $rule pointwise(nuTM_f<-(cr,cl)->(vol,nuTM)) {
+    real vrvl = 1.0/($cr->$vol+$cl->$vol) ;
+    $nuTM_f = ($cr->$vol*$cl->$nuTM+$cl->$vol*$cr->$nuTM)*vrvl ;
+  }
+
+  //===========================================================================
+  // Everything above this sets up the boundary conditions, convection, and
+  // diffusion terms for the turbulence model.  Now we will setup the 
+  // production and destruction terms
+  //===========================================================================
+
+  // Note, since we will need a gradient of strainRate we need to define
+  // strainRate at the boundaries.  This is not provided by the flowPsi solver
+  // A simple solution is to assume the strainRate does not change near the
+  // boundary and copy the data.
+  $type strainRate_f store<real> ;
+  $rule pointwise(strainRate_f<-ci->strainRate) {
+    $strainRate_f = $ci->$strainRate ;
+  }
+
+  // production damping function
+  $type D1 store<real> ;
+  $rule pointwise(D1<-nuTM,tmu,mu,rho) {
+    const real nut = $tmu/$rho ;
+    const real nu = $mu/$rho ;
+    $D1 = (nut+nu)/($nuTM+nu) ;
+  }
+
+  // nuTM damping function
+  $type D2 store<real> ;
+  $rule pointwise(D2<-nuTM,rho,mu,menter) {
+    const real aplus = $menter.aplus ;
+    const real kappa = $menter.kappa ;
+    const real nu = $mu/$rho ;
+    const real a1 = pow($nuTM/(aplus*kappa*nu),2) ;
+    $D2 = 1.-exp(-a1) ;
+  }
+
+  // one equation destruction term
+  $type nuTM_dest store<real> ;
+
+  $rule pointwise(nuTM_dest<-nuTM,strainRate,grads(nuTM),grads(strainRate),rho,menter) {
+    const real c3 = $menter.c3 ;
+    const real Ebb = dot($grads(nuTM),$grads(nuTM)) ;
+    const real Sdot = dot($grads(strainRate),$grads(strainRate)) ;
+    const real S2 = $strainRate*$strainRate ;
+    const real EPSILON=1e-20 ;
+    const real Eke = pow($nuTM,2)*Sdot/(S2+EPSILON) ;
+    real E1e = c3*Ebb*tanh(Eke/(c3*Ebb+EPSILON)) ;
+    const real c2 = $menter.c2 ;
+    $nuTM_dest = $rho*c2*E1e ;
+  }
+
+  //===========================================================================
+  // Add integrated destruction term rhs
+  //===========================================================================
+  $rule apply(nuTM_src<-nuTM_dest,vol)[Loci::Summation] {
+    join($nuTM_src, -$nuTM_dest*$vol) ;
+  }
+
+  //===========================================================================
+  // Apply an approximate destruction term jacobian
+  //===========================================================================
+  $type nuTM_srcJ store<real> ;
+  $rule apply(nuTM_srcJ<-nuTM_dest,vol,nuTM)[Loci::Summation] {
+    join($nuTM_srcJ, -$vol*2.*$nuTM*($nuTM_dest/pow($nuTM,2))) ;
+  }
+
+  // Production term
+  $type nuTM_prod store<real> ;
+  $rule pointwise(nuTM_prod<-nuTM,D1,rho,strainRate,vol,menter) {
+    const real c1 = $menter.c1 ;
+    const real P_k = $rho*c1*$D1*$nuTM*$strainRate ;
+    $nuTM_prod = P_k ;
+  }
+
+
+  //===========================================================================
+  // add integrated production term to rhs
+  //===========================================================================
+  $rule apply(nuTM_src<-nuTM_prod,vol)[Loci::Summation] {
+    $nuTM_src += $nuTM_prod*$vol ;
+  }
+
+
+  //===========================================================================
+  // Define turbulent viscosity for mean flow solver to use
+  //===========================================================================
+  $rule pointwise(menter::tmu<-nuTM,rho,D2) {
+    $tmu = $rho*$D2*$nuTM ;
+  }
+
+  //===========================================================================
+  // Add output of scalar transport variable
+  //===========================================================================
+
+  OUTPUT_SCALAR("cell2node(nuTM)",nu_tm) ;
+}

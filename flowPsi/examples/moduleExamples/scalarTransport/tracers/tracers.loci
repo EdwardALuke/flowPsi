@@ -1,0 +1,104 @@
+//----------------------------------------------------------------------------
+// Example of building scalar equation solver
+// Tracer equation that transports tracer value with flow
+#include <Loci.h>
+#include <string>
+#include "flowTypes.h"
+// This include is needed to setup boundary condition checks for the
+// boundary inputs for the turbulence variable used by this model
+#include "readGrid.h"
+// This include is needed to add output for the turbulence model scalar
+#include "flowPsiIO.h"
+// This include gets Loci types for flowPsi variables
+$include "flowPsi.lh"
+
+using std::cout ;
+using std::endl ;
+
+namespace flowPsi {
+  //===========================================================================
+  // This is a special set of checks needed to add tracer to the possible inputs
+  // for inflow boundary conditions
+  //===========================================================================
+  class tracer_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+    std::string variablesChecked() { return "tracer" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+  
+  // The construction of this object registers this check with CHEM
+  // The name of the checker is not important
+  register_BC<tracer_check> register_BC_tracer_check ;
+
+
+  //===========================================================================
+  // Get options for tracer injection.  Tracers will be input based on distance
+  // from a plane.  The normal and a point on the plane specifies the plane.
+  // The spacing tells the distance between the tracer peaks.
+  //===========================================================================
+
+  $type tracerParams param<options_list> ;
+  $rule default(tracerParams) {}
+
+  $type tracerNormal param<vect3d> ;
+  $type tracerPt param<vect3d> ;
+  $type tracerInterval param<real> ;
+  $rule singleton(tracerNormal<-tracerParams) {
+    vect3d n = vect3d(0.0,1.0,0.0) ;
+    if($tracerParams.optionExists("normal")) {
+      $tracerParams.getOptionUnits("normal","",n) ;
+    }
+    $tracerNormal = n ;
+  }
+
+  $rule singleton(tracerPt<-tracerParams) {
+    vect3d x = vect3d(0.0,0,0.0) ;
+    if($tracerParams.optionExists("pt")) {
+      $tracerParams.getOptionUnits("pt","m",x) ;
+    }
+    $tracerPt= x ;
+  }
+  
+  $rule singleton(tracerInterval<-tracerParams) {
+    $tracerInterval = 1 ;
+    if($tracerParams.optionExists("spacing")) {
+      $tracerParams.getOptionUnits("spacing","m",$tracerInterval) ;
+    }
+  }
+
+  //===========================================================================
+  // Setup the transport of the scalar called tracer
+  //===========================================================================
+  $rule pointwise(OUTPUT<-scalarTransport(tracer,UNIVERSE)) { }
+
+  $type tracer_ic store<real> ;
+  $rule pointwise(tracer_ic <- cellcenter) {
+    $tracer_ic = 0 ;
+  }
+  
+  $type tracer_bc store<real> ;
+  
+  $rule pointwise(tracer_bc),constraint(ref->BC_options) {
+    $tracer_bc = 0 ;
+  }
+  
+  $rule pointwise(marker::tracer_bc<-facecenter,tracerNormal,tracerPt,tracerInterval),constraint(ref->tracer_BCoption) {
+    real r = 2.*M_PI*dot($facecenter-$tracerPt,$tracerNormal)/$tracerInterval ;
+    $tracer_bc = cos(r) ;
+  }
+
+  //===========================================================================
+  // Add output of scalar transport variable
+  //===========================================================================
+
+  OUTPUT_SCALAR("cell2node(tracer)",tracer) ;
+}

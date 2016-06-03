@@ -1,0 +1,44 @@
+// Include Loci system 
+#include <Loci.h>
+// defines types used by flowPsi
+#include "flowTypes.h"
+// imports flowPsi IO functionality
+#include "flowPsiIO.h"
+// defines Loci types for flowPsi variables
+$include "flowPsi.lh"
+//----------------------------------------------------------------------------
+// Find the integrated kinetic energy for each tagged component grid
+namespace flowPsi {
+	  
+  // The volumeTag(X) is a parametric variable that is created by the grid
+  // reader and is a string with the name of the component and is defined for
+  // all of the cells of the component.
+  $type  volumeTag(X) param<string> ;
+  
+  // KEComponent_X is the integrated kinetic energy for component X.  This
+  // rule is parametric so one of these variables will be created for each
+  // component.
+  $type KEComponent_X param<double> ;
+  $rule unit(KEComponent_X),constraint(volumeTag(X)),
+    parametric(volumeTag(X)) {
+    $KEComponent_X = 0 ;
+  }
+  // Here we integrate the kinetic energy over each cell which by use
+  // of the midpoint rule is simply vol*rho*0.5*dot(u,u), then the sum
+  // is the total kinetic energy
+  $rule apply(KEComponent_X<-vol,rho,u)[Loci::Summation],
+    constraint(volumeTag(X)),parametric(volumeTag(X)) {
+    double kecell = 0.5*$vol*$rho*dot($u,$u) ;
+    join($KEComponent_X,kecell) ;
+  }
+  // Write out the integrated value for each component to stdout
+  $rule pointwise(OUTPUT<-KEComponent_X,volumeTag(X)),
+    conditional(do_plot),
+    parametric(volumeTag(X)), prelude {
+    using namespace std ;
+    $[Once] {
+      cout << "Component " << *$volumeTag(X) << " has fluid kinetic energy of  " << *$KEComponent_X << endl ;
+    }
+  } ;
+
+}

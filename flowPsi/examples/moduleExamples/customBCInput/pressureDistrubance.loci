@@ -1,0 +1,105 @@
+// Include Loci system 
+#include <Loci.h>
+// defines types used by flowPsi
+#include "flowTypes.h"
+// This include is needed to setup boundary condition checks for the
+// boundary inputs needed for this BC change
+#include "readGrid.h"
+// defines Loci types for flowPsi variables
+$include "flowPsi.lh"
+
+using std::endl ;
+using std::cout ;
+
+//----------------------------------------------------------------------------
+// This module is adding a sinusoidal pressure distrubance to inflow boundary
+// conditions.  This is just an example of how to override the default 
+// values for the BC's
+//----------------------------------------------------------------------------
+
+namespace flowPsi {
+  
+  //--------------------------------------------------------------------------
+  // If we want to add new arguments to a boundary condition, we need to 
+  // let flowPsi know about the new variables so that a usage error is not
+  // issued.  This BC_check class does this job.  It's responsibility is 
+  // to tell flowPsi about the added boundary condition options and
+  // check them for validity and possibly issue error messages if
+  // the inputs do not conform to the added boundary condition requirements
+  // In this case we are adding to arguments, amplitude and frequency.
+  //--------------------------------------------------------------------------
+
+  // Here we create a checking class that inherits from BC_Check that is defined
+  // in read_grid.h
+  class pwave_check : public BC_Check {
+    string error_message ;
+  public:
+    // List which boundary conditions this checker is for
+    std::string boundaryConditions() { return "inflow,supersonicInflow,farfield" ; }
+    // List which variables this checker will verify
+    std::string variablesChecked() { return "amplitude,frequency" ; }
+    // Check for the existence of amplitude and frequency
+    // in our implementation these are optional, but if amplitude is
+    // given then frequency must also be given
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      bool check = true ;
+      if(bc_options.optionExists("amplitude")) {
+	if(!check_scalar_units(bc_options,"amplitude","Pa")) {
+	  error_message += "Pressure units needed for 'amplitude' " ;
+	  check = false ;
+	}
+	if(!bc_options.optionExists("frequency")) {
+	  error_message += "'amplitude' must also specify 'frequency' " ;
+	  check = false ;
+	}
+      }
+      return check ;
+    }
+    // Print out error messsage.  Used if checker fails to generate error
+    // message to the user.  Usually the error message is remembered from 
+    // when the checker was run.
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+  // The register_BC template registers this object in the boundary checker
+  // database.  The names are not important only that we create the object
+  // so that it is registered.
+  register_BC<pwave_check> register_BC_pwave_check ;
+  
+  
+  //--------------------------------------------------------------------------
+  // The variables amplitude and frequency are stuck in the BC_options 
+  // variable.  Now we need to extract them so that their values can be used
+  // in the boundary condition.  We will extract them to the variable
+  // amplitude_BC and frequency_BC.  The constraint amplitude_BCoption
+  // only contains the boundary surfaces that have been assigned an
+  // amplitude attribute
+  $type amplitude_BC store<real> ;
+  $rule pointwise(amplitude_BC<-BC_options),constraint(amplitude_BCoption) {
+    $BC_options.getOptionUnits("amplitude","Pa",$amplitude_BC) ;
+  }
+  $type frequency_BC store<real> ;
+  $rule pointwise(frequency_BC<-BC_options),constraint(frequency_BCoption) {
+    $BC_options.getOption("frequency",$frequency_BC) ;
+  }
+
+  // Now we compute the time dependent perturbation to the pressure
+  // NOTE, this variable will only exists for boundary surfaces that
+  // have been given both an amplitude and a frequency attribute
+  $type pgDelta_BC store<real> ;
+
+  $rule pointwise(pgDelta_BC<-stime,amplitude_BC,frequency_BC) {
+    $pgDelta_BC = $amplitude_BC*sin($stime*$frequency_BC*2.*M_PI) ;
+  }
+
+  // Override the reference condtions for the faces that adds in the
+  // perturbation.  This will be used instead of the default settings
+  $rule pointwise(distrbance::gagePressureRef<-
+		  ref->(gagePressureRef_BC,pgDelta_BC)) { 
+    $gagePressureRef = $ref->$gagePressureRef_BC + $ref->$pgDelta_BC ;
+  }
+}
+
