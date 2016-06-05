@@ -1,0 +1,32 @@
+  // Average varaiables
+  $type mu_avg store<real> ;
+  $type mu_avg_f store<real> ;
+  $type rho_avg store<real> ;
+  $type rho_avg_f store<real> ;
+  $type u_avg store<vect3d> ;
+  $type u_avg_f store<vect3d> ;
+  $type strainRate_avg store<real> ;
+  $type vort_avg store<vect3d> ;
+  $type vortMag_avg store<real> ;
+  $type divu_avg store<real> ;
+  $type uv_avg store<symmetricTensor> ;
+  $type temp_avg store<real> ;
+  $type temp_avg_f store<real> ;
+  // DHRL hooks
+  $type alpha_dhrl store<real> ;
+  $type alpha_dhrl_f store<real> ;
+  $type alpha_star_dhrl store<real> ;
+  $type alpha_star_dhrl_f store<real> ;
+  $type gamma_dhrl store<real> ;
+  $type gamma_dhrl_f store<real> ;
+  $type s_ratio store<real> ;
+  $type s_ratio_f store<real> ;
+  $type tmu_rans_eff_f store<real> ;
+  $type tmu_rans_f store<real> ;
+  $type tau_rans store<symmetricTensor> ;
+  $type tmu_sgs store<real> ;
+  $type prod_sgs store<real> ;
+  $type prod_les store<real> ;
+  $type prod_rans store<real> ;
+  $type prod_les store<real> ;
+

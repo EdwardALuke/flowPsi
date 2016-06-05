@@ -1,0 +1,80 @@
+//#############################################################################
+//#
+//# Copyright 2015, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "kOmega_param.h"
+
+$include "FVM.lh"
+$include "flowPsi.lh"
+$include "kOmega.lh"
+$include "dhrl.lh"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+namespace flowPsi {
+
+  // Implement viscous terms based on averaged quantities
+  $type vflux_rans store<Loci::Array<flowPsi::real,4> > ;
+
+  //Add viscous flux at face fc to cl[fc] cells.
+  $rule apply(cl->src<-vflux_rans)[Loci::Summation],
+    constraint(cl->geom_cells,ViscousSimulation) {
+    for(int i=0;i<4;++i)
+      $cl->$src[i+1] += $vflux_rans[i] ;
+  }
+
+  //add viscous flux at face fc to cr[fc] cells
+  $rule apply(cr->src<-vflux_rans)[Loci::Summation], 
+    constraint(cr->geom_cells,ViscousSimulation) {
+    for(int i=0;i<4;++i)
+      $cr->$src[i+1] -= $vflux_rans[i] ;
+  }
+
+  $rule pointwise(vflux_rans<-turbulentPrandtlNumber,area,tau_rans,u_f,
+                  grads_f(temp_avg),tmu_rans_eff_f,Cp,rho_f,rho_avg_f),
+    constraint(no_symmetry_BC) {
+
+    const vect3d an=$area.n ;
+    const real sada=$area.sada ;
+
+    $vflux_rans[0] = ($tau_rans.xx*an.x +$tau_rans.xy*an.y
+		      +$tau_rans.xz*an.z)*sada ;
+    $vflux_rans[1] = ($tau_rans.xy*an.x +$tau_rans.yy*an.y
+		      +$tau_rans.yz*an.z)*sada ;
+    $vflux_rans[2] = ($tau_rans.xz*an.x +$tau_rans.yz*an.y
+		      +$tau_rans.zz*an.z)*sada ;
+    //total work done by viscous shear (tau_rans),including heat dissipation
+    //and deformation work
+    $vflux_rans[3] = ($u_f.x*$vflux_rans[0]+$u_f.y*$vflux_rans[1]+
+		      $u_f.z*$vflux_rans[2]) ;
+    //conduction term in the energy part of viscous flux
+    const real Prt = $turbulentPrandtlNumber ;
+    real conduction = sada*dot($grads_f(temp_avg),an)*$tmu_rans_eff_f*$Cp/Prt ;
+    $vflux_rans[3] += conduction ;
+  }
+}
