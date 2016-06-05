@@ -1,0 +1,20 @@
+\subsection{Shear Stress Transport Model (SST)}
+
+The SST model is
+similar to the BSL model described above, except that $\sigma_{k1} =
+0.85$, and the eddy viscosity is defined as:
+
+\begin{equation}
+  \nu_t = \frac{a_1 k}{\max(a_1 \omega, \Omega F_{sst})},
+\end{equation}
+where $\Omega$ is the absolute value of the vorticity, and $a_1=0.31$.
+The blending function $F_{sst}$ is
+given by:
+\begin{equation}
+F_{sst} = tanh (arg^{2}_{sst}),
+\end{equation}
+where
+\begin{equation}
+arg_{sst} = \max \Bigl (2 \frac{\sqrt{k}}{0.09 \omega y},
+\frac{500 \nu}{y^2 \omega} \Bigr).
+\end{equation}

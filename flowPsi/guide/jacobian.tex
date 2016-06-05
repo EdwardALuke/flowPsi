@@ -1,0 +1,60 @@
+\subsection{Jacobian Formulations}
+
+The Jacobian matrix used in the Newton method, described by
+Eq.~(\ref{Jacobian}), consists of a block-diagonal matrix, formed from
+Jacobians of chemistry source terms, combined with both diagonal and
+off-diagonal matrices, formed from the differentiation of flux functions.
+When constructing this Jacobian, one takes advantage of the fact that
+the flux function, $\hat{F}(q_{l}, q_{r})$,
+is defined by the conservative variables on the left and
+right side of the face.  Then the Jacobian of this function will
+consist of two matrices, given by
+\begin{equation}
+\begin{split}
+fjl & = \mathcal{A}^{n+1}\frac{\partial \hat{F}(q_{l},q_{r})}{\partial q_{l}},\\
+fjr & = \mathcal{A}^{n+1}\frac{\partial \hat{F}(q_{l},q_{r})}{\partial q_{r}}.
+\end{split}
+\end{equation}
+The variables above, {\tt fjl} and {\tt fjr}, are Jacobians of the flux
+functions located at faces and are components of the overall Jacobian
+matrix given in Eq.~(\ref{Jacobian}).
+More details on the final form of the Jacobian matrix are given by 
+Luke\cite{luke.99}.
+
+\subsubsection{Inviscid Flux Jacobians}
+
+In the study, all Jacobians are evaluated analytically, except for the
+inviscid flux, whereby Jacobians associated with the Roe scheme are
+too complex to implement efficiently.  In this case, several
+alternatives are available: 1) use analytic Jacobians of simpler
+inviscid flux functions such as Steger-Warming or Van Leer, or 2)
+compute Jacobians of the Roe flux numerically. The
+analytic Van Leer Jacobian was found to provide superior stability properties,
+but severely hampered convergence of the implicit scheme.  On the
+other hand, the numerical Roe Jacobians provided better convergence
+rates, but sometimes produced ill-conditioned linear systems.  It was
+observed that these problems occurred in regions where discontinuities
+existed in the Roe Jacobians, due to the use of non-linear absolute
+value functions.  A compromise that appears to provide a reasonable
+balance between convergence and robustness has been found by smoothing
+the Roe flux function before taking its derivative.  This is
+accomplished by replacing the absolute value function $|x|$ with the continuous
+function $\sqrt{x^2+\epsilon}$, where $\epsilon$ is set to $.05$ times
+the average sound speed.
+
+\subsubsection{Viscous Flux Jacobians}
+
+In the construction of viscous flux Jacobians, a thin-layer
+approximation is used in the representation of the face gradient by
+using simple centered differences in the direction of the vector
+connecting cell centroids on either side of the face.
+
+\subsubsection{Jacobians for Turbulence Models}
+
+In order to preserve the diagonal dominance of the matrix in the
+linear system, positive parts of the source terms are not linearized:
+only the negative parts (which model the destruction of turbulence)
+are included in the Jacobians.  For the Jacobians used in the BSL,
+SST, and $k-\omega$ models the approach of Merci {\sl et
+  al.\/}\cite{Merci.00} is adopted.
+

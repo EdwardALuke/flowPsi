@@ -1,0 +1,64 @@
+\subsection{Geometric Integrations}
+
+In the previous section, numerical integrations over surfaces and
+volumes were described without explicitly defining the formulas
+used to evaluate Eqs.~(\ref{eq:volume_exact}) and~(\ref{eq:area_exact}).
+Here the numerical integrations that approximate the volumes and areas
+of generalized cells and faces are discussed in some detail.
+Several considerations have to be made regarding
+these computations.  First, when the nodes of a generalized face are
+not co-planar, the geometry of the face is not uniquely specified.
+A unique specification of the geometry of such faces can be obtained
+by subdividing the face into triangles: using a symmetric decomposition, each
+edge of the face, combined with the face centroid, creates a triangle.
+This strategy allows the face geometry to be independent of
+data-structures used to describe generalized meshes (the geometry is
+the same regardless of the ordering of the face edges).  Using this
+technique, the area for the face is determined numerically using the
+following summation
+\begin{equation}
+\Tilde{\mathcal{A}}_{c,f} = \frac{1}{2} \sum_{e=1}^{\mathbf{NE}_f} 
+(\Tilde{x}_{1,e}-\Tilde{x}_{c,f})\times(\Tilde{x}_{2,e}-\Tilde{x}_{c,f}),
+\label{eq:face_area}
+\end{equation}
+where $\Tilde{x}_{1,e}$ and $\Tilde{x}_{2,e}$ are the positions of the
+two nodes of edge $e$ in counter-clockwise order, and $\Tilde{x}_{c,f}$
+is the face centroid (approximated by an edge-length-weighted sum of
+edge centers).  Here the computed area is a vector, which is represented
+as the product of the face normal vector and the face area,
+$\Tilde{\mathcal{A}} = \mathcal{A} \Tilde{n}$.
+
+For numerical approximations of the volume integrals, it is essential to
+achieve a geometric conservation of volume, avoiding
+truncation errors in integrating volumes that would yield inaccurate total
+volume computations.  For example, one would expect that the sum of the
+individual cell volumes would be equal to the total grid volume if exact
+arithmetic were used.  To accomplish this, the volume of a cell is determined
+by decomposing it into tetrahedra and summing the individual
+tetrahedral volumes.  The volume of a tetrahedron is given by
+\begin{equation}
+\mathcal{V}_{tet} = \frac{1}{3!} \left(\Tilde{a} \cdot (\Tilde{b} \times
+  \Tilde{c})\right),
+\label{eq:tet_volume}
+\end{equation}
+where $\Tilde{a}$, $\Tilde{b}$, and $\Tilde{c}$ are the three edge vectors
+from a given vertex of the tetrahedron.  The volume of a generalized
+cell is then computed by using the triangulation of each face and the
+cell centroid: each surface triangle and the cell centroid define a
+tetrahedron.  The cell volume is the sum of the tetrahedra volumes.
+Thus, the volume of a cell is computed by combining
+Eqs.~(\ref{eq:face_area}) and~(\ref{eq:tet_volume}), and factoring, to obtain
+\begin{equation}
+\mathcal{V}_c = -\frac{1}{3} \sum_{f=1}^{\mathbf{NF}_c} (\Tilde{x}_{c,c}-
+\Tilde{x}_{c,f}) \cdot \Tilde{\mathcal{A}}_{c,f},
+\end{equation}
+where $\Tilde{x}_{c,c}$ is the cell centroid (approximated by the
+area-weighted sum of face centroids).  Notice that this computation assumes
+that the face normals point outward from the cell, which explains the
+negative sign. Using this
+approach, one can compute the correct volume of any cell, including
+highly non-convex cells.
+
+
+
+

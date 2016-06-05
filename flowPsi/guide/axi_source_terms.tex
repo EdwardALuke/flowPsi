@@ -1,0 +1,152 @@
+\section{Formulation for Axisymmetric Flows with Swirl}
+The axisymmetric flow formulation follows the same finite volume discretization procedures that are used for three dimensional flows, except that the formulation begins with the governing equations written in cylindrical coordinates ({\it{i.e.}}, in ($z, r, \theta$) coordinates which correspond to ($x, y, z$)).  The governing equations in cylindrical coordinates are\footnote{For simplicity, only the nonreacting equations are discussed here.}:
+
+\begin{equation}
+\frac{\partial Q}{\partial t} + \frac{\partial E}{\partial z} + \frac{1}{r} \frac{\partial (r F)}{\partial r} + \frac{1}{r} \frac{\partial G}{\partial \theta} + H =
+\frac{\partial E_v}{\partial z} + \frac{1}{r} \frac{\partial (r F_v)}{\partial r} + \frac{1}{r} \frac{\partial G_v}{\partial \theta} + H_v
+\end{equation}
+where the vector of conservative state variables, $Q$, inviscid fluxes, $E$, $F$, $G$,
+viscous fluxes, $E_v$, $F_v$, $G_v$ and coordinate transformation source terms, $H$ and $H_v$, are given by:
+
+\begin{equation}
+Q =
+\begin{bmatrix}
+\rho \\
+\rho u_z \\
+\rho u_r \\
+\rho u_\theta \\
+\rho e_0
+\end{bmatrix}
+,
+\end{equation}
+
+\begin{equation}
+E =
+\begin{bmatrix}
+\rho u_z \\
+\rho u_z^2 + p \\
+\rho u_z u_r \\
+\rho u_z u_\theta \\
+\left(\rho e_0 + p\right) u_z
+\end{bmatrix}, \quad
+F =
+\begin{bmatrix}
+\rho u_r \\
+\rho u_r u_z \\
+\rho u_r^2 + p \\
+\rho u_r u_\theta \\
+\left(\rho e_0 + p\right) u_r
+\end{bmatrix}, \quad
+G =
+\begin{bmatrix}
+\rho u_\theta \\
+\rho u_z u_\theta \\
+\rho u_r u_\theta \\
+\rho u_\theta ^2 + p \\
+\left(\rho e_0 + p\right) u_\theta
+\end{bmatrix}
+, 
+\end{equation}
+
+\begin{equation}
+E_v =
+\begin{bmatrix}
+0 \\
+\tau_{zz} \\
+\tau_{zr} \\
+\tau_{z \theta} \\
+u_z \tau_{zz} + u_r \tau_{zr} + u_\theta \tau_{z \theta} - q_z \\
+\end{bmatrix}
+,
+\end{equation}
+
+\begin{equation}
+F_v =
+\begin{bmatrix}
+0 \\
+\tau_{rz} \\
+\tau_{rr} \\
+\tau_{r \theta} \\
+u_z \tau_{rz} + u_r \tau_{rr} + u_\theta \tau_{r \theta} - q_r \\
+\end{bmatrix}
+,
+\end{equation}
+
+\begin{equation}
+G_v =
+\begin{bmatrix}
+0 \\
+\tau_{\theta z} \\
+\tau_{\theta r} \\
+\tau_{\theta \theta} \\
+u_z \tau_{\theta z} + u_r \tau_{\theta r} + u_\theta \tau_{\theta \theta} - q_\theta \\
+\end{bmatrix}
+,
+\end{equation}
+
+\begin{equation}
+H = - \frac{1}{r}
+\begin{bmatrix}
+0 \\
+0 \\
+p + \rho u_{\theta}^2\\
+0 \\
+0 \\
+\end{bmatrix}
+, \quad
+H_v = \frac{1}{r}
+\begin{bmatrix}
+0 \\
+0 \\
+- \tau_{\theta \theta} \\
+\tau_{r \theta} \\
+0 \\
+\end{bmatrix}
+.
+\label{axi_source}
+\end{equation}
+
+The shear stress components are defined as:
+\begin{eqnarray}
+\nonumber \tau_{z z} = 2 \mu_T \frac{\partial u_z}{\partial z} + \lambda \nabla \cdot \vec{V} \rule[-.6cm]{0cm}{1cm} \\
+\nonumber \tau_{r r} = 2 \mu_T \frac{\partial u_r}{\partial r} + \lambda \nabla \cdot \vec{V}
+\rule[-.6cm]{0cm}{1cm} \\
+\nonumber \tau_{\theta \theta} = 2 \mu_T \left( \frac{1}{r} \frac{\partial u_\theta}{\partial \theta} + \frac{u_r}{r} \right) + \lambda \nabla \cdot \vec{V}
+\rule[-.6cm]{0cm}{1cm} \\
+\tau_{r \theta} = \tau_{\theta r} = \mu_T \left [ r \frac{\partial }{\partial r} \left ( \frac{u_\theta}{r} \right ) + \frac{1}{r} \frac{\partial u_r}{\partial \theta} \right ]
+\rule[-.6cm]{0cm}{1cm} \\
+\nonumber \tau_{\theta z} = \tau_{z \theta} = \mu_T \left [ \frac{\partial u_\theta}{\partial z} + \frac{1}{r} \frac{\partial u_z}{\partial \theta} \right ]
+\rule[-.6cm]{0cm}{1cm} \\
+\nonumber \tau_{z r} = \tau_{r z} = \mu_T \left [ \frac{\partial u_z}{\partial r} + \frac{\partial u_r}{\partial z} \right ] , \\ \nonumber
+\end{eqnarray}
+where $\nabla \cdot \vec{V} = \frac{1}{r} \frac{\partial (r u_r)}{\partial r} + \frac{1}{r} \frac{\partial u_\theta}{\partial \theta} + \frac{\partial u_z}{\partial z}$ and $\lambda = - \frac{2}{3} \mu_T$.  The heat flux vector is defined as:
+\begin{equation}
+q_z = -k_T \frac{\partial T}{\partial z}  ~ , \quad q_r = -k_T \frac{\partial T}{\partial r} ~ , \quad q_\theta = -\frac{k_T}{r} \frac{\partial T}{\partial \theta} ~ ,
+\end{equation}
+and the total viscosity and thermal conductivity coefficients are:
+\begin{equation}
+\mu_T = \mu + \mu_{turb} ~ , \quad k_T = k + k_{turb} ~ .
+\end{equation}
+
+The axisymmetric equations with swirl are found by setting the
+$\theta$ derivatives to zero and by identifying the cylindrical
+velocity components $(u_z, u_r, u_\theta)$ with the Cartesian
+components $(u, v, w)$.  Furthermore, the equations are multiplied
+through by $2 \pi r$, and the areas and volumes are adjusted to
+account for a 360$^o$ rotation about the $x$-axis.  A grid may thus be
+translated by an arbitrary amount in the $z$ direction, and the
+axisymmetric flow will be computed in the $x-y$ plane.
+
+The resulting equations are:
+\begin{equation}
+\frac{\partial (2 \pi r Q)}{\partial t} + \frac{\partial (2 \pi r E)}{\partial z} + \frac{\partial (2 \pi r F)}{\partial r} + 2 \pi r H =
+\frac{\partial ( 2 \pi r E_v)}{\partial z} + \frac{\partial (2 \pi r F_v)}{\partial r} + 2 \pi r H_v ~ ,
+\end{equation}
+and the 2D/axisymmetric finite volume form is:
+\begin{equation}
+\frac{d}{dt} \int Q ~dS' +
+\int \left [ (E-E_v)\hat{n}_x + (F-F_v)\hat{n}_y \right ] ~dl' = - \int (H - H_v) ~dS'_y = 
+- \int r (H - H_v) ~dl'_y ~ .
+\end{equation}
+The quantity $dS'$ is the modified cell area ($dS' = 2 \pi r dS$), and $dl'$ is the modified side length of each cell ($dl' = 2 \pi r dl$).  The factor $2 \pi r$ is retained so that the integrations are taken over a 360$^o$ slice that is rotated about the $x$-axis\footnote{In the actual implementation, exact analytic area and volume integrations are used rather than the second order approximations given here.}.  The final step of identifying $dS'_y = r ~dl_y'$ is to ensure that a constant pressure uniform flow is numerically preserved.
+

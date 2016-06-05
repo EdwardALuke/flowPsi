@@ -1,0 +1,193 @@
+\subsection{Baseline Model (BSL)}
+
+It is well known that two-equation eddy-viscosity
+{\sl low-Reynolds-number\/} turbulence models are among the most widely
+used models for engineering applications today, and the $k-\epsilon$
+model with damping functions near the wall is the most popular.
+However, the $k-\epsilon$ model often suffers from numerical stability
+problems due to disparate turbulent time scales.  Another well-known
+two-equation turbulence model is the $k-\omega$ model, developed by
+Wilcox\cite{Wilcox.88}.  It has the advantage that it does not
+require damping functions in the viscous sublayer and that the
+equations are less stiff near the wall, therefore it is superior to 
+$k-\epsilon$ model with regard to numerical stability.  However, when
+applied to the free shear layers, it is found that there is a strong
+dependency of the results on the freestream value of
+$\omega$\cite{Wilcox.91,Menter.92}.  Menter created a new model,
+called baseline (BSL) model, by blending the $k-\epsilon$ and
+$k-\omega$ models\cite{Menter.94}.  It utilizes the $k-\omega$ model
+in the wall region and gradually switches to the $k-\epsilon$ model
+away from the wall.  To achieve this, the $k-\epsilon$ model is first
+transformed into a $k-\omega$ formulation, and an additional cross
+diffusion term is added (another diffusion term associated with
+turbulent kinetic energy is neglected in the formulation under certain
+assumptions\cite{WilcoxBook}). The original $k-\omega$ equations are
+then multiplied by a blending function $F_{bsl}$, the transformed
+$k-\epsilon$ equations are multiplied by $(1-F_{bsl})$, and then both
+are added together.  The blending function $F_{bsl}$ is designed so
+that it is unity at the wall, and gradually approaches zero away from
+the wall.  Note that the $k-\omega$ model can be easily obtained by
+setting $F_{bsl} = 1$ identically.  In order to accurately predict
+adverse pressure gradient flows, especially in the wake region,
+Menter\cite{Menter.94} modified the BSL model by including the transport of
+the principal turbulent shear stress\cite{Jon-King.85} in the
+eddy-viscosity formulations. This leads to the shear-stress transport
+(SST) model.  In the present study, both BSL and SST models are
+discussed.
+
+The defining equations for the BSL model are written as:
+
+{\it Kinematic Eddy Viscosity:} 
+\begin{equation}
+\nu_t = k/\omega,
+\end{equation}
+
+{\it Turbulent Stress Tensor:}
+\begin{equation}
+\begin{split}
+\tau_{ij}^{'}=\mu_t \left(\frac{\partial u_i}{\partial x_j}+\frac
+{\partial u_j}{\partial x_i}\right) - \frac{2}{3} \left(\mu_t \nabla \cdot \Tilde{u} + \rho k\right) \delta_{ij}, \\
+ i=1,2,3, \quad j=1,2,3,
+\end{split}
+\end{equation}
+
+
+{\it Turbulent Kinetic Energy Equation:}
+\begin{equation}
+\rho \frac{D k}{Dt} = \tau_{ij}^{'}\frac{\partial u_i}
+{\partial x_j}-\beta^{\star}\rho\omega k + \frac{\partial}{\partial
+ x_{j}} \bigl[(\mu+\mu_t \sigma_k)
+\frac{\partial k}{\partial x_j} \Bigr] ,
+\label{kb-turb}
+\end{equation}
+
+{\it Turbulent Dissipation Equation:}
+\begin{equation}
+\begin{split}
+\rho \frac{D \omega}{D t} = \frac{\gamma}{\nu_{t}}\tau_{ij}^{'}\frac{\partial u_i}
+{\partial x_j} - \beta \rho \omega^{2} +
+\frac{\partial}{\partial x_j} \Bigl[ (\mu+\mu_t \sigma_{\omega})
+\frac{\partial \omega}{\partial x_j} \Bigr] \\
++2(1-F_{bsl})\rho \sigma_{\omega 2} \frac{1}{\omega} \frac{\partial k}
+{\partial x_{j}} \frac{\partial \omega}{\partial x_{j}}.
+\end{split}
+\label{omega-turb}
+\end{equation}
+
+{\it Closure Coefficients:}
+
+All the constants $\phi$ of the model are computed by blending the
+appropriate $k-\omega$ and $k-\epsilon$ constants, as follows:
+
+\begin{equation}
+\phi = F_{bsl} \phi_{1} + (1-F_{bsl}) \phi_2,
+\label{constant}
+\end{equation}
+where the constants $\phi_1$ ($k-\omega$) are:
+\begin{multline}
+\sigma_{k1} = 0.5, \quad \sigma_{\omega 1} = 0.5,
+\quad \beta_1 = 0.075,\\
+ \beta^{\star} = 0.09, \quad \kappa = 0.41,
+\quad \gamma_1 = \beta_1/\beta^{\star} - \sigma_{\omega 1} \kappa^{2}/\sqrt
+{\beta^{\star}},
+\end{multline}
+and the constants $\phi_2$ ($k-\epsilon$) are:
+\begin{multline}
+\sigma_{k2} = 1.0, \quad \sigma_{\omega 2} = 0.856,
+\quad \beta_2 = 0.0828,\\
+ \beta^{\star} = 0.09, \quad \kappa = 0.41,
+\quad \gamma_2 = \beta_2/\beta^{\star} - \sigma_{\omega 2} \kappa^{2}/\sqrt
+{\beta^{\star}}.
+\end{multline}
+
+The blending function $F_{sbl}$ is defined as follows:
+
+\begin{equation}
+F_{bsl} = tanh(arg^{4}_{bsl}),
+\end{equation}
+where
+\begin{equation}
+arg_{bsl} = \min \Bigl[ \max \Bigl (\frac{\sqrt{k}}{0.09 \omega y},
+\frac{500 \nu}{y^2 \omega} \Bigr),
+\frac{4 \rho \sigma_{\omega 2} k}{C D_{k\omega} y^2} \Bigr],
+\end{equation}
+and $y$ is the distance to the closest point away from the wall surface.
+In the above, $CD_{k \omega}$ is defined as:
+\begin{equation}
+CD_{k \omega} = \max \Bigl(2 \rho \sigma_{\omega 2} \frac{1}{\omega}
+\frac{\partial k}
+{\partial x_{j}} \frac{\partial \omega}{\partial x_{j}}, 10^{-20}
+\Bigr).
+\end{equation}
+
+The boundary conditions for $k$ and $\omega$ at a solid wall are:
+\begin{equation}
+k=0, \quad \omega = 10 \frac{6 \nu}{\beta_1 (\bigtriangleup y_1)^2}\,,
+\label{bsl_omega}
+\end{equation}
+where $\bigtriangleup y_1$ is the distance from the first cell center
+to the solid wall.  For rough walls, the user-specified equivalent sand grain roughness height ($k_s$)
+is used to compute the solid wall value of $\omega$ from:
+\begin{equation}
+\omega = \frac{u_{\tau}^2}{\nu}S_R
+\label{wilcox_omega}
+\end{equation}
+where
+\begin{equation}
+S_R =  \left\{ \begin{array} {l@{\,\,}r}
+\left(\frac{200}{k_s^+}\right)^2 ,
+& \ k_s^+ \leq 5 \\ \\
+\frac{100}{k_s^+} + \left[ \left(\frac{200}{k_s^+}\right)^2 - \frac{100}{k_s^+} \right] e^{5 - k_s^+} ,
+& \ k_s^+ > 5 \\
+\end{array} \right. \label{SR}
+\end{equation}
+A surface is considered to be hydraulically smooth\footnote{A hydraulically smooth surface is one in which the roughness height is smaller than the laminar sublayer.} when $k_s^+ = u_{\tau} k_s / \nu < 5$.  A slightly rough wall boundary condition for $\omega$ can be derived by combining Eqs. (\ref{wilcox_omega}) and (\ref{SR}) and to obtain\cite{wilcox.08}:
+\begin{equation}
+\omega = \frac{40000 \nu}{k_s^2} ~ ,
+\end{equation}
+in which $k_s$ must be chosen to ensure that $k_s^+ < 5$.  Equations (\ref{bsl_omega}) and (\ref{wilcox_omega}) are equivalent when $\Delta y_1 = 0.1414 k_s$.
+
+
+%The following freestream values are used in the current simulations:
+%\begin{equation}
+%\omega_\infty = 10 \frac{U_\infty}{L}, \quad \nu_{t\infty} =
+%10^{-3} \nu_\infty,
+%\end{equation}
+%where $U_\infty$ is the reference velocity, $\nu_{\infty}$ is the
+%laminar viscocity at reference conditions, and $L$ is the geometry
+%reference length.
+
+The corresponding integral form of Eqs.~(\ref{kb-turb}) and~(\ref{omega-turb})
+can be included into the system of governing equations,
+Eq.~(\ref{gov_integral}), by adding the
+following additional terms to the vectors $Q$, $F$, $F_v$, and $W$:
+
+\begin{multline}
+Q =
+\begin{bmatrix}
+\rho k \\
+\rho \omega \\
+\end{bmatrix}
+,\,
+F =
+\begin{bmatrix}
+\rho k \Tilde{u} \cdot \Tilde{n}\\
+\rho \omega \Tilde{u} \cdot \Tilde{n} \\
+\end{bmatrix}
+, \,
+F_v =
+\begin{bmatrix}
+(\mu+\mu_t\sigma_k)\nabla k \cdot \Tilde{n} \\
+(\mu+\mu_t\sigma_\omega)\nabla \omega \cdot \Tilde{n} \\
+\end{bmatrix}
+, \\
+W =\rho
+\begin{bmatrix}
+\tau_{ij}^{'}\frac{\partial u_i}{\partial x_j}-\beta^{\star}\rho\omega k\\
+\frac{\gamma}{\nu_{t}}\tau_{ij}^{'}\frac{\partial u_i}
+{\partial x_j} - \beta \rho \omega^{2}+2(1-F_{bsl})\rho 
+\sigma_{\omega 2} \frac{1}{\omega} \frac{\partial k}
+{\partial x_{j}} \frac{\partial \omega}{\partial x_{j}}\\
+\end{bmatrix}.
+\end{multline}
+

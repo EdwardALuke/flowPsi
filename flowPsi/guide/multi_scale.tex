@@ -1,0 +1,96 @@
+\subsection{Hybrid RANS/LES Model (LES)}
+
+The hybrid RANS/LES turbulence model\cite{Nichols.2003} is an
+implementation of a multiscale turbulence model in which the eddy
+viscosity is a function of two turbulent length scales as opposed to
+just one for the previously discussed models.  The basic idea of the
+hybrid model is that the largest turbulent scales are resolved on the
+computational mesh while the smallest, unresolved scales continue to
+be modeled.  This requires the definition of appropriate length
+scales, a filtering mechanism to determine which scales are modeled
+and which are resolved, and a blending function to smoothly match the
+eddy viscosity between the two regimes.
+
+The turbulent length scale is defined as:
+\begin{equation}
+L_T = max (6.0 \sqrt{\frac{\nu_{t_{RANS}}}{{\Omega}}}, l_T),
+\label{LT}
+\end{equation}
+where $\Omega$ is the local mean flow vorticity that helps define an algebraic length scale, and $l_T$ is a turbulent length scale associated with two equation RANS models.  The subscript RANS indicates that the values are from the unfiltered RANS model, while the factor 6.0 is used by Nichols and Nelson to make the two length scales approximately equal for a simple test problem.  Their definition of $l_T$ is
+\begin{equation}
+l_T = k^{3/2}_{RANS}/\epsilon_{RANS},
+\end{equation}
+whereas the usual definition is
+\begin{equation}
+l_T = \beta^* k^{3/2}_{RANS}/\epsilon_{RANS} = k^{1/2}/\omega.
+\end{equation}
+The latter value has been used in the CHEM code, which suggests that
+further tuning of the constant 6.0 in Eq. \ref{LT} may be necessary.
+
+When the grid is substantially refined outside of the boundary layer,
+additional turbulent scales will be resolved, and the eddy viscosity
+will be decreased compared to its usual RANS value.  The subgrid value
+for the turbulence kinetic energy is thus taken as a fraction of the
+RANS value:
+\begin{equation}
+k_{LES} = k_{RANS} f_d,
+\end{equation}
+where the damping function $f_d$ is defined as:
+\begin{equation}
+f_d = \frac{1}{2} \left\{1 + tanh [2 \pi (\Lambda - 0.5)] \right\}.
+\label{fd}
+\end{equation}
+The function $\Lambda$ determines which scales are locally resolved by comparing the turbulent length scale $L_T$ to the local grid size:
+\begin{equation}
+\Lambda = \frac{1}{1 + \left(\frac{L_T}{2 L_G}\right)^{4/3}},
+\label{Lambda}
+\end{equation}
+where
+\begin{equation}
+L_G = max(\Delta x, \Delta y, \Delta z)
+\label{LG}
+\end{equation}
+for 3D flows.  For axisymmetric or 2D flows, the user-specified out-of-plane direction is ignored (see below for the \verb!.vars! file specification).
+
+Finally, the blended eddy viscosity is computed from
+\begin{equation}
+\nu_t = \nu_{t_{RANS}} f_d + (1 - f_d) \nu_{t_{LES}},
+\end{equation}
+where the LES-based subgrid eddy viscosity is given by
+\begin{equation}
+\nu_{t_{LES}} = min(0.0854 L_G \sqrt{k_{LES}}, \nu_{t_{RANS}}).
+\end{equation}
+By examining Eqs. \ref{fd}-\ref{Lambda}, we find the following delineations between the RANS and LES modes:\\
+
+\noindent
+\underline{RANS Mode}
+\begin{equation}
+L_T << L_G : \Lambda \rightarrow 1 : f_d \rightarrow 1
+\end{equation}
+\underline{LES Mode}
+\begin{equation}
+L_T >> L_G : \Lambda \rightarrow 0 : f_d \rightarrow 0
+\end{equation}
+In other words, when the turbulent scales ($L_T$) are much smaller than local grid scale ($L_G$), implying that they cannot be adequately resolved, the RANS mode is used in the usual single scale turbulence model approach.  On the other hand, when the turbulent scales are much larger than the local grid scale and can be resolved, the model switches smoothly to the LES mode.  This results in a smaller eddy viscosity which is necessary to resolve the unsteady turbulent fluid motion that was originally damped out by the larger RANS eddy viscosity.
+
+The above hybrid RANS/LES model must be associated with a two equation
+turbulence model, and thus the only addition to the \verb!.vars! file
+for a hybrid RANS/LES turbulent run is the following line:
+\begin{verbatim}
+multi_scale: LES
+\end{verbatim}
+Note, however, that since CHEM is a 3D code, the default option for
+the local grid scale (Eq. \ref{LG}) is 3D.  In order to make
+axisymmetric or 2D runs, the user must specify which out-of-plane
+direction is to be ignored when computing the local grid scale.  This
+is done by replacing \verb!LES! with either \verb!LES2DX!,
+\verb!LES2DY!, or \verb!LES2DZ!, depending on which coordinate
+direction is to be ignored.  For example, for a run in the $xy$ plane,
+the $z$ direction is out-of-plane and thus should be ignored, so we
+would use:
+\begin{verbatim}
+multi_scale: LES2DZ
+\end{verbatim}
+to obtain the proper length scale calculation.
+
+

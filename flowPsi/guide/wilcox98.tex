@@ -1,0 +1,103 @@
+\subsection{The Wilcox (1998) $k-\omega$ Turbulence Model}
+\label{wilcox_kw}
+
+The Wilcox (1998) two equation turbulence model\cite{WilcoxBook} is an
+updated version of the 1988 model\cite{Wilcox.88}.  The main
+differences between the new version and the previous 1988 version
+currently in the CHEM code are in the coefficients of the dissipation
+terms, which now depend on local flow conditions, and in the values of
+two modeling constants.  The complete turbulence model specification
+is given below.\\ 
+
+\noindent
+\textbf{Eddy Viscosity:}
+
+\begin{equation}
+\mu_T = \rho k/\omega
+\label{eddy_viscosity}
+\end{equation}\\
+
+\noindent
+\textbf{Turbulence Kinetic Energy:}
+
+\begin{equation}
+\frac{\partial{\rho k}} {\partial{t}} + \frac{\partial{\rho U_j k}}{\partial{x_j}} =
+\tau_{ij} \frac{\partial{U_i}}{\partial{x_j}} - \rho \beta^* k \omega +
+\frac{\partial}{\partial{x_j}} \left[ (\mu + \sigma^* \mu_T) \frac{\partial{k}}{\partial{x_j}}] \right]
+\label{tke_equation}
+\end{equation}\\
+
+\noindent
+\textbf{Specific Dissipation Rate:}
+
+\begin{equation}
+\frac{\partial{\rho \omega}} {\partial{t}} + \frac{\rho U_j \partial{\omega}}{\partial{x_j}} =
+\alpha \frac{\omega}{k} \tau_{ij} \frac{\partial{U_i}}{\partial{x_j}} -
+\rho \beta \omega^2 +
+\frac{\partial}{\partial{x_j}} \left[ (\mu + \sigma \mu_T) \frac{\partial{\omega}}{\partial{x_j}} \right]
+\label{omega_equation}
+\end{equation}\\
+
+\noindent
+\textbf{Closure Coefficients and Auxiliary Relations:}
+
+\begin{equation}
+\alpha = \frac{13}{25}, \hspace{0.1in}
+\beta = \beta_0 f_{\beta}, \hspace{0.1in}
+\beta^* = \beta_{0}^* f_{\beta^*}, \hspace{0.1in}
+\sigma = 0.5, \hspace{0.1in}
+\sigma^* = 0.5
+\label{coefficients_1}
+\end{equation}\\
+
+\begin{equation}
+\beta_0 = \frac{9}{125}, \hspace{0.1in}
+f_{\beta} = \frac{1 + 70 \chi_{\omega}}{1 + 80 \chi_{\omega}}, \hspace{0.1in}
+\chi_{\omega} \equiv \left|{\frac{\Omega_{ij} \Omega_{jk} S_{ki}}{(\beta_{0}^* \omega)^3}} \right|
+\label{coefficients_2}
+\end{equation}\\
+
+\begin{equation}
+\beta_{0}^* = \frac{9}{100}, \hspace{0.1in}
+f_{\beta^*} = \left\{ \begin{array} {l@{\,:\,}r}
+1
+& \chi_k \leq 0 \\
+\frac{1 + 680 \chi_{k}^2}{1 + 400 \chi_{k}^2}
+& \chi_k > 0 \\
+\end{array}, \hspace{0.1in}
+\chi_{k} \equiv \frac{1}{\omega^3} \frac{\partial{k}} {\partial{x_j}} \frac{\partial{\omega}} {\partial{x_j}} \right .
+\label{coefficients_3}
+\end{equation} \\
+
+\begin{equation}
+\epsilon = \beta^* \omega k  \hspace{0.1in} \text{and} \hspace{0.1in}
+l = k^{1/2}/w
+\label{coefficients_4}
+\end{equation}
+
+The mean rotation and strain rate tensors are defined as:
+
+\begin{equation}
+\Omega_{ij} = \frac{1}{2} \left( \frac{\partial{U_i}} {\partial{x_j}} - \frac{\partial{U_j}} {\partial{x_i}} \right), \hspace{0.1in}
+S_{ij} = \frac{1}{2} \left( \frac{\partial{U_i}} {\partial{x_j}} + \frac{\partial{U_j}} {\partial{x_i}} \right)
+\end{equation}
+
+\noindent
+and the Reynolds stress tensor is:
+
+\begin{equation}
+\tau_{ij} = 2 \mu_T S_{ij} - \frac{2}{3} \rho k \delta_{ij}
+\end{equation}
+
+
+The implementation of the Wilcox 1998 turbulence model into CHEM is
+straightforward and requires only the modification of existing source
+terms and the definition of new constants.  In addition, the
+computation of the coeffcients in Eqs.
+\ref{coefficients_2}-\ref{coefficients_3} was added.  The new
+turbulence model is invoked from the CHEM input file as
+\verb!turbulence_model: Wilcox98!.  All of the other turbulence model
+options, including the choices of compressibility correction and the
+production function, work with this new model.
+
+

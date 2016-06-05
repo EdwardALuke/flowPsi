@@ -1,0 +1,98 @@
+\subsection{Numerical Approximations to Spatial Integrals}
+
+The numerical solution of the governing equations,
+Eq.~(\ref{gov_integral}), is obtained by applying the finite
+volume method.  This approach is frequently used because it can
+guarantee that numerical truncation errors do not violate
+conservation properties.  The numerical integration of
+Eq.~(\ref{gov_integral}) begins with approximations to volume and surface
+integrals.  For the volume integrals a second-order midpoint rule is
+used.  For example, the numerical integration of $Q$ results in
+\begin{equation}
+\int_{\Omega_c(t)} Q(\Tilde{x},t) dV = Q_c(t) \V_c(t), 
+\end{equation}
+where $Q_c(t)$ is the value of $Q$ at the centroid of cell $c$, and
+$\V_c(t)$ is defined by
+\begin{equation}
+\V_c(t) = \int_{\Omega_c(t)} dV.
+\label{eq:volume_exact}
+\end{equation}
+
+The numerical integration of the surface integral in
+Eq.~(\ref{gov_integral}) is accomplished by summing the contributions of
+each of the $\mathbf{NF}$ faces of cell $c$.  Each individual contribution is
+again approximated using the midpoint rule.  The flux function itself
+will require additional numerical treatment, and will be discussed in
+later sections.  For now, assume that the flux can be approximated by
+a function, $\hat{F}$, of conservative values to the left and right of
+the face.  Given this, the numerical integration of $F=F_i-F_v$
+results in the following
+\begin{equation}
+\int_{\partial \Omega_c(t)} F dS = \sum_{f=1}^{\mathbf{NF}_c} \int_{\partial
+  \Omega_{c,f}(t)} F dS \approx 
+  \sum_{f=1}^{\mathbf{NF}_c} \A_{c,f}(t) \hat{F}_{f},
+\end{equation}
+where the area of the face, $\A_{c,f}(t)$, is defined as
+\begin{equation}
+\A_{c,f}(t) = \int_{\partial \Omega_{c,f}(t)} dS.
+\label{eq:area_exact}
+\end{equation}
+
+At this point, Eq.~(\ref{gov_integral}) is numerically
+approximated by the equation
+\begin{equation}
+\frac{d}{dt} \left[\V_c(t) Q_c(t)\right] + 
+\sum_{f=1}^{NF_c} \A_{c,f}(t) \hat{F}_f = 0.
+\end{equation}
+Notice that the differential term that remains in this equation
+applies to the product of volume and conservative state vector for the
+cell.  However, the variable that is the objective of these
+calculations is $Q_c(t)$, not $\V_c(t) Q_c(t)$.  This problem is
+solved by applying the chain rule:
+\begin{equation}
+\frac{d}{dt} Q_c(t) \V_c(t) = Q_c(t) \frac{d}{dt} \V_c(t) + \V_c(t)
+\frac{d}{dt} Q_c(t).
+\end{equation}
+The derivative of volume with respect to time can be converted into a
+spatial integral through the use of an identity for integration over
+time-dependent domains\cite{Hansen.65}:
+\begin{equation}
+\begin{split}
+Q_c \frac{d}{dt} \V_c(t)& = Q_c \frac{d}{dt} \int_{\Omega_c(t)} dV\\
+&= Q_c \int_{\partial \Omega_c(t)} \Tilde{u}_\Omega \cdot \Tilde{n}
+dS \\
+&\approx Q_c \sum_{f=1}^{NF_c} \A_{c,f}(t) ({\Tilde{u}_{\Omega,f}}
+\cdot \Tilde{n}_{c,f}).
+\end{split}
+\end{equation}
+This equation, known as the geometric conservation law\cite{Thomas.78}, is
+necessary for correct time integration when mesh deformation is
+present.  Given this, the solution method can now be described in
+terms of a system of ordinary differential equations of the form
+\begin{equation}
+\V_c \frac{d}{dt} Q_c = R_c,
+\label{eq5:timeode}
+\end{equation}
+where $R_c$ is given by the expression
+\begin{equation}
+R_c = \sum_{f=1}^{\mathbf{NF}_c} \A_{c,f} \hat{F}_{v,f} - \sum_{f=1}^{\mathbf{NF}_c} \A_{c,f}
+  \hat{F}_f  -  Q_c \sum_{f=1}^{\mathbf{NF}_c} \A_{c,f} ({\Tilde{u}_{\Omega,f}}
+\cdot \Tilde{n}_{c,f}).
+\label{eq5:residual}
+\end{equation}
+
+Eqs.~(\ref{eq5:timeode}) and~(\ref{eq5:residual}) describe a
+system of ordinary differential equations that numerically model the
+time evolution of the fluid dynamics equations when simultaneously
+satisfied for all cells in the mesh.  To represent this fact, the cell
+subscript $c$ will be dropped.  Thus $Q_c$ represents the fluid state
+for cell $c$, while $Q$ represents the fluid states of all cells in
+the mesh.  For example, while Eq.~(\ref{eq5:timeode}) represents
+the cell by cell differential equations, the global system of
+equations is given by
+\begin{equation}
+\V \frac{d}{dt} Q(t) = R(Q(t),t).
+\label{eq5:timeode2}
+\end{equation}
+
+

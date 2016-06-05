@@ -1,0 +1,76 @@
+\subsection{Time Integration}
+
+For the time integration scheme we utilize a Crank-Nicholson inspired
+scheme where the residual is evaluated an an interpolated half step.
+The interpolated half step, denoted by the primitive variable vector
+$q^{\star}$, is computed according to the relation
+\begin{equation}
+  q^{\star} = \left[ T^{\star}, \vec{u}^{\star}, p^{\star} \right ],
+\label{half_step}
+\end{equation}
+where 
+\begin{equation}
+\begin{aligned}
+  T^{\star} &= \frac{2 T^{n+1} ~ T^{n}}{T^{n+1} + T^{n}} \\
+  \vec{u}^{\star} &= \frac{\sqrt{\rho^{n+1}} \vec{u}^{n+1}+\sqrt{\rho^{n}} \vec{u}^n} {\sqrt{\rho^{n+1}}+\sqrt{\rho^n}} \\
+p^{\star} &= \frac{(1+\epsilon)p^{n+1} + (1-\epsilon)p^{n}}{2}\\
+\label{eq:temporalavg}
+\end{aligned}
+\end{equation} 
+This differs from the Subbareddy {\it et al.} \cite{Subbareddy.2009}
+scheme in several important aspects.  First the average is defined in
+terms of pressure and temperature to improve the performance
+of the algorithm when there is a more complex EoS as mentioned
+previously.  Second, a harmonic averaging of temperature is utilized
+as this provides stability in high speed flow cases.  The energy
+consistent form of velocity averaging is retained.  Note, the
+$\epsilon$ pressure biasing in the pressure averaging is used to
+provide the scheme with acoustic damping which is necessary when
+running at high Courant-Friedrich-Lewy (CFL) numbers.  The effect of
+this term will be elucidated in later discussions.  The time
+integration can then be expressed as the solution to the non-linear
+equation
+\begin{equation}
+\mathcal{L}(q^{\star})=\frac{\V}{\Delta t} (Q^{n+1} - Q^n) - R(q^{\star}) = 0 ,
+\label{Lcn}
+\end{equation}
+where $Q = \left[ \rho, \rho\vec{u}, \rho e_T \right]$ is the
+conservative variable vector where the total energy is $e_T =
+e(p,T)+(\vec{u}\cdot \vec{u})/2$.  The residual, $R$, results from the
+numerically integrated flux functions given by
+\begin{equation}
+R = \sum_{f=1}^{nf} \A_f \left( F_{v,f} - F_{i,f} \right)
+\end{equation}
+where $\A_f$ is the area of face $f$, and $F_v$ and $F_i$ are the
+viscous and inviscid fluxes respectively.
+
+The solution is advanced in time by solving eq. (\ref{Lcn}) by a
+Newton iteration method which can be described as follows
+\begin{equation}
+\mathcal{L}'(q^{\star, n+1,k}) (q^{\star,n+1,k+1} - q^{\star, n+1,k}) = -\mathcal{L}
+(q^{\star,n+1,k}), \label{new}
+\end{equation}
+for $k\geq 0$, where the Newton iteration is initialized using the
+previous time step value ($q^{\star,n+1,k=0} = q^{\star,n}$). To limit
+the size of the jacobian of operator $\mathcal{L}$, only the first
+order parts of the flux stencils are retained.  For the inviscid flux
+jacobians we utilize approximate jacobians of the HLLC flux as
+described by Batten {\it et al.} \cite{Batten.2006} even when the
+skew-symmetric fluxes are utilized. These jacobian approximation
+errors have no effect on the solution once the Newton method is
+converged.
+
+
+\subsubsection{Local Time-Stepping Scheme}
+
+When running in steady timestepping mode the code utilizes a local
+timestep based on estimated changes in local pressure and temperature.
+This estimate is base on a first order explicit step whereby the
+estimated rate of change in pressure and temperature can be determined
+through solving the inverse of the jacobian of the conservative
+variables with respect to the primitive variables times the source
+terms formed from the invisicd and viscous fluxes.  The timestep that
+will limit the change of these variables no more than the
+$\mu_{relax}$ factor is computed from these rates.  If this timestep
+is smaller than the specified maximum timestep, then the smaller value
+will be used.

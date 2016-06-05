@@ -265,7 +265,6 @@ plane (away from the normal) are included in this geometry.
   dissipation flux, and ``ssf'' is based on a fourth order skew
   symmetric scheme.  Select the ``ssf'' for LES style simulations.
 
-
 \item {\tt flowRegime }
 
 This sets the type of flow model we will be using.  This will be set
@@ -281,6 +280,15 @@ will utilize a backward Euler time integration method with local
 timestepping enabled.  For time-accurate simulations select {\tt
   unsteady} to disable local timestepping and switch to a second order
 temporal integration.
+
+\item {\tt timePressureBiasControl}
+
+This variable changes how pressure is interpolated in the unsteady
+mode.  First order biasing is required to improve stability in when
+using low dissipation fluxes such as 'kec' or 'ssf' on low speed
+problems.  Setting this to 1.0 will change the temporal biasing to
+first order.  The default value of is 0.0 which will only turn on
+pressure biasing for cells that exceed a CFL of 1.0.
 
 \item {\tt print\_freq}
 
@@ -1302,6 +1310,49 @@ Favre averaged while
   \end{center}
 \end{table}
 
+\clearpage
+\appendix
+\def\V{\mathcal{V}}
+\def\A{\mathcal{A}}
+
+\begin{center}
+{\huge \bf APPENDIX}
+\end{center}
+
+%%\input{nomenclature.tex}
+\input{govern.tex}
+\input{axi_source_terms.tex}
+
+\input{turbulence.tex}
+
+\input{spalartallmaras.tex}
+
+\input{baseline.tex}
+
+\input{sst.tex}
+
+\input{wilcox98.tex}
+
+\input{multi_scale.tex}
+
+\input{compressibility_corrections.tex}
+
+%% Wall function description?
+\input{generalized_grid.tex}
+
+\input{space_integration.tex}
+\input{grid_terms.tex}
+
+\input{inviscidFlux.tex}
+%%\input{num_inviscid.tex}
+
+%%\input{num_difftrans.tex}
+
+\input{time_integration.tex}
+
+%%\input{jacobian.tex}
+
+%%\input{scalar_transport.tex}
 
 
 

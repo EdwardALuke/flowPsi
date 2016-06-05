@@ -1,0 +1,21 @@
+\subsection{Turbulence Compressibility Corrections}
+
+Compressibility corrections for high-speed shear flows
+\cite{Samimy.90,Sarkar.91} are implemented in the turbulence
+equations.  These corrections are expected to improve the results on
+problems involving high speed free shear flows.  For the BSL and SST
+turbulence models we implement Wilcox's \cite{WilcoxBook} modification
+to the correction.  The compressibility correction is implemented as a
+modification to the $\beta$ and $\beta^*$ destruction terms that
+appear in equations (\ref{kb-turb}) and (\ref{omega-turb}) such that
+the new constants are given by:
+\begin{equation}
+\beta^*_{corr} = \beta^*[1+\xi^*F(M_t)], 
+\end{equation}
+\begin{equation}
+\beta_{corr} = \beta-\beta^*\xi^* F(M_t),
+\end{equation}
+where $F(M_t) = \max(M_t^2 - M^2_{t_0},0)$.  We recover Sarkar's
+original model by setting $\xi^* = 1$ and $M_{t_0} = 0$, and Wilcox's
+modification by setting $\xi^* = \frac{3}{2}$, and $M_{t_0} =
+\frac{1}{4}$.  The correction is disabled by setting $\xi^* = 0$.

@@ -1,0 +1,74 @@
+\subsection{Spalart-Allmaras Model}
+The defining equations for this model are written as follows:
+
+\vspace{0.2cm}
+{\it Kinematic Eddy Viscosity:} $\nu_t = \tilde{\nu} f_{v1}$.
+
+{\it Eddy Viscosity Equation:}
+
+\begin{equation}
+\frac{\partial \rho \tilde{\nu}}{\partial t}+\frac{\partial{u_j \rho \tilde{\nu}}}
+{\partial x_j} =
+ \rho c_{b1}\Tilde{S}\tilde{\nu} 
+- \rho c_{w1} f_w \left ( \frac{\tilde{\nu}}{y} \right )^2 +
+\frac{\rho}{\sigma}\frac{\partial}{\partial x_k} \Bigl[ (\nu+\tilde{\nu}) \frac
+{\partial\tilde{\nu}}{\partial x_k} \Bigr ] + \frac{\rho c_{b2}}{\sigma}
+\frac{\partial 
+\tilde{\nu}}{\partial x_k}\frac{\partial \tilde{\nu}}{\partial x_k},
+\label{Spalart-Allmaras}
+\end{equation}
+where the last two terms on the left hand side represent turbulent
+diffusion, and tensor notation is employed (repeated indexes $j,k$
+denote summations). The first term on the right is the turbulence
+production, while the second term denotes the destruction due to the
+presence of a wall.
+
+{\it Closure Coefficients and Auxiliary Relations:}
+\begin{multline*}
+\\
+c_{b1}=0.1355, \quad c_{b2}=0.622, \quad c_{v1}=7.1, \quad \sigma =2/3, \\
+c_{w1}=\frac{c_{b1}}{\kappa ^{2}}+\frac{(1+c_{b2})}{\sigma},  c_{w2}=0.3,
+c_{w3}=2,  \kappa=0.41, \\
+f_{v1}=\frac{\chi^{3}}{\chi^{3}+c_{v1}^{3}},\quad f_{v2}=1-\frac{\chi}
+{1+\chi f_{v1}}, \\
+f_w=g \Bigl [ \frac{1+c_{w3}^{6}}{g^6+c_{w3}^{6}}\Bigr]^{1/6}, \quad 
+\chi=\frac{\tilde{\nu}}{\nu}, \quad g=r+c_{w2}(r^{6}-r), \\
+r=\frac{\tilde{\nu}}{\Tilde{S}\kappa^{2}y^{2}},\quad 
+\Tilde S=S+\frac{\tilde{\nu}}{\kappa^{2}y^{2}}f_{v2}, \quad
+S=\sqrt{2\Omega_{ij}\Omega_{ij}}.\\
+ \label{aux01}
+\end{multline*}
+
+The tensor $\Omega_{ij}=\frac{1}{2}(\partial u_i/\partial x_j-
+\partial u_j/\partial x_i)$ is one half of the vorticity tensor, and
+$y$ is the distance to the closest wall surface. For simplicity, no
+tripping term is included.
+
+The value ${\tilde{\nu}}$ at the wall boundary is set to zero,
+and the value of $\nu_t$ in the freestream is selected as $\nu_t=10^{-3}\nu$.
+ 
+The corresponding integral form of Eq.~(\ref{Spalart-Allmaras}) can be
+included into the system of governing equations,
+Eq.~(\ref{gov_integral}).  The resulting integral equations are
+solved, in a decoupled form, using the same algorithmic strategies as
+applied in the mean flow equations.  We do perform a simple
+transformation to make the integration of the second diffusion term in
+the equation more straightforward to evaluate.  This equivalent form that transforms all diffusion operators to face operations is given as:
+
+\begin{equation}
+\rho \frac{D\tilde{\nu}}{D t} =  \rho c_{b1}\Tilde{S}\tilde{\nu} 
+- \rho c_{w1} f_w \left ( \frac{\tilde{\nu}}{y} \right )^2 +
+\frac{\rho}{\sigma} \left \{ \nabla \cdot \left[\bigl( \nu + (1+c_{b2}) \tilde{\nu}\bigr) \nabla \tilde{\nu}\right] - c_{b2} \tilde{\nu} \nabla \cdot (\nabla \tilde{\nu})\right\}
+\end{equation}
+
+\subsection{Compressible Form of Spalart-Allmaras}
+
+There is also an alternative compressible form of the Spalart-Allmaras model as developed by Catris and Aupoix.  In this versionof the model, the diffusiond quantity is taken to be $\sqrt{\rho} \tilde{\nu}$ giving rise to the equation:
+
+\begin{equation}
+\rho \frac{D \tilde{\nu}} {D t} = \rho c_{b1}\Tilde{S}\tilde{\nu} 
+- \rho c_{w1} f_w \left ( \frac{\tilde{\nu}}{y} \right )^2 +
+\frac{1}{\sigma} \left\{ \nabla \cdot (\mu \nabla \tilde{\nu}) + \nabla\cdot \left( \sqrt{\rho}\tilde{\nu} \nabla \sqrt{\rho}\tilde{\nu}\right) + c_{b2} \left(\nabla \sqrt{\rho}\tilde{\nu}\right)^2\right\}.
+\end{equation}
+
+In this version of the model, all of the coefficients remain the same as the original Spalart-Allmaras model.

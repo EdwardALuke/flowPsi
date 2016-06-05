@@ -1,0 +1,64 @@
+
+\section{Governing Equations}
+A finite-volume procedure is applied to discretize the flow equations.
+After integration over a computational cell, the governing equations
+for a three-dimensional flow with non-equilibrium chemistry and
+equilibrium internal energy, written in vector form for an arbitrary control 
+volume $\Omega_c$ (closed by a boundary $\partial\Omega_c$) are: 
+
+\begin{equation}
+\frac{d}{dt} \int_{\Omega_c(t)} Q ~dV +
+\int_{{\partial\Omega_c}(t)} (F_i-F_v) ~dS = 0
+\label{gov_integral}
+\end{equation}
+where the vectors of conservative state variables, $Q$, inviscid flux, $F_i$, 
+viscous flux, $F_v$, and chemistry source term, $\Dot{W}$, are given by:
+
+\begin{equation}
+Q =
+\begin{bmatrix}
+\rho \\
+\rho \Tilde{u} \\
+\rho e_0
+\end{bmatrix}
+,\quad
+F_i =
+\begin{bmatrix}
+\rho \Tilde{u} \cdot \Tilde{n} \\
+(\rho \Tilde{u} \Tilde{u} + p \Tilde{\Tilde{I}})\cdot \Tilde{n}\\
+\left(\rho e_0 + p\right)\Tilde{u} \cdot \Tilde{n}
+\end{bmatrix}, \quad
+F_v =
+\begin{bmatrix}
+0
+\Tilde{\Tilde{\tau}} \cdot \Tilde{n}\\
+(\Tilde{u} \cdot\Tilde{\Tilde{\tau}} + \Tilde{q} 
+\end{bmatrix}
+. 
+\end{equation}
+
+\subsection{Thermodynamic Model}
+
+The equations are closed using the ideal gas model where pressure is defined
+by 
+\begin{equation}
+p = \rho \tilde{R} T.
+\label{state}
+\end{equation}
+In Eq.~(\ref{state}),
+pressure is related to gas temperature, which is determined from the
+internal energy, $e_{internal}$.  Moreover,
+\begin{equation}
+e_0 = \frac{1}{2}\Tilde{u} \cdot \Tilde{u} + e_{internal} ,
+\label{energy}
+\end{equation}
+where the total energy $e_0$ appears in the vector of conserved
+variables.
+\begin{equation}
+e_{internal} = \frac{\tilde{R} T}{\gamma - 1}
+\end{equation} 
+
+Note that $\tilde{R}=\hat{R}/m$ is the specific gas constant which is
+the ratio of the universal gas constant $\hat{R}$ to the mean
+molecular mass, $m$.
+
