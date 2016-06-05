@@ -213,5 +213,47 @@ $type timeSteppingMode param<int> ;
 
 $type gravityAccel param<flowPsi::vect3d> ;
 
+// Solver averaging types
+$type meanFreq param<int> ;
+$type meanCount param<real> ;
+$type meanCount_ic param<pair<int,real> > ;
+$type scalarMean(X) store<real> ;
+$type scalarMean_f(X) store<real> ;
+$type scalarM2(X) store<real> ;
+$type scalarVariance(X) store<real> ;
+$type scalarM2_f(X) store<real> ;
+$type scalarVariance_f(X) store <real> ;
+$type vect3dMean(X) store<vect3d> ;
+$type vect3dMean_f(X) store<vect3d> ;
+$type vect3dM2(X) store<vect3d> ;
+$type vect3dVariance(X) store<vect3d> ;
+$type vect3dM2_f(X) store<vect3d> ;
+$type vect3dVariance_f(X) store<vect3d> ;
+$type vect3dMX2(X) store<vect3d> ;
+$type vect3dCoVariance(X) store<vect3d> ;
+$type vect3dMX2_f(X) store<vect3d> ;
+$type vect3dCoVariance_f(X) store<vect3d> ;
+$type scalarFavreMean(X) store<real> ;
+$type scalarFavreMeanBase(X) store<real> ;
+$type scalarFavreMean_f(X) store<real> ;
+$type scalarFavreMeanBase_f(X) store<real> ;
+$type scalarFavreVar(X) store<real> ;
+$type scalarFavreVarBase(X) store<real> ;
+$type scalarFavreVar_f(X) store<real> ;
+$type scalarFavreVarBase_f(X) store<real> ;
+$type vect3dFavreMean(X) store<vect3d> ;
+$type vect3dFavreMeanBase(X) store<vect3d> ;
+$type vect3dFavreMean_f(X) store<vect3d> ;
+$type vect3dFavreMeanBase_f(X) store<vect3d> ;
+$type vect3dFavreVar(X) store<vect3d> ;
+$type vect3dFavreVarBase(X) store<vect3d> ;
+$type vect3dFavreVar_f(X) store<vect3d> ;
+$type vect3dFavreVarBase_f(X) store<vect3d> ;
+$type vect3dFavreCoVar(X) store<vect3d> ;
+$type vect3dFavreCoVarBase(X) store<vect3d> ;
+$type vect3dFavreCoVar_f(X) store<vect3d> ;
+$type vect3dFavreCoVarBase_f(X) store<vect3d> ;
+
 $type scalarTransportP(X,C) store<flowPsi::real> ;
 $type scalarTransport(X,C) store<flowPsi::real> ;
+
