@@ -36,7 +36,6 @@ using std::endl ;
 
 namespace flowPsi {
 
-  $type meanFreq param<int> ;
   $rule default(meanFreq) {
     $meanFreq = 1000 ;
   }
@@ -53,9 +52,6 @@ namespace flowPsi {
       $useExponentialMean = true ;
   }
 
-  $type meanCount param<real> ;
-  $type meanCount_ic param<pair<int,real> > ;
-  
   $rule unit(meanCount_ic),constraint(UNIVERSE) {
     $meanCount_ic = std::pair<int,real>(0,0) ;
   }
@@ -89,6 +85,22 @@ namespace flowPsi {
       count.second = *meanCount ;
     } 
     join(*$meanCount_ic,count) ;
+  } ;
+
+  
+  $type meanCountReset param<int> ;
+
+  $rule optional(meanCountReset) { 
+    $meanCountReset = -1 ;
+  }
+
+  // Reset the mean count overriding the initial condition data
+  $rule apply(meanCount_ic<-meanCountReset)[priority_joiner], prelude {
+    if (*$meanCountReset > 0.) {
+      std::pair<int,real> count(2,0) ;
+      count.second = max(double(*$meanCountReset),1.) ;
+      join(*$meanCount_ic,count) ;
+    }
   } ;
 
   $rule singleton(meanCount{n=0}<-meanCount_ic),constraint(UNIVERSE) {
@@ -212,7 +224,6 @@ namespace flowPsi {
   }
     
 
-  $type scalarMean(X) store<real> ;
   $type scalarMeanCell_X store<real> ;
   $type scalarMeanCell_X_ic store<real> ;
   
@@ -300,7 +311,6 @@ namespace flowPsi {
     }
   } 
 
-  $type scalarMean_f(X) store<real> ;
   $type scalarMeanFace_X store<real> ;
   $type scalarMeanFace_X_ic store<real> ;
   
@@ -387,10 +397,121 @@ namespace flowPsi {
     }
   } 
 
-  $type scalarM2(X) store<real> ;
+
+  // Special case to average for all faces, not just boundary faces
+
+  $type meanVarNameFaceAll_X param<std::string> ;
+
+  $rule singleton(meanVarNameFaceAll_X),constraint(UNIVERSE),
+    parametric(scalarMeanAll_f(X)),option(disable_threading) {
+    const Loci::rule_impl::info &info = get_info() ;
+    Loci::variableSet outset = info.output_vars() ;
+    Loci::variable out=*outset.begin() ;
+    const Loci::variable::info vinfo = out.get_info() ;
+    string name ;
+    // Scan forward for first underscore
+    int sz = vinfo.name.size() ;
+    int i=0 ;
+    while(i < sz && vinfo.name[i] != '_')
+      ++i ;
+    i++ ;
+    while(i<sz) {
+      name += vinfo.name[i] ;
+      i++ ;
+    }
+    $meanVarNameFaceAll_X = name ;
+  }
+
+  $type scalarMeanAll_f(X) store<real> ;
+  $type scalarMeanFaceAll_X store<real> ;
+  $type scalarMeanFaceAll_X_ic store<real> ;
+  
+  $type X store<real> ;
+  $rule pointwise(scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
+    parametric(scalarMeanAll_f(X)) {
+    $scalarMeanFaceAll_X_ic = 0 ;
+  }
+
+  $rule pointwise(icfile::scalarMeanFaceAll_X_ic<-icfile,modelName,meanVarNameFaceAll_X),
+    constraint(cl->geom_cells),parametric(scalarMeanAll_f(X)),option(disable_threading),
+    prelude {
+    string filename = *$icfile+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName ;
+
+    int file_exists = 1 ;
+    if(Loci::MPI_rank == 0) {
+      struct stat buf ;
+      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+        file_exists = 0 ;
+    }
+    MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
+
+    if(file_exists == 1) {
+      hid_t  file_id = Loci::hdf5OpenFile((filename).c_str(),
+					  H5F_ACC_RDONLY, H5P_DEFAULT);
+      Loci::entitySet dom = entitySet(seq) ;
+      Loci::readContainer(file_id,"MeanFaceAllData",$scalarMeanFaceAll_X_ic.Rep(),
+			  dom) ;
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      if(Loci::MPI_rank == 0) {
+	cerr << "Warning, couldn't read restart file '" 
+	     << filename << "'" << endl ;
+      }
+      Loci::entitySet dom = entitySet(seq) ;
+      FORALL(dom,ii) {
+	$scalarMeanFaceAll_X_ic[ii] = 0 ;
+      } ENDFORALL ;
+    }
+
+  } ;
+
+  $rule pointwise(scalarMeanFaceAll_X{n=0}<-scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
+			    parametric(scalarMeanAll_f(X)) {
+    $scalarMeanFaceAll_X{n=0} = $scalarMeanFaceAll_X_ic ;
+  }
+
+  // Write out restart file
+  $rule pointwise(OUTPUT{n}<-scalarMeanFaceAll_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFaceAll_X),
+    constraint(cl->geom_cells{n}),conditional(do_restart{n}),
+			    parametric(scalarMeanAll_f(X)),option(disable_threading),prelude {
+    if(*$ncycle{n} == 0) 
+      return ;
+    string filename = *$restart_directory{n}+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName{n} ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    Loci::writeContainer(file_id,"MeanFaceAllData",$scalarMeanFaceAll_X{n}.Rep()) ;
+    Loci::hdf5CloseFile(file_id) ;
+  } ;
+
+  $rule pointwise(scalarMeanFaceAll_X{n,it=0}<-scalarMeanFaceAll_X{n}),
+    inplace(scalarMeanFaceAll_X{n,it=0}|scalarMeanFaceAll_X{n}), 
+    parametric(scalarMeanAll_f(X)),
+    prelude {
+  } ;
+
+  $type X store<real> ;
+  $rule pointwise(scalarMeanAll_f(X){n,it}<-scalarMeanFaceAll_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
+    $scalarMeanAll_f(X){n,it} = $scalarMeanFaceAll_X{n,it} ;
+    if($lastNewton{n,it}) {
+      real delta = $X{n,it}-$scalarMeanAll_f(X){n,it} ;
+      $scalarMeanAll_f(X){n,it} += delta/$meanCount{n,it} ;
+    }
+  }
+
+  $rule pointwise(scalarMeanFaceAll_X{n,it+1}<-scalarMeanAll_f(X){n,it}),inplace(scalarMeanFaceAll_X{n,it+1}|scalarMeanAll_f(X){n,it}),
+    parametric(scalarMeanAll_f(X)),prelude { } ;
+
+  $rule pointwise(scalarMeanFaceAll_X{n+1}<-scalarMeanFaceAll_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarMeanFaceAll_X{n+1}|scalarMeanFaceAll_X{n,it}),conditional(newtonFinished{n,it}),
+    parametric(scalarMeanAll_f(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $scalarMeanFaceAll_X{n+1} = 0 ;
+    }
+  } 
+
+
+
   $type scalarM2Cell_X store<real> ;
   $type scalarM2Cell_X_ic store<real> ;
-  $type scalarVariance(X) store<real> ;
 
   $rule pointwise(scalarM2Cell_X_ic),constraint(geom_cells),
     parametric(scalarM2(X)) {
@@ -480,10 +601,8 @@ namespace flowPsi {
     $scalarVariance(X){n,it} = $scalarM2(X){n,it}/$meanCount{n,it} ;
   }
 
-  $type scalarM2_f(X) store<real> ;
   $type scalarM2Face_X store<real> ;
   $type scalarM2Face_X_ic store<real> ;
-  $type scalarVariance_f(X) store <real> ;
 
   $rule pointwise(scalarM2Face_X_ic),constraint(ci->geom_cells),
     parametric(scalarM2_f(X)) {
@@ -579,7 +698,6 @@ namespace flowPsi {
 
 
 
-  $type vect3dMean(X) store<vect3d> ;
   $type vect3dMeanCell_X store<vect3d> ;
   $type vect3dMeanCell_X_ic store<vect3d> ;
 
@@ -666,7 +784,6 @@ namespace flowPsi {
     }
   } 
 
-  $type vect3dMean_f(X) store<vect3d> ;
   $type vect3dMeanFace_X store<vect3d> ;
   $type vect3dMeanFace_X_ic store<vect3d> ;
 
@@ -754,10 +871,8 @@ namespace flowPsi {
      }
    } 
 
-   $type vect3dM2(X) store<vect3d> ;
    $type vect3dM2Cell_X store<vect3d> ;
    $type vect3dM2Cell_X_ic store<vect3d> ;
-   $type vect3dVariance(X) store<vect3d> ;
 
    $rule pointwise(vect3dM2Cell_X_ic),constraint(geom_cells),
      parametric(vect3dM2(X)) {
@@ -848,10 +963,8 @@ namespace flowPsi {
      $vect3dVariance(X){n,it} = $vect3dM2(X){n,it}/$meanCount{n,it} ;
    }
 
-   $type vect3dM2_f(X) store<vect3d> ;
    $type vect3dM2Face_X store<vect3d> ;
    $type vect3dM2Face_X_ic store<vect3d> ;
-   $type vect3dVariance_f(X) store<vect3d> ;
 
    $rule pointwise(vect3dM2Face_X_ic),constraint(ci->geom_cells),
      parametric(vect3dM2_f(X)) {
@@ -951,10 +1064,8 @@ namespace flowPsi {
      $vect3dVariance_f(X){n,it} = $vect3dM2_f(X){n,it}/$meanCount{n,it} ;
    }
 
-  $type vect3dMX2(X) store<vect3d> ;
   $type vect3dMX2Cell_X store<vect3d> ;
   $type vect3dMX2Cell_X_ic store<vect3d> ;
-  $type vect3dCoVariance(X) store<vect3d> ;
 
   $rule pointwise(vect3dMX2Cell_X_ic),constraint(geom_cells),
     parametric(vect3dMX2(X)) {
@@ -1047,10 +1158,8 @@ namespace flowPsi {
      $vect3dCoVariance(X){n,it} = $vect3dMX2(X){n,it}/$meanCount{n,it} ;
    }
 
-   $type vect3dMX2_f(X) store<vect3d> ;
    $type vect3dMX2Face_X store<vect3d> ;
    $type vect3dMX2Face_X_ic store<vect3d> ;
-   $type vect3dCoVariance_f(X) store<vect3d> ;
 
    $rule pointwise(vect3dMX2Face_X_ic),constraint(ci->geom_cells),
      parametric(vect3dMX2_f(X)) {
@@ -1237,8 +1346,6 @@ namespace flowPsi {
   }
     
 
-  $type scalarFavreMean(X) store<real> ;
-  $type scalarFavreMeanBase(X) store<real> ;
   $type scalarFavreMeanCell_X store<real> ;
   $type scalarFavreMeanCell_X_ic store<real> ;
   
@@ -1330,8 +1437,6 @@ namespace flowPsi {
     }
   } 
 
-  $type scalarFavreMean_f(X) store<real> ;
-  $type scalarFavreMeanBase_f(X) store<real> ;
   $type scalarFavreMeanFace_X store<real> ;
   $type scalarFavreMeanFace_X_ic store<real> ;
   
@@ -1425,8 +1530,6 @@ namespace flowPsi {
     }
   } 
   // --- Scalar Favre Variance
-  $type scalarFavreVar(X) store<real> ;
-  $type scalarFavreVarBase(X) store<real> ;
   $type scalarFavreVarCell_X store<real> ;
   $type scalarFavreVarCell_X_ic store<real> ;
   
@@ -1530,8 +1633,6 @@ namespace flowPsi {
     }
   } 
 
-  $type scalarFavreVar_f(X) store<real> ;
-  $type scalarFavreVarBase_f(X) store<real> ;
   $type scalarFavreVarFace_X store<real> ;
   $type scalarFavreVarFace_X_ic store<real> ;
   
@@ -1635,8 +1736,6 @@ namespace flowPsi {
   } 
 
   // --- Vect3d favre averaging  
-  $type vect3dFavreMean(X) store<vect3d> ;
-  $type vect3dFavreMeanBase(X) store<vect3d> ;
   $type vect3dFavreMeanCell_X store<vect3d> ;
   $type vect3dFavreMeanCell_X_ic store<vect3d> ;
   
@@ -1728,8 +1827,6 @@ namespace flowPsi {
     }
   } 
 
-  $type vect3dFavreMean_f(X) store<vect3d> ;
-  $type vect3dFavreMeanBase_f(X) store<vect3d> ;
   $type vect3dFavreMeanFace_X store<vect3d> ;
   $type vect3dFavreMeanFace_X_ic store<vect3d> ;
   
@@ -1824,8 +1921,6 @@ namespace flowPsi {
   } 
 
   // vect3d variance
-  $type vect3dFavreVar(X) store<vect3d> ;
-  $type vect3dFavreVarBase(X) store<vect3d> ;
   $type vect3dFavreVarCell_X store<vect3d> ;
   $type vect3dFavreVarCell_X_ic store<vect3d> ;
   
@@ -1929,8 +2024,6 @@ namespace flowPsi {
     }
   } 
 
-  $type vect3dFavreVar_f(X) store<vect3d> ;
-  $type vect3dFavreVarBase_f(X) store<vect3d> ;
   $type vect3dFavreVarFace_X store<vect3d> ;
   $type vect3dFavreVarFace_X_ic store<vect3d> ;
   
@@ -2035,8 +2128,6 @@ namespace flowPsi {
     }
   } 
   // vect3d covariance
-  $type vect3dFavreCoVar(X) store<vect3d> ;
-  $type vect3dFavreCoVarBase(X) store<vect3d> ;
   $type vect3dFavreCoVarCell_X store<vect3d> ;
   $type vect3dFavreCoVarCell_X_ic store<vect3d> ;
   
@@ -2140,8 +2231,6 @@ namespace flowPsi {
     }
   } 
 
-  $type vect3dFavreCoVar_f(X) store<vect3d> ;
-  $type vect3dFavreCoVarBase_f(X) store<vect3d> ;
   $type vect3dFavreCoVarFace_X store<vect3d> ;
   $type vect3dFavreCoVarFace_X_ic store<vect3d> ;
   
