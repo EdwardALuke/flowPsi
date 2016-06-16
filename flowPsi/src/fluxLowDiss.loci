@@ -99,20 +99,6 @@ namespace flowPsi {
     $LDS_compFactor = 5.0 ;
   }
 
-  // $type compDiss store<real> ;
-  // $rule unit(compDiss),constraint(geom_cells) {
-  //   $compDiss = 0 ;
-  // }
-
-  // $rule apply((cl,cr)->compDiss<-(cl,cr)->(veldiv,soundSpeed),LDS_compFactor,area)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
-
-  //   real factor = $LDS_compFactor*(fabs($cl->$veldiv) + fabs($cr->$veldiv))/
-  //       (($cl->$soundSpeed + $cr->$soundSpeed)*$area.sada) ;
-  //   factor = factor*factor ;
-  //   join($cl->$compDiss,factor) ;
-  //   join($cr->$compDiss,factor) ;
-  // }
-
   $type LDS_nonSymmetricCoeff param<double> ;
   $type LDS_nonSymmetricFactor param<double> ;
   // This defines the cutoff angle where full upwinding occurs,
