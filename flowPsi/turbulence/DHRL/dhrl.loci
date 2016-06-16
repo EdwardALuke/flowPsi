@@ -67,24 +67,8 @@ namespace flowPsi {
   $type DHRL_SST_BSL_KW Constraint ;
   $rule constraint(DHRL_SST_BSL_KW<-multi_scale) {
     $DHRL_SST_BSL_KW = EMPTY ;
-    if($multi_scale == "DHRL") {$DHRL_SST_BSL_KW = $*multi_scale.domain() ;} 
-  }
-
-  $type dhrl_source_terms param<std::string> ;
-  $rule default(dhrl_source_terms) {
-    $dhrl_source_terms = "on" ;
-  }
-  $type DHRL_SRC Constraint ;
-  $rule constraint(DHRL_SRC<-dhrl_source_terms) {
-    $DHRL_SRC = EMPTY ;
-    if($dhrl_source_terms == "on") {
-      $DHRL_SRC = $*dhrl_source_terms.domain() ;
-    } else if($dhrl_source_terms == "off") {
-      $DHRL_SRC = EMPTY ;
-    } else {
-      cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
-      $DHRL_SRC = $*dhrl_source_terms.domain() ;
-    }
+    if($multi_scale == "DHRL" ||  $multi_scale == "dhrl"  )
+    {$DHRL_SST_BSL_KW = $*multi_scale.domain() ;} 
   }
 
   $rule pointwise(rho_avg<-scalarMean(rho)) {$rho_avg = $scalarMean(rho) ;}
@@ -365,7 +349,7 @@ namespace flowPsi {
 
   // Modify newton iteration to use average density -- use Euler stepping for k and w
   $type k_rhs store<real> ;
-  $rule pointwise(dhrl::k_rhs{n,it}<-vol{n,it},dtmax{n,it},k_src{n,it},
+  $rule pointwise(dhrl::wallLaw::k_rhs{n,it}<-vol{n,it},dtmax{n,it},k_src{n,it},
                   k{n},k{n,it},rho_avg{n,it}),
     constraint(k_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
     real factor = $vol{n,it}/$dtmax{n,it} ;
@@ -376,7 +360,7 @@ namespace flowPsi {
   }
 
   $type w_rhs store<real> ;
-  $rule pointwise(dhrl::w_rhs{n,it}<-vol{n,it},dtmax{n,it},w_src{n,it},
+  $rule pointwise(dhrl::wallLaw::w_rhs{n,it}<-vol{n,it},dtmax{n,it},w_src{n,it},
                   w{n},w{n,it},rho_avg{n,it}),
     constraint(w_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
     real factor = $vol{n,it}/$dtmax{n,it} ;
@@ -385,6 +369,14 @@ namespace flowPsi {
 
     $w_rhs{n,it} = factor*($w{n,it}-$w{n})*rn - $w_src{n,it} ;
   }
+
+  $rule pointwise(wallLaw::dhrl::wallLaw::k_rhs{n,it}<-vol{n,it}),constraint(wall_cells,SST_BSL_KW) {
+    $k_rhs{n,it} = 0 ;
+  }
+
+  $rule pointwise(wallLaw::dhrl::wallLaw::w_rhs{n,it}<-vol{n,it}),constraint(wall_cells,SST_BSL_KW) {
+    $w_rhs{n,it} = 0 ;
+  } 
 
   // Modify RANS model convective terms to be based on averaged fluxes
   $type k_mdot_f store<real> ;
@@ -782,171 +774,6 @@ namespace flowPsi {
 
   // MILES
   $rule pointwise(tmu_sgs<-mu) {$tmu_sgs = 1.e-12*$mu ;}
-
-
-  // Modify onlineStats to allow averaging at internal (all) faces
-  $type meanFreq param<int> ;
-  $type geometricMean param<std::string> ;
-  $type useGeometricMean param<bool> ;
-  $type meanCount param<real> ;
-
-  $type meanVarNameFaceAll_X param<std::string> ;
-
-  $rule singleton(meanVarNameFaceAll_X),constraint(UNIVERSE),
-    parametric(scalarMeanAll_f(X)),option(disable_threading) {
-    const Loci::rule_impl::info &info = get_info() ;
-    Loci::variableSet outset = info.output_vars() ;
-    Loci::variable out=*outset.begin() ;
-    const Loci::variable::info vinfo = out.get_info() ;
-    string name ;
-    // Scan forward for first underscore
-    int sz = vinfo.name.size() ;
-    int i=0 ;
-    while(i < sz && vinfo.name[i] != '_')
-      ++i ;
-    i++ ;
-    while(i<sz) {
-      name += vinfo.name[i] ;
-      i++ ;
-    }
-    $meanVarNameFaceAll_X = name ;
-  }
-
-  $type scalarMeanAll_f(X) store<real> ;
-  $type scalarMeanFaceAll_X store<real> ;
-  $type scalarMeanFaceAll_X_ic store<real> ;
-  
-  $type X store<real> ;
-  $rule pointwise(scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
-    parametric(scalarMeanAll_f(X)) {
-    $scalarMeanFaceAll_X_ic = 0 ;
-  }
-
-  $rule pointwise(icfile::scalarMeanFaceAll_X_ic<-icfile,modelName,meanVarNameFaceAll_X),
-    constraint(cl->geom_cells),parametric(scalarMeanAll_f(X)),option(disable_threading),
-    prelude {
-    string filename = *$icfile+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName ;
-
-    int file_exists = 1 ;
-    if(Loci::MPI_rank == 0) {
-      struct stat buf ;
-      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
-        file_exists = 0 ;
-    }
-    MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
-
-    if(file_exists == 1) {
-      hid_t  file_id = Loci::hdf5OpenFile((filename).c_str(),
-					  H5F_ACC_RDONLY, H5P_DEFAULT);
-      Loci::entitySet dom = entitySet(seq) ;
-      Loci::readContainer(file_id,"MeanFaceAllData",$scalarMeanFaceAll_X_ic.Rep(),
-			  dom) ;
-      Loci::hdf5CloseFile(file_id) ;
-    } else {
-      if(Loci::MPI_rank == 0) {
-	cerr << "Warning, couldn't read restart file '" 
-	     << filename << "'" << endl ;
-      }
-      Loci::entitySet dom = entitySet(seq) ;
-      FORALL(dom,ii) {
-	$scalarMeanFaceAll_X_ic[ii] = 0 ;
-      } ENDFORALL ;
-    }
-
-  } ;
-
-  $rule pointwise(scalarMeanFaceAll_X{n=0}<-scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
-			    parametric(scalarMeanAll_f(X)) {
-    $scalarMeanFaceAll_X{n=0} = $scalarMeanFaceAll_X_ic ;
-  }
-
-  // Write out restart file
-  $rule pointwise(OUTPUT{n}<-scalarMeanFaceAll_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFaceAll_X),
-    constraint(cl->geom_cells{n}),conditional(do_restart{n}),
-			    parametric(scalarMeanAll_f(X)),option(disable_threading),prelude {
-    if(*$ncycle{n} == 0) 
-      return ;
-    string filename = *$restart_directory{n}+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName{n} ;
-    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
-					 H5P_DEFAULT, H5P_DEFAULT) ;
-    Loci::writeContainer(file_id,"MeanFaceAllData",$scalarMeanFaceAll_X{n}.Rep()) ;
-    Loci::hdf5CloseFile(file_id) ;
-  } ;
-
-  $rule pointwise(scalarMeanFaceAll_X{n,it=0}<-scalarMeanFaceAll_X{n}),
-    inplace(scalarMeanFaceAll_X{n,it=0}|scalarMeanFaceAll_X{n}), 
-    parametric(scalarMeanAll_f(X)),
-    prelude {
-  } ;
-
-  $type X store<real> ;
-  $rule pointwise(scalarMeanAll_f(X){n,it}<-scalarMeanFaceAll_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
-    $scalarMeanAll_f(X){n,it} = $scalarMeanFaceAll_X{n,it} ;
-    if($lastNewton{n,it}) {
-      real delta = $X{n,it}-$scalarMeanAll_f(X){n,it} ;
-      $scalarMeanAll_f(X){n,it} += delta/$meanCount{n,it} ;
-    }
-  }
-
-  $rule pointwise(scalarMeanFaceAll_X{n,it+1}<-scalarMeanAll_f(X){n,it}),inplace(scalarMeanFaceAll_X{n,it+1}|scalarMeanAll_f(X){n,it}),
-    parametric(scalarMeanAll_f(X)),prelude { } ;
-
-  $rule pointwise(scalarMeanFaceAll_X{n+1}<-scalarMeanFaceAll_X{n,it},ncycle{n,it},meanFreq,useGeometricMean),inplace(scalarMeanFaceAll_X{n+1}|scalarMeanFaceAll_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarMeanAll_f(X)) {
-    if(!$useGeometricMean && ($ncycle{n,it}%$meanFreq) == 0) {
-      $scalarMeanFaceAll_X{n+1} = 0 ;
-    }
-  } 
-
-
-  // Adjust averaging count in .vars file
-  $type meanCount param<real> ;
-  $type meanCount_ic param<pair<int,real> > ;
-  $type meanCountReset param<real> ;
-
-  $rule default(meanCountReset) {
-    $meanCountReset = -1 ;
-  }
-
-  $rule apply(meanCount_ic<-icfile,modelName,meanCountReset)[priority_joiner], 
-    option(disable_threading),constraint(meanCountReset),prelude {
-    
-    if (*$meanCountReset > 0.) {
-
-      real mcount ;
-      string filename = *$icfile + "meanCount_" + *$modelName ;
-
-      int file_exists = 1 ;
-      $[Once] {
-	struct stat buf ;
-	if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
-	  file_exists = 0 ;
-      }
-      MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
-      std::pair<int,real> count(-1,0) ;
-      if(file_exists == 1) {
-	hid_t file_id = Loci::hdf5OpenFile((filename).c_str(),
-					   H5F_ACC_RDONLY, H5P_DEFAULT);
-	entitySet dom = ~EMPTY ;
-	param<int> meanCount ;
-	*meanCount = 0 ;
-	Loci::readContainer(file_id,"meanCount",meanCount.Rep(),dom) ;
-	Loci::hdf5CloseFile(file_id) ;
-	count.first = -1 ;
-	mcount = *meanCount*-1. ;
-	count.second = mcount ;
-      } 
-      join(*$meanCount_ic,count) ;
-    }
-  } ;
-
-  $rule apply(meanCount_ic<-meanCountReset)[priority_joiner], prelude {
-    if (*$meanCountReset > 0.) {
-      std::pair<int,real> count(1,0) ;
-      count.second = max(*$meanCountReset,1.) ;
-      join(*$meanCount_ic,count) ;
-    }
-  } ;
 
 
   // Output controls

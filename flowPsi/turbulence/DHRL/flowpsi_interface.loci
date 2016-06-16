@@ -38,6 +38,24 @@ $include "dhrl.lh"
 
 namespace flowPsi {
 
+  $type dhrl_source_terms param<std::string> ;
+  $rule default(dhrl_source_terms) {
+    $dhrl_source_terms = "on" ;
+  }
+  $type DHRL_SRC Constraint ;
+  $rule constraint(DHRL_SRC<-dhrl_source_terms) {
+    $DHRL_SRC = EMPTY ;
+    if($dhrl_source_terms == "on") {
+      $DHRL_SRC = $*dhrl_source_terms.domain() ;
+    } else if($dhrl_source_terms == "off") {
+      $DHRL_SRC = EMPTY ;
+    } else {
+      cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
+      $DHRL_SRC = $*dhrl_source_terms.domain() ;
+    }
+  }
+
+
   // Implement viscous terms based on averaged quantities
   $type vflux_rans store<Loci::Array<flowPsi::real,4> > ;
 
