@@ -40,5 +40,23 @@ echo Installing \#include files
 mkdir -p $INSTALL_PATH/include
 cp include/*.h include/*.lh $INSTALL_PATH/include
 
+if [ -d turbulence ] ; then
+echo Making turbulence subdirectories...
+mkdir -p $INSTALL_PATH/turbulence
+cd turbulence
+for i in * ; do
+if [ -d $i ]; then
+  mkdir -p $INSTALL_PATH/turbulence/$i
+  echo $i:
+  cd $i
+  for j in *.h *.lh; do
+      if [ -f $j ]; then
+	  cp $j $INSTALL_PATH/turbulence/$i/$j
+      fi
+  done
+  cd ..
+fi
+done
+fi
 # make directories open to everyone
 chmod -R a+rX $INSTALL_PATH
