@@ -219,6 +219,8 @@ $type meanCount param<real> ;
 $type meanCount_ic param<pair<int,real> > ;
 $type scalarMean(X) store<real> ;
 $type scalarMean_f(X) store<real> ;
+$type scalarMeanAll_f(X) store<real> ;
+$type scalarMeanFaceAll_X_ic store<real> ;
 $type scalarM2(X) store<real> ;
 $type scalarVariance(X) store<real> ;
 $type scalarM2_f(X) store<real> ;
