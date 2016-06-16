@@ -8,4 +8,4 @@ guide.pdf: guide.tex
 clean:
 	rm -f *.aux *.ps *.bbl *.blg *.log *.toc *.dvi *.ps *~
 distclean:
-	rm -f *.aux *.ps *.bbl *.blg *.log *.toc *.dvi *.ps *.pdf *~
+	rm -f *.aux *.ps *.bbl *.blg *.log *.toc *.dvi *.ps guide.pdf *~
