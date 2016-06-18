@@ -1,0 +1,246 @@
+\subsection{The Dynamic Hybrid RANS-LES (DHRL) turbulence model}
+
+One hybridized RANS-LES modeling option provided in the {\it flowPsi}
+code is based on an averaging consistent framework that can couple any
+arbitrary RANS turbulence model with any arbitrary RANS model.  In
+this model the RANS turbulence model is solved on the time averaged
+flowfield.  In this framework there is always a consistent RANS
+interpretation in all regions, even those that are using the LES
+model.  To derive the DHRL approach, the instantaneous velocity
+($u_i$) is decomposed into Favre-averaged $\overline{u}_i$ , resolved
+fluctuating ($u^{\prime\prime}$), and unresolved fluctuating
+($u^\prime_i$) components, {\it i.e.}:
+\begin{equation}
+\overline{u}_i = <\hat{\rho} \tilde{u}_i>/<\hat{\rho}>
+\end{equation}
+\begin{equation}
+u^{\prime\prime}_i = \tilde{u}_i - \overline{u}_i
+\end{equation}
+\begin{equation}
+u^\prime_i = u_i - \tilde{u}_i
+\end{equation}
+Here the angle brackets denote Reynolds averaging.  For stationary flow, this is equivalent to an infinite-time average.
+
+The assumptions used in the derivation of the DHRL method are: (1)
+negligible correlation between the resolved and unresolved
+fluctuations, (2) scale similarity, {\it i.e.}
+$\hat{\rho}\widetilde{\tilde{u}_i\tilde{u}_j} -
+\hat{\rho}\tilde{u}_i\tilde{u}_j = \alpha \tau^{SGS}_{ij}$ and
+$\hat{\rho}\widetilde{u^\prime_i u^\prime_j} = \beta
+\hat{\rho}\overline{u^{\prime}_i u^{\prime}_j}$, and (3) that model
+constants $\alpha$ and $\beta$ are complementary.  This yields the
+following blending method for RANS and LES stresses:
+\begin{equation}
+\tau_{ij} = \alpha \tau^{SGS}_{ij} + (1-\alpha)\tau^{RANS}_{ij},
+\label{eq:dhrlblend}
+\end{equation}
+\begin{equation}
+\alpha = \underbrace{-<\hat{\rho}> \overline{u^{\prime\prime}_i u^{\prime\prime}_j} \overline{S}_{ij}}_{\text{Resolved Production}}/ (\underbrace{\tau^{RANS}_{ij} \overline S_{ij}}_{\text{RANS Production}} - \underbrace{ \overline{\tau}^{SGS}_{ij} \overline{S}_{ij}}_{\text{Inhomogeneous Production}})
+\label{eq:dhrlswitch}
+\end{equation}
+
+where $\tau^{SGS}_{ij}$ is the subgrid stress predicted by any
+candidate LES model (for MILES this is identically zero), and
+$\tau^{RANS}_{ij}$ is the turbulent stress predicted by any candidate
+RANS model. Refer to Bhushan and Walters\cite{Bhushan.2012} and Walters
+{\it et al.} \cite{Walters.2013} for further details.
+
+The above approach is similar to dynamic LES model coefficient
+evaluation, where the secondary filter is in fact the Reynolds (or
+Favre) averaging operation. The numerator in Eq. (\ref{eq:dhrlswitch})
+represents the sum of production of turbulent kinetic energy ($k$) due
+to the resolved turbulent scales in the flow, and
+$\overline{\tau}^{SGS}_{ij} \overline{S}_{ij}$ which is the mean
+component of the subgrid scale turbulent kinetic energy
+production. The term in the denominator,$\tau^{RANS}_{ij}
+\overline{S}_{ij}$, is the production of $k$ predicted by the RANS
+model. A similar expression to Eq. (\ref{eq:dhrlblend}) is adopted for
+the turbulent heat flux:
+
+\begin{equation}
+q_j = \alpha q^{SGS}_j + (1-\alpha) q^{RANS}_j
+\end{equation}
+
+Equation (\ref{eq:dhrlswitch}) indicates that the model operates in a
+pure LES mode only if the resolved scale production is equal to the
+predicted RANS production; otherwise, the model behaves in a
+transitional mode where an additional RANS stress compensates for
+reduced LES content. This leads to a smooth variation of turbulent
+production across the transition region. In regions with zero LES
+content, i.e. numerically steady flow, the model operates in a pure
+RANS mode. Note that, according to Eq. (\ref{eq:dhrlswitch}), the
+value of can become negative and/or singular. In practice, the value
+of is limited to lie between 0 (pure RANS) and 1 (pure LES).
+
+One further critical aspect of the DHRL method is that the RANS model
+terms are computed based solely on the Favre-averaged flowfield. For
+example, for a linear eddy viscosity model the turbulent stress and
+heat flux are computed as:
+
+\begin{equation}
+\tau^{RANS}_{ij} = \frac{2}{3} \rho k \delta_{ij} - \mu_T \left( \frac{\partial \overline{u}_i}{\partial x_j} + \frac{\partial \overline{u}_j}{\partial x_i} - \frac{2}{3} \frac{\partial \overline{u}_k}{\partial x_k} \delta_{ij}\right)
+\end{equation}
+
+\begin{equation}
+q^{RANS}_j = - k_T \frac{\partial \overline{T}}{\partial x_j}
+\end{equation}
+
+Similarly, all of the terms in the model transport equations for
+turbulence model dependent variables (e.g. $k$ and $\omega$) are
+computed in terms of $\tilde{u}_i$, including convective and
+production terms. In stationary flows, for example, the velocity field
+used to compute all RANS terms is obtained from a running
+time-average. Other appropriate averaging methods can be adopted for
+non-stationary flows. For example, as discussed below, the DHRL model
+can be run using the exponential averaging option for online
+statistics, in which case the averaged terms ({\it e.g.}
+$\overline{u}$ ) strictly represent time-filtered, rather than
+infinite averaged, quantities.
+
+\subsubsection{Current DHRL Implementation}
+
+For the {\tt flowpsi} implementation the DHRL model has been
+implemented and verification tests have been performed for use with
+the SST $k-\omega$ model for the RANS component and MILES for the LES
+component.  Wall functions are not currently supported, solid
+boundaries should be modeled as {\tt viscousWall} conditions and mesh
+resolution should be sufficient to resolve the mean flow features for
+accurate boundary layer prediction. To implement DHRL, load the
+following modules:
+
+\begin{verbatim}
+loadModule: KOmegaModel
+loadModule: dhrl
+\end{verbatim}
+
+
+\subsubsection{DHRL Inputs}
+
+The following inputs are required in the {\tt .vars} file to properly enable DHRL:
+
+\begin{verbatim}
+turbulence_model: SST
+multi_scale: DHRL
+\end{verbatim}
+
+\subsubsection{Optional inputs for DHRL include:}
+
+\begin{verbatim}
+dhrl_source_terms: on 
+\end{verbatim}
+
+{\it comment}: This input parameter can be used to disengage the
+inclusion of the RANS source terms in the governing equations by
+setting to ``off''. This allows the simulation to be effectively run in
+a pure LES mode, while simultaneously obtaining values for the
+averaged variable field statistics, as well as the RANS model variable
+fields ($k$ and $\omega$) based on the time-averaged velocity field
+from the LES simulation.
+
+\begin{verbatim}
+exponentialMean: off
+\end{verbatim}
+
+{\it comment}: The standard use of DHRL is for stationary turbulent
+flow. To use time-filtering instead of infinite averaging, input ``on''
+for {\tt exponentialMean}.
+
+\begin{verbatim}
+meanFreq: 1000
+\end{verbatim}
+
+{\it comment}: For standard DHRL ({\tt exponentialMean: off}), the value of
+{\tt meanFreq} should be set to a very large number, i.e. greater than the
+maximum expected timesteps to be run in the simulation, in order to
+ensure that the averaging counter does not reset during the
+simulation. If time filtering is used, the value of {\tt meanFreq}
+determines the filter width in terms of the number of time steps
+
+\begin{verbatim}
+meanCountReset: NO DEFAULT VALUE
+\end{verbatim}
+
+{\it comment}: If this parameter is set to a non-zero integer value,
+the counter used for the time averaging will be reset to that
+value. Note that the values of the averaged variables themselves will
+not be changed.
+
+
+\subsubsection{DHRL Outputs}
+
+The following additional variables are available as outputs when running the DHRL model:
+
+\begin{verbatim}
+alpha_dhrl
+\end{verbatim}
+
+{\it comment}: This is the scalar value of the RANS-to-LES blending parameter
+
+
+\subsubsection{Recommended DHRL Start Up Procedure}
+
+A converged DHRL solution requires infinite-time averaged quantities
+within the model formulation itself. For this reason, it is desirable
+to remove start up transients as quickly as possible from the flow
+statistics. The following is a recommended procedure for reducing the
+overall run time required for a DHRL simulation.
+
+\begin{enumerate}
+\item (Optional) Obtain a converged or nearly converged RANS
+  solution. This may be useful if, for example, the initialization may
+  lead to unstable behavior for a pure LES simulation.
+
+\item Run the DHRL model using initial solution either prescribed or
+  obtained from precursor RANS simulation, using the {\tt
+    dhrl\_source\_terms: off} input option. This is effectively a
+  MILES simulation but with collection of averaged statistics as well
+  as development of the steady $k$ and $\omega$ solution field based
+  on the time-averaged velocity field. The simulation need not be run
+  to statistical convergence, but should be run sufficiently long that
+  LES-like behavior is clearly observed and any large-scale features
+  of the initial field are no longer apparent in the results.
+
+\item Run the DHRL model using the {\tt dhrl\_source\_terms: on}
+  (default) option and setting {\tt meanCountReset: \#}. A recommended
+  value for {\it meanCountReset} is 100. If the simulation proves to
+  be unstable, this value can be increased.
+
+\item Continue running DHRL, {\it making sure that for any restarts
+  the meanCountReset variable is not included in the .vars
+  file}. Monitor averaged quantities of interest (e.g. drag) to
+  determine variation of key variables as a function of simulation
+  time. Determination of statistical convergence is identical to that
+  for pure LES.
+\end{enumerate}
+
+\subsubsection{Optimal settings for MILES}
+
+The preferred method for running the DHRL model is using a MILES
+(Monotone Implicit LES) approach for the subgrid model whereby the
+implicit dissipation provided by the upwind scheme is used as a
+subgrid model. Since the upwind operators provide a natural low pass
+filter, they provide dissipation characteristics that are consistent
+with the requirements of a good LES filter.  However, the standard Roe
+upwinding scheme can add too much dissipation and so some sort of
+dissipation lowering technique will be needed for the best results.
+Currently the suggested method is to utilize the skew-symmetric flux
+options provided by {\it flowPsi}.  The recommended settings for this are:
+
+\begin{verbatim}
+inviscidFlux: ssf
+LDS_useUpwind: 0.20
+\end{verbatim}
+
+This will use the $4^{th}$ order skew symmetric flux blended with 20\%
+of the standard upwind flux.  This amount of upwinding has been found
+to have good performance as a MILES LES subgrid model.  This skew
+symmetric based flux will not work reliably on tetrahedral or
+prismatic element meshes, however often reasonable results can be
+obtained by refining the mesh with {\tt refmesh} which splits the
+tetrahedral into hexahedral elements.
+
+%\subsubsection{Low Dissipation Scheme}
+%% \begin{equation}
+%% u_i = \underbrace{\overline{u}_i + u^{\prime\prime}_i}_{\hat{u}_i} + u^\prime_i
+%% \end{equation}
+
