@@ -743,6 +743,55 @@ The boundary conditions may be assigned as:
                             rotate=30 deg),
     BC_4=periodic(name="B"),
 \end{verbatim}
+
+  \item {\tt turboInterface}
+    
+    The {\tt turboInterface} is a specialized paired interface that
+    was developed specifically for turbomachinery simulations.  In the
+    turbo interface boundary condition surfaces are paired by
+    assigning two different boundaries with the same name.  For
+    example, to connect a stator section to a rotor section one may
+    couple these two boundary conditions using turboInterface using
+    the specification:
+\begin{verbatim}
+  statorOutflow = turboInterface(name="interface1"),
+  rotorInflow = turboInterface(name="interface1"),
+\end{verbatim}
+
+The two boundary conditions are paired through sharing the name
+``interface1''.  There are additional controls that can be provided in
+the vars file to control the behavior of the {\tt turboInterface}
+boundary conditon.  Note that the correct function of this boundary
+condition requires that exactly two boundaries share the same name.
+Multiple boundaries can be paired and identified with independent
+names.  The names given to each pair are arbitrary and can be selected
+by the user based on the problem at hand. They are listed as follows:
+
+\begin{itemize}
+\item {\tt turbo\_walk\_history\_start} 
+  
+This variable gives how many steps a particle walks before it will
+start remembering its path to prevent cycles in the geometric search.
+The default value is 9.
+
+\item {\tt turbo\_max\_walking\_warning}
+
+This variable gives the number of steps that a particle will walk
+before issuing a warning and terminating its search.  The default
+setting is 500.
+
+\item {\tt turboSearchGeometry}
+
+This variable gives the type of search used to find cells for
+interpolation.  it can be set to either 'cartesian' or 'cylindrical'.
+If it is set to cylindrical, then it is assumed that the axis of the
+cylidrical coordinate system is the x axis.  The default is to use
+cartesian searching.  For turbomachinery applications cylindrical
+searching can provide more accurate interpolations for boundary layer
+regions near viscous walls.
+
+\end{itemize}
+
 \end{list}
 
 \subsubsection{ Notes on Vector Value Inputs }
