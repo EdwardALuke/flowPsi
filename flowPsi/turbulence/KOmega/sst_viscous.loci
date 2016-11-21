@@ -32,6 +32,30 @@ $include "flowPsi.lh"
 $include "kOmega.lh"
 
 namespace flowPsi {
+
+  class vwallks_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "viscousWall" ; }
+    std::string variablesChecked() { return "ks" ; }
+    bool checkOptions(const options_list& bc_options) {  
+      error_message = "" ;
+      if(bc_options.optionExists("ks")) {
+        if(!check_scalar_units(bc_options,"ks","m")) {
+          error_message = "Wrong units for 'ks'" ;
+          return false ;
+        }
+      }
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << std::endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<vwallks_check> register_BC_vwallks_check ;
+
   
   $type sst_k_bc store<real> ;
   $type sst_w_bc store<real> ;

@@ -959,5 +959,7 @@ namespace flowPsi {
   OUTPUT_SCALAR("cell2node(w)",w) ;
   OUTPUT_SCALAR("cell2node(tmu)",tmu) ;
   OUTPUT_BNDRY_SCALAR("k_f",bk,"ci") ;
+  OUTPUT_BNDRY_SCALAR("w_f",bw,"ci") ;
   OUTPUT_BNDRY_SCALAR("tmu_f",btmu,"ci") ;
+  OUTPUT_BNDRY_SCALAR("ksp",ksp,"RoughWallBC") ;
 }
