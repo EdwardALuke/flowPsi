@@ -1,0 +1,2906 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+$include "flowPsi.lh"
+
+#include <map>
+using std::map ;
+#include <vector>
+using std::vector ;
+#include <list>
+using std::list;
+#include <set>
+using std::set;
+
+namespace flowPsi {
+  namespace {
+    // Use least squares method to compute 
+    void computeWeights(vector3d<double> *wvec,
+                        const vector3d<double> *deltas,
+                        const double *deltaweights,
+                        int ndeltas) {
+      tmp_array<vector3d<double> > weights(ndeltas) ;
+
+      double r[3][3] ;
+      r[0][0] = 0 ;
+      for(int i=0;i<ndeltas;++i) {
+        r[0][0] += deltas[i].x*deltas[i].x ;
+        weights[i] = deltas[i] ;
+      }
+      r[0][0] = sqrt(r[0][0]) ;
+      r[0][0] = max(r[0][0],1e-30) ;
+
+      const double rr00 = 1./r[0][0] ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].x *= rr00 ;
+      r[0][1] = 0 ;
+      for(int i=0;i<ndeltas;++i)
+        r[0][1] += weights[i].x*weights[i].y ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].y -= r[0][1]*weights[i].x ;
+      r[0][2] = 0 ;
+      for(int i=0;i<ndeltas;++i)
+        r[0][2] += weights[i].x*weights[i].z ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].z -= r[0][2]*weights[i].x ;
+      r[1][1] = 0 ;
+      for(int i=0;i<ndeltas;++i)
+        r[1][1] += weights[i].y*weights[i].y ;
+      r[1][1] = sqrt(r[1][1]) ;
+      r[1][1] = max(r[1][1],1e-30) ;
+      const double rr11 = 1./r[1][1] ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].y *= rr11 ;
+
+      r[1][2] = 0 ;
+      for(int i=0;i<ndeltas;++i)
+        r[1][2] += weights[i].y*weights[i].z ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].z -= r[1][2]*weights[i].y ;
+      r[2][2] = 0 ;
+      for(int i=0;i<ndeltas;++i)
+        r[2][2] += weights[i].z*weights[i].z ;
+      r[2][2] = sqrt(r[2][2]) ;
+      r[2][2] = max(r[2][2],1e-30) ;
+      const double rr22 = 1./r[2][2] ;
+      for(int i=0;i<ndeltas;++i)
+        weights[i].z *= rr22 ;
+      // Compute R inverse
+      //
+      // Rinv[0] = R^-1[0][0]
+      // Rinv[1] = R^-1[0][1]
+      // Rinv[2] = R^-1[0][2]
+      // Rinv[3] = R^-1[1][1]
+      // Rinv[4] = R^-1[1][2]
+      // Rinv[5] = R^-1[2][2]
+      double Rinv[6] ;
+      Rinv[0] = rr00 ;
+      Rinv[1] = -r[0][1]*rr00*rr11 ;
+      Rinv[2] = (r[0][1]*r[1][2]-r[0][2]*r[1][1])*rr00*rr11*rr22 ;
+      Rinv[3] = rr11 ;
+      Rinv[4] = -r[1][2]*rr11*rr22 ;
+      Rinv[5] = rr22 ;
+
+      for(int i=0;i<ndeltas;++i) {
+        double weightx = Rinv[0]*weights[i].x + Rinv[1]*weights[i].y +
+          Rinv[2]*weights[i].z ;
+        double weighty = Rinv[3]*weights[i].y + Rinv[4]*weights[i].z ;
+        double weightz = Rinv[5]*weights[i].z ;
+        wvec[i] = vector3d<double>(weightx,weighty,weightz)*deltaweights[i] ;
+      }
+    }
+  }
+  
+
+  map<string,int> namelistcanonical(string s) {
+    vector<string> slist ;
+    for(size_t i=0;i<s.size();++i) {
+      string accum = "" ;
+      if(s[i] == '(') {
+        for(++i;i<s.size();++i)
+          if(s[i] == ')') {
+            break ;
+          } else {
+            accum += s[i] ;
+          }
+      }
+      slist.push_back(accum) ;
+    }
+    sort(slist.begin(),slist.end()) ;
+    map<string,int> ms ;
+    string last = slist[0] ;
+    ms[slist[0]] = 0 ;
+    int cnt = 1 ;
+    for(size_t i=1;i<slist.size();++i) {
+      if(slist[i] != last) {
+        ms[slist[i]] = cnt ;
+        last = slist[i] ;
+        cnt++ ;
+      }
+    }
+    return ms ;
+  }
+
+   $type boundary_names store<string> ;
+  // this section contains codes for the sliding interface walking part
+  typedef vector3d<double> vec3d;
+
+  // normalization of 3d vector
+  inline void
+  normalize(Loci::vector3d<double>& v) {
+    if( (fabs(v.x) <= 0.0) &&
+        (fabs(v.y) <= 0.0) &&
+        (fabs(v.z) <= 0.0)) {
+      //cerr << "WARNING: normalizing zero vector, nothing done!" << endl ;
+      return ;
+    }
+    double t = sqrt(v.x*v.x + v.y*v.y + v.z*v.z) ;
+    v.x /= t ;
+    v.y /= t ;
+    v.z /= t ;
+  }
+
+  // some function header
+  void
+  transpose_vector_entitySet_opt(const std::vector<entitySet>& in,
+                                 std::vector<entitySet>& out) ;
+  std::vector<entitySet>
+  gather_all_entitySet(const entitySet& eset) ;  
+
+  void
+  generate_process_map(const std::vector<entitySet>& ptn,
+                       const std::vector<int>& items,
+                       std::vector<int>& pmap) ;
+
+  template<typename T> void
+  distribute_vector(const std::vector<int>& pmap,
+                    std::vector<T>& v, MPI_Comm comm) {
+    if(pmap.size() != v.size()) {
+      throw Loci::StringError
+        ("distribute_vector failed! pmap.size != v.size") ;
+    }
+    int np = 0 ;
+    MPI_Comm_size(comm, &np) ;
+    // first communicate the send/recv size
+    std::vector<int> send_items(np, 0) ;
+    for(size_t i=0;i!=pmap.size();++i)
+      send_items[pmap[i]]++ ;
+
+    std::vector<int> recv_items(np, 0) ;
+    MPI_Alltoall(&send_items[0], 1, MPI_INT,
+                 &recv_items[0], 1, MPI_INT, comm) ;
+
+    // now obtain the true send/recv size (in bytes)
+    std::vector<int> send_sizes(np, 0) ;
+    for(int i=0;i!=np;++i)
+      send_sizes[i] = send_items[i] * sizeof(T) ;
+
+    std::vector<int> recv_sizes(np, 0) ;
+    for(int i=0;i!=np;++i)
+      recv_sizes[i] = recv_items[i] * sizeof(T) ;
+
+    std::vector<int> send_displs(np, 0) ;
+    std::vector<int> recv_displs(np, 0) ;
+    for(int i=1;i<np;++i) {
+      send_displs[i] = send_displs[i-1] + send_items[i-1] ;
+      recv_displs[i] = recv_displs[i-1] + recv_items[i-1] ;
+    }
+
+    int tot_send_items = 0 ;
+    int tot_recv_items = 0 ;
+    for(int i=0;i<np;++i) {
+      tot_send_items += send_items[i] ;
+      tot_recv_items += recv_items[i] ;
+    }
+    // allocate the send buffer
+    std::vector<T> send_buffer(tot_send_items) ;
+    // pack the send buffer
+    std::vector<int> buffer_idx = send_displs ;
+    for(size_t i=0;i!=pmap.size();++i) {
+      int pid = pmap[i] ;
+      int& po = buffer_idx[pid] ;
+      send_buffer[po] = v[i] ;
+      po++ ;
+    }
+
+    // rescale displs in bytes
+    for(int i=0;i!=np;++i) {
+      send_displs[i] = send_displs[i] * sizeof(T) ;
+      recv_displs[i] = recv_displs[i] * sizeof(T) ;
+    }
+    
+    // allocate recv buffer
+    std::vector<T> recv_buffer(tot_recv_items) ;
+    MPI_Alltoallv(&send_buffer[0], &send_sizes[0],
+                  &send_displs[0], MPI_BYTE,
+                  &recv_buffer[0], &recv_sizes[0],
+                  &recv_displs[0], MPI_BYTE, comm) ;
+
+    v.swap(recv_buffer) ;
+  }  
+  //////////////////////////////////////////////////////////////
+  // some usefule global values
+  //////////////////////////////////////////////////////////////
+  $type turbo_walk_history_start param<int> ;
+  $rule default(turbo_walk_history_start) {
+    $turbo_walk_history_start = 9 ;
+  }
+  // default maximum walking step warning threshold
+  $type turbo_max_walking_warning param<int> ;
+  $rule default(turbo_max_walking_warning) {
+    $turbo_max_walking_warning = 500 ;
+  }
+  // use cylindrical coordinate or not (default is not)
+  $type turbo_use_cylindrical param<bool>;
+  $type turboSearchGeometry param<string> ;
+  $rule default(turboSearchGeometry) {
+    $turboSearchGeometry = "cartesian" ;
+  }
+
+  $rule singleton(turbo_use_cylindrical<-turboSearchGeometry) {
+    $turbo_use_cylindrical = false ;
+    if($turboSearchGeometry=="cartesian" || 
+       $turboSearchGeometry=="Cartesian") {
+    } else if($turboSearchGeometry=="cylindrical" || 
+	      $turboSearchGeometry=="Cylindrical") {
+      $turbo_use_cylindrical = true ;
+    } else {
+      if(Loci::MPI_rank==0) {
+	cerr << "WARNING: turboSearchGeometry set to unknown key: '" 
+	     << $turboSearchGeometry <<"'"  <<endl
+	     << "         Set to 'cartesian' or 'cylindrical' " << endl ;
+      }
+    } 
+  }
+
+  // rules that compute the global minimum
+  // and maximum edge length in the mesh
+  $type turbo_min_edge_len param<double> ; // minimum edge length in the mesh
+  $type turbo_max_edge_len param<double> ; // maximum edge length in the mesh
+
+  // a rule that computes the global minimum edge length
+  // this is a unit/apply rule that performs a reduction
+  $rule unit(turbo_min_edge_len), constraint(UNIVERSE) {
+    $turbo_min_edge_len = std::numeric_limits<double>::max() ;
+  }
+  $rule apply(turbo_min_edge_len <- face2node->pos)[Loci::Minimum] {
+    // get the number of nodes in a face2node map for a particular face
+    int size = $face2node.size() ;
+    double local_turbo_min_edge_len = std::numeric_limits<double>::max() ;
+    double local_len = 0 ;
+    // looping over all edges to compute each edge length
+    for(int i=0;i<size-1;++i) {
+      local_len = norm($face2node[i]->$pos -
+                       $face2node[i+1]->$pos) ;
+      if(local_len < local_turbo_min_edge_len)
+        local_turbo_min_edge_len = local_len ;
+    }
+    // last edge
+    local_len = norm($face2node[0]->$pos -
+                     $face2node[size-1]->$pos) ;
+    if(local_len < local_turbo_min_edge_len)
+      local_turbo_min_edge_len = local_len ;
+    // merge the result
+    join($turbo_min_edge_len,local_turbo_min_edge_len) ;
+  }
+
+  // the same to compute the maximum edge length in the mesh
+  $rule unit(turbo_max_edge_len), constraint(UNIVERSE) {
+    $turbo_max_edge_len = 0 ;
+  }
+  $rule apply(turbo_max_edge_len <- face2node->pos)[Loci::Maximum] {
+    int size = $face2node.size() ;
+    double local_turbo_max_edge_len = 0 ;
+    double local_len = 0 ;
+    for(int i=0;i<size-1;++i) {
+      local_len = norm($face2node[i]->$pos -
+                       $face2node[i+1]->$pos) ;
+      if(local_len > local_turbo_max_edge_len)
+        local_turbo_max_edge_len = local_len ;
+    }
+    local_len = norm($face2node[0]->$pos -
+                     $face2node[size-1]->$pos) ;
+    if(local_len > local_turbo_max_edge_len)
+      local_turbo_max_edge_len = local_len ;
+    join($turbo_max_edge_len,local_turbo_max_edge_len) ;
+  }
+
+  // define a global threshold used in containing cell location
+  // computation to avoid possible errors caused by floating point
+  // round-off errors. it is now defined to be the 1/100 of the
+  // global minimum edge length in the mesh
+  $type turbo_dot_threshold param<double> ;
+  $rule singleton(turbo_dot_threshold <- turbo_min_edge_len) {
+    $turbo_dot_threshold = $turbo_min_edge_len / 100 ;
+  }
+
+  namespace {
+    // these functions convert a Cartesian point to its cylindrical
+    // coordinate and vice versa.  the summation/difference of two
+    // cylindrical coordinate points need to be normalized so that
+    // the angle is always within the [-PI, PI] range
+    const double PI=3.141592653589793238463;
+
+    // this function normalize the theta component of a cylindrical
+    // coordinate to the range [-PI,PI].
+    // it is assumed that the input range is within [-2PI, 2PI]
+    // this range is derived from the fact that the "atan2" function
+    // always returns the range [-PI,PI], then two angles involved
+    // can at most have [-2PI,2PI]
+    inline double norm_theta(double theta)
+    {
+      if(theta > PI) {
+        // we can be sure that t is within range (PI,2PI] because
+        // of the input angle range restriction. then we just need
+        // to convert it to negative angle
+        while(theta > PI)
+          theta -= 2*PI;
+        return theta;
+        //return theta-2*PI;
+      } else if(theta < -PI) {
+        // we can be sure that t is within range [-2PI,-PI)
+        // we just need to convert it to positive angle
+        //return theta+2*PI;
+        while(theta < -PI)
+          theta += 2*PI;
+        return theta;
+      } else
+        return theta;
+    }
+    
+
+    // this function computes the difference of two angles in
+    // cylindrical coordinate
+    // the input angles are assumed to be within the range [-PI, PI],
+    // the normal range returned by the "atan2" function.
+    // the output angle is normalized to be within [-PI, PI] as well.
+    inline double theta_diff(double t1, double t2) // t1-t2
+    {
+      double t = t1-t2;
+      return norm_theta(t);
+    }
+
+    // the cylindrical coordinate has 3 components (X,R,Theta),
+    // the X component corresponds to the X component in the Cartesian
+    // coordinate directly. the (R,Theta) corresponds to the
+    // the (Y,Z) plane in the Cartesian coordinate system.
+
+    // we use the Loci type vector3d<double> to represent both
+    // the Cartesian and the cylindrical coordinate points.
+    // all operations defined on the original vector3d<double> type
+    // can be reused for cylindrical coordinate points. we will
+    // need to ensure that the angle "Theta" is normalized after
+    // each operation though.
+
+    // converting a Cartesian point to cylindrical coordinate
+    inline vec3d cart_to_cylind(const vec3d& p)
+    {
+      return vec3d(p.x, sqrt(p.y*p.y + p.z*p.z), atan2(p.y,p.z));
+    }
+    // converting a cylindrical coordinate point to a Cartesian point
+    inline vec3d cylind_to_cart(const vec3d& p)
+    {
+      return vec3d(p.x, p.y*sin(p.z), p.y*cos(p.z));
+    }
+
+    // this function normalizes a cylindrical representation so that
+    // the theta component is always within [-PI,PI]
+    inline vec3d norm_cylind(const vec3d& p)
+    {
+      return vec3d(p.x,p.y,norm_theta(p.z));
+    }
+
+    bool curve_face(const_multiMap& face2node,
+		    Loci::const_store<vec3d>& pos,
+		    Loci::Entity f) {
+      int nn = face2node[f].size();
+      vec3d p0 = pos[face2node[f][0]] ;
+      double r2max = p0.y*p0.y+p0.z*p0.z ;
+      double r2min = r2max ;
+      for(int i=1;i<nn;++i) {
+	vec3d p1 = pos[face2node[f][i]] ;
+	double r2 = p1.y*p1.y+p1.z*p1.z ;
+	r2max = max(r2max,r2) ;
+	r2min = min(r2min,r2) ;
+      }
+      double rmax = sqrt(r2max) ;
+      double rmin = sqrt(r2min) ;
+      return (rmax-rmin < rmin*0.1) ;
+    }
+
+
+    // this function computes the facecenter in cylindrical
+    // coordinate given the nodes of the faces in Cartesian coordinate
+    vec3d cylind_facecenter(const_multiMap& face2node,
+                            Loci::const_store<vec3d>& pos,
+                            Loci::Entity f)
+    {
+      // first we will translate all the nodes in cylindrical coordinate
+      int nn = face2node[f].size();
+      vector<vec3d> cpos(nn);
+      for(int i=0;i<nn;++i)
+        cpos[i] = cart_to_cylind(pos[face2node[f][i]]);
+      // then pick the first node, convert all nodes into a delta form
+      // we will need to remember the original coordinate of the first
+      // node since we will need to use it to obtain the global face
+      // center later
+      vec3d orig = cpos[0];
+      for(int i=0;i<nn;++i)
+        cpos[i] = norm_cylind(cpos[i]-orig);
+      // now we can compute the facecenter based on the normal procedure
+      // (e.g., in reference to the facecenter calculation in
+      // FVMMod/metrics.loci
+      vec3d nodesum(0,0,0);
+      double lensum = 0;
+      for(int i=0;i<nn-1;++i) {
+        vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
+        vec3d edge = (cpos[i]-cpos[i+1]);
+        double len = sqrt(dot(edge,edge));
+        nodesum += len*mid;
+        lensum += len;
+      }
+      // last edge
+      vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
+      vec3d edge = (cpos[0]-cpos[nn-1]);
+      double len = sqrt(dot(edge,edge));
+      nodesum += len*mid;
+      lensum += len;
+
+      return norm_cylind(nodesum/lensum + orig);
+    }
+
+    // given a face center in cylindrical form, this function calculates
+    // the face normal vector in cylindrical coordinate.  the calculation
+    // looks just like the usual procedure (e.g., FVMMod/metrics.loci)
+    // since we have everything in cylindrical form.
+    
+
+    vec3d cylind_facenormal(const vec3d& center,
+                            const_multiMap& face2node,
+                            Loci::const_store<vec3d>& pos,
+                            Loci::Entity f)
+    {
+      // first convert all nodes of the face to cylindrical coordinate
+      int nn = face2node[f].size();
+      vector<vec3d> cpos(nn);
+      for(int i=0;i<nn;++i)
+        cpos[i] = norm_cylind(cart_to_cylind(pos[face2node[f][i]])-center) ;
+      // then calculate the face normal
+      vec3d sum(0,0,0);
+      for(int i=0;i<nn-1;++i) {
+        sum += cross(cpos[i],cpos[i+1]) ;
+      }
+      // last nodes pair
+      sum += cross(cpos[nn-1],cpos[0]) ;
+      double sada = sqrt(dot(sum,sum));
+      vec3d normal = -1.0*sum*(1./(sada+1e-33));
+      return normal;
+    }
+
+    // this function computes the facecenter in cylindrical
+    // coordinate given the nodes of the faces in Cartesian coordinate
+    vec3d cart_facecenter(const_multiMap& face2node,
+                            Loci::const_store<vec3d>& pos,
+                            Loci::Entity f)
+    {
+      // first we will translate all the nodes in cylindrical coordinate
+      int nn = face2node[f].size();
+      vector<vec3d> cpos(nn);
+      for(int i=0;i<nn;++i)
+        cpos[i] = (pos[face2node[f][i]]);
+
+      vec3d nodesum(0,0,0);
+      double lensum = 0;
+      for(int i=0;i<nn-1;++i) {
+        vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
+        vec3d edge = (cpos[i]-cpos[i+1]);
+        double len = sqrt(dot(edge,edge));
+        nodesum += len*mid;
+        lensum += len;
+      }
+      // last edge
+      vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
+      vec3d edge = (cpos[0]-cpos[nn-1]);
+      double len = sqrt(dot(edge,edge));
+      nodesum += len*mid;
+      lensum += len;
+
+      return nodesum/lensum ;
+    }
+
+    vec3d cart_facenormal(const vec3d& center,
+                            const_multiMap& face2node,
+                            Loci::const_store<vec3d>& pos,
+                            Loci::Entity f)
+    {
+      // first convert all nodes of the face to cylindrical coordinate
+      int nn = face2node[f].size();
+      vector<vec3d> cpos(nn);
+      for(int i=0;i<nn;++i)
+        cpos[i] = (pos[face2node[f][i]])-center ;
+      // then calculate the face normal
+      vec3d sum(0,0,0);
+      for(int i=0;i<nn-1;++i) {
+        sum += cross(cpos[i],cpos[i+1]) ;
+      }
+      // last nodes pair
+      sum += cross(cpos[nn-1],cpos[0]) ;
+      double sada = sqrt(dot(sum,sum));
+      vec3d normal = sum*(1./(sada+1e-33));
+      return normal;
+    }
+  }
+  
+  
+  class turboInterface_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "turboInterface"; }
+    std::string variablesChecked() { return "name"; }
+    bool checkOptions(const options_list &bc_options) {
+      bool check = true ;
+      
+      error_message = "" ;
+      if(!bc_options.optionExists("name")) {
+        error_message = "all turboInterface boundaries must have a name! " ;
+        check = false ; 
+      }
+      
+      return check ;
+    }
+    
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+  register_BC<turboInterface_check> register_turboInterface_check;
+
+  $type turboSurfaces store<int>;
+  $rule pointwise(ref->turboSurfaces),constraint(turboInterface_BC) {
+  }
+
+  $type turboName store<string>;
+  $rule pointwise(turboName <- BC_options),
+    constraint(name_BCoption,turboSurfaces) {
+    $BC_options.getOption("name",$turboName);
+  }
+
+  $type TBCTagList param<string>;
+  $rule unit(TBCTagList),constraint(UNIVERSE) {
+    $TBCTagList = "";
+  }
+
+  $rule apply(TBCTagList<-boundary_names)[Loci::Summation],
+    constraint(turboSurfaces) {
+    $TBCTagList += string("(")+$boundary_names+string(")");
+  }
+  
+  $type turboNameList param<string>;
+  $rule unit(turboNameList),constraint(UNIVERSE) {
+    $turboNameList = "";
+  }
+
+  $rule apply(turboNameList<-turboName)[Loci::Summation] {
+    $turboNameList += string("(")+$turboName+string(")");
+  }
+
+  $type turboNameIds blackbox<map<string,int> >;
+  $type turboBCIds blackbox<map<string,int> >;
+
+  $rule blackbox(turboNameIds<-turboNameList),prelude {
+    *$turboNameIds = namelistcanonical(*$turboNameList);
+  };
+  
+  $rule blackbox(turboBCIds<-TBCTagList),prelude {
+    *$turboBCIds = namelistcanonical(*$TBCTagList);
+  };
+
+  $type turboNameID store<int>;
+  $type turboBCID store<int>;
+
+  $rule pointwise(turboNameID<-turboNameIds,turboName),constraint(turboSurfaces) {
+    map<string,int>::const_iterator mi = $turboNameIds.find($turboName);
+    int nid = -1;
+    if(mi != $turboNameIds.end()) {
+      nid = mi->second;
+    }
+    $turboNameID = nid;
+  }
+    
+  $rule pointwise(turboBCID<-turboBCIds,boundary_names),constraint(turboSurfaces) {
+    map<string,int>::const_iterator mi = $turboBCIds.find($boundary_names);
+    int nid = -1;
+    if(mi != $turboBCIds.end()) {
+      nid = mi->second;
+    }
+    $turboBCID = nid;
+    //    cout << "turboBCID = " << $boundary_names << ", nid = " << nid << endl ;
+  }
+  
+  $type turboPairs param<vector<pair<int,int> > >;
+
+  $rule unit(turboPairs),constraint(UNIVERSE) {
+    $turboPairs.clear();
+  }
+  namespace {
+    template<class T> struct AppendOperator {
+      void operator()(T & lhs, const T & rhs) {
+        lhs.insert(lhs.end(),rhs.begin(),rhs.end());
+      }
+    };
+  }
+  $rule apply(turboPairs<-turboNameID,turboBCID)[AppendOperator],
+    constraint(turboSurfaces) {
+    int nid = $turboNameID;
+    int bid = $turboBCID;
+    $turboPairs.push_back(pair<int,int>(nid,bid));
+  }
+  
+  $type turboConnect param<vector<pair<int,int> > > ;
+  $rule singleton(turboConnect<-turboPairs,turboBCIds) {
+    vector<pair<int,int> > plist = $turboPairs ;
+    sort(plist.begin(),plist.end()) ;
+    int psz = plist.size() ;
+    int error = 0 ;
+    vector<pair<int,int> > connect ;
+    for(int i=0;i<psz;++i) {
+      if(i+1==psz || plist[i].first != plist[i+1].first) { 
+	// error in matching bc's, find bc name
+	map<string,int>::const_iterator mi ;
+	string name = "error" ;
+	for(mi=$turboBCIds.begin();mi!=$turboBCIds.end();++mi) {
+	  if(mi->second == plist[i].second)
+	    name = mi->first ;
+	}
+	if(Loci::MPI_rank == 0) {
+	  cerr << "unmatched name for turbo BC '" << name << "'" << endl ;
+	}
+	error++ ;
+      } else {
+	connect.push_back(pair<int,int>(plist[i].second,plist[i+1].second)) ;
+	connect.push_back(pair<int,int>(plist[i+1].second,plist[i].second)) ;
+      }
+      i++ ;
+    }
+    if(error > 0) {
+      Loci::Abort() ;
+    }
+    sort(connect.begin(),connect.end()) ;
+    $turboConnect = connect ;
+  }
+  
+  $type turboBCPartner store<int> ;
+
+  $rule pointwise(turboBCPartner<-turboConnect,turboBCID) {
+    int tsz =$turboConnect.size() ;
+    $turboBCPartner = -1 ;
+    for(int i=0;i<tsz;++i) 
+      if($turboConnect[i].first == $turboBCID) 
+	$turboBCPartner = $turboConnect[i].second ;
+    if($turboBCPartner == -1) {
+      cerr << "internal inconsistency error" << endl ;
+      Loci::Abort() ;
+    }
+  }
+  
+  // spaceH is per interface value
+  $type spaceH store<double>;
+  $rule unit(spaceH),constraint(turboSurfaces) {
+    $spaceH =1e30;
+  }
+  $rule apply(ref->spaceH <- facecenter,area,ci->cellcenter)[Loci::Minimum],
+    constraint(turboInterface_BC) {
+    double localH = dot($facecenter - $ci->$cellcenter,$area.n);
+    if(localH < $ref->$spaceH)
+      $ref->$spaceH = localH;
+  }
+
+
+  template<class T>
+  struct AppendOp {
+    void operator()(T & lhs, const T & rhs) {
+      lhs.insert(lhs.end(),rhs.begin(),rhs.end());
+    }
+  };
+
+  $type turboHDB param<vector<pair<int,double> > > ;
+
+  
+  $rule unit(turboHDB),constraint(UNIVERSE) {
+    $turboHDB = vector<pair<int,double> >() ;
+  }
+
+
+  $rule apply(turboHDB<-spaceH,turboBCPartner)[flowPsi::AppendOp] {
+    $turboHDB.push_back(pair<int,double>($turboBCPartner,$spaceH)) ;
+  }
+
+  $type spaceHP store<double>;
+  
+  $rule pointwise(spaceHP<-turboHDB,turboBCID) {
+    int sz = $turboHDB.size() ;
+    $spaceHP = 0 ;
+    for(int i=0;i<sz;++i)
+      if($turboHDB[i].first == $turboBCID)
+	$spaceHP = $turboHDB[i].second ;
+    //    cout << "spaceHP = " << $spaceHP << ", bcid = " << $turboBCID << endl ;
+  }
+
+  // spaceH2 is per face (just copy spaceH to each interface face)
+  // this is done as a hack to simplify later programming
+  $type spaceH2 store<double>;
+  $rule pointwise(spaceH2 <- ref->spaceHP),constraint(turboInterface_BC) {
+    $spaceH2 = 0.25*$ref->$spaceHP;
+  }
+
+
+
+  // we need to maintain a mapping (numbering) between
+  // the points and the faces they are associated.
+  Map pt_l2g;
+  dMap pt_g2l;
+
+  // we need to generate two lists of points, the first list contains
+  // all of the first associate points, the second list contains all
+  // of the second associate points.
+
+  // first we define a structure for points, it should have a containing
+  // cell and a corresponding face id, and of course its position
+  struct TurboPoint {
+    int id;                     // the unique id of the point
+    vec3d pos;                  // could be cylindrical or Cartesian
+    Loci::Entity cell, face; // cell is in local number, face in global number
+    int BCid ;
+    TurboPoint() {}
+    TurboPoint(int i, const vec3d& p, int c, int f, int bc)
+      :id(i),pos(p),cell(c),face(f),BCid(bc) {}
+  };
+  std::ostream& operator<<(std::ostream& s, const TurboPoint& p)
+  {
+    s << "(" << p.id << ":"
+      << p.pos << "|" << p.cell << "|" << p.face 
+      << "|" << p.BCid << ")";
+    return s;
+  }
+  std::istream& operator>>(std::istream& s, TurboPoint& p)
+  {
+    s >> p.id >> p.pos >> p.cell >> p.face >> p.BCid ;
+    return s;
+  }
+  std::ostream& operator<<(std::ostream& s, const std::list<TurboPoint>& lp)
+  {
+    for(std::list<TurboPoint>::const_iterator
+          li=lp.begin();li!=lp.end();++li)
+      s << *li << std::endl;
+    return s;
+  }
+  std::istream& operator>>(std::istream& s, std::list<TurboPoint>& lp)
+  {
+    size_t sz; s >> sz;
+    lp.resize(sz);
+    for(list<TurboPoint>::iterator li=lp.begin();li!=lp.end();++li)
+      s >> *li;
+    return s;
+  }
+} // end of flowPsi namespace
+
+namespace Loci {
+  // TurboPoint type traits for Loci
+  template<>
+  struct data_schema_traits<flowPsi::TurboPoint> {
+    typedef IDENTITY_CONVERTER Schema_Converter ;
+    static DatatypeP get_type() {
+      CompoundDatatypeP cmpd =
+        CompoundFactory(flowPsi::TurboPoint()) ;
+      LOCI_INSERT_TYPE(cmpd, flowPsi::TurboPoint, id) ;
+      LOCI_INSERT_TYPE(cmpd, flowPsi::TurboPoint, pos) ;
+      LOCI_INSERT_TYPE(cmpd, flowPsi::TurboPoint, cell) ;
+      LOCI_INSERT_TYPE(cmpd, flowPsi::TurboPoint, face) ;
+      LOCI_INSERT_TYPE(cmpd, flowPsi::TurboPoint, BCid) ;
+      return DatatypeP(cmpd) ;
+    }
+  } ;
+  // list<TurboPoint> traits
+  class listTurboPointSchemaConverter {
+    std::list<flowPsi::TurboPoint>& lp ;
+  public:
+    explicit listTurboPointSchemaConverter
+    (std::list<flowPsi::TurboPoint>& lpr):lp(lpr) {}
+
+    int
+    getSize() const {
+      return lp.size() ;
+    }
+
+    void
+    getState(flowPsi::TurboPoint* buf, int& size) {
+      size = getSize() ;
+      int ii = 0 ;
+      for(std::list<flowPsi::TurboPoint>::const_iterator
+            ci=lp.begin();ci!=lp.end();++ci)
+        buf[ii++] = *ci ;
+    }
+    
+    void
+    setState(flowPsi::TurboPoint* buf, int size) {
+      lp.clear() ;
+      for(int i=0;i<size;++i)
+        lp.push_back(buf[i]) ;
+    }
+  } ;
+
+  template<>
+  struct data_schema_traits<std::list<flowPsi::TurboPoint> > {
+    typedef USER_DEFINED_CONVERTER Schema_Converter ;
+    typedef flowPsi::TurboPoint Converter_Base_Type ;
+    typedef listTurboPointSchemaConverter Converter_Type ;
+  } ;
+} // end of Loci namespace
+
+namespace flowPsi {
+  
+  // these maps are for sequential use
+  Map seq_l2g;
+  dMap seq_g2l;
+
+  void createSeedPoints(list<TurboPoint> &seed_list,
+			const vector<pair<pair<int,int>,vector3d<float> > >  &turboPointInitDB,
+			const map<string,int>  &turboBCIds,			
+			store<vec3d> &floc,
+			store<int> &fbcid,
+			Loci::fact_db *factsP) {
+    int nsz = turboPointInitDB.size() ;
+    int bsz = turboBCIds.size() ;
+    vector<vector<vector3d<float> > > coord_list(bsz) ;
+    vector<vector<int> > id_list(bsz) ;
+    // collate information based on boundaries
+    for(int i=0;i<nsz;++i) {
+      int bc = turboPointInitDB[i].first.first ;
+      int cell = turboPointInitDB[i].first.second ;
+      vector3d<float> pt = turboPointInitDB[i].second ;
+      coord_list[bc].push_back(pt) ;
+      id_list[bc].push_back(cell) ;
+    }
+    vector<Loci::kdTree::KDTree<float> * > kd_list(bsz) ;
+    for(int i=0;i<bsz;++i)
+      kd_list[i] = new Loci::kdTree::KDTree<float>(coord_list[i],id_list[i]) ;
+
+    
+    Loci::fact_db::distribute_infoP df = 0;
+    if(factsP->is_distributed_start())
+      df = factsP->get_distribute_info();
+
+    Loci::constraint turboFaces = factsP->get_variable("turboInterface_BC") ;
+    Loci::entitySet dom = *turboFaces ;
+    
+    if(df!=0) {
+      dom &= df->my_entities ;
+    }
+    for(Loci::entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei) {
+      vec3d p1 = floc[*ei] ;
+      Loci::Entity f = *ei;
+      if(factsP->is_distributed_start()) {
+        // store the global number for the face id
+        f = df->l2g[*ei];
+      }
+      int bcid = fbcid[*ei] ;
+      vector3d<float> pt=p1 ;
+      int cell = kd_list[bcid]->find_closest(pt) ;
+      //      cout << "cell = " << cell << endl ;
+      seed_list.push_back(TurboPoint(0,p1,cell,f,bcid));
+    }
+    for(int i=0;i<bsz;++i)
+      delete kd_list[i] ;
+
+    // we will then need to assign ids to the points
+    // first assign ids to all point1
+    int local_num = seed_list.size();
+    int local_id = 0;
+    MPI_Scan(&local_num, &local_id, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    local_id -= local_num;
+    for(list<TurboPoint>::iterator li=seed_list.begin();li!=seed_list.end();++li)
+      li->id = local_id++;
+    // assign ids to all point2
+    int total_pt1 = 0;
+    MPI_Allreduce(&local_num, &total_pt1, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    // we will also collect all faces and renumber them on each process
+    Loci::entitySet local_faces;
+    for(list<TurboPoint>::const_iterator li=seed_list.begin();li!=seed_list.end();++li)
+      local_faces += li->face;
+    // collect all faces on each process
+    vector<entitySet> facesv = gather_all_entitySet(local_faces);
+    entitySet faces;
+    for(size_t i=0;i<facesv.size();++i)
+      faces += facesv[i];
+    
+    int lf = 0;
+    pt_l2g.allocate(Loci::entitySet(interval(0,faces.size()-1)));
+    for(Loci::entitySet::const_iterator
+          ei=faces.begin();ei!=faces.end();++ei,++lf) {
+      pt_l2g[lf] = *ei;
+      pt_g2l[*ei] = lf;
+    }
+    // build identity map for the sequential case
+    seq_l2g.allocate(faces);
+    for(Loci::entitySet::const_iterator
+          ei=faces.begin();ei!=faces.end();++ei) {
+      seq_l2g[*ei] = *ei;
+      seq_g2l[*ei] = *ei;
+    }    
+  }
+
+  // these are used in the iteration {n}, so we have
+  // turboPt*{n} -> turboPt*_posUpdated{n} -> turboPt*_located{n}
+  //             -> turboPt*{n+1}
+  $type turboPt1 blackbox<list<TurboPoint> >;
+  $type turboPt1Init blackbox<list<TurboPoint> >;
+  $type turboPt1_located blackbox<list<TurboPoint> >;
+
+  // here we define a communication structure that is used to
+  // pull and/or push data from/to the interface faces and the cells
+  // that contain the interface projection points.
+  struct Communicator {
+    // first we define a communication structure for point 2 point
+    // communication. it records the domain (in entitySet) that
+    // a process needs to send to others and needs to receive from others.
+    struct P2pCommInfo {
+      int proc ;            // process id to talk/listen to
+      Loci::entitySet set_g ;      // in global numbering
+      Loci::entitySet set_l ;      // in local numbering
+      int size ;                   // size of the entitySet
+      P2pCommInfo(int p=0, const Loci::entitySet& sg=EMPTY,
+                  const Loci::entitySet& sl=EMPTY):proc(p),
+                                                   set_g(sg),
+                                                   set_l(sl) {
+        size = sg.size() ;
+      }
+      // ordering of the P2pCommInfo is based on the proc id
+      bool
+      operator<(const P2pCommInfo& p) const {
+        return proc < p.proc ;
+      }
+    } ;
+    // recording communication patterns for the points
+    std::vector<P2pCommInfo> send ;
+    std::vector<P2pCommInfo> recv ;
+    // mapping info used to do pack/unpack remap during the
+    // communication using the send/recv list
+    // "pack" is the map used when packing the request entity set
+    // during sending operations, it is usually a
+    // local -> global mapping and has a type of Loci::Map.
+    // the "unpack" is the map used when unpacking the request
+    // entity set during the receiving operations. it is usually
+    // a global -> local mapping and has a type of Loci::dMap.
+    // either of them can be empty, however, users have to
+    // make sure that the use of the communicator object must be
+    // compatible with the pack/unpack map it contains.
+    Map pack ;
+    dMap unpack ;
+    // these are shortcuts to the entity distribution stored
+    // in the send/recv list. the "send_alloc" is the union of
+    // "set_l" in the send vector, the "recv_alloc" is the
+    // union of the "set_l" in the recv vector. they
+    // represent the local numbering of the sent entitities,
+    // and the local numbering of the requested entities. they
+    // can be used to obtain an allocation domain.
+    Loci::entitySet send_alloc ;
+    Loci::entitySet recv_alloc ;
+    // constructor
+    Communicator():send_alloc(EMPTY),recv_alloc(EMPTY) {}
+    // methods that clears a communicator object
+    void
+    clear() {
+      send.clear(), recv.clear() ;
+      send_alloc = EMPTY, recv_alloc = EMPTY ;
+    }
+  } ;
+
+  // function header for remote store communication
+  void
+  get_remote_stores(std::vector<Loci::storeRepP>& in,
+                    const std::vector<Communicator::P2pCommInfo>& send,
+                    const std::vector<Communicator::P2pCommInfo>& recv,
+                    const Map& pack_remap,
+                    const dMap& unpack_remap,
+                    std::vector<Loci::storeRepP>& out) ;
+  void
+  get_remote_stores(std::vector<Loci::storeRepP>& in,
+                    std::vector<Loci::storeRepP>& out,
+                    const Communicator& comm) ;
+  
+  // this is from the points' perspective, i.e., pull means
+  // communicate data from the faces to the cells that contain
+  // those points, and push means communicate data from the cells
+  // that contain the points to the interface faces.
+  // if the interface faces perspective is needed sometimes, then
+  // we should just flip their usage.
+  Communicator p1_pull_comm, p1_push_comm;
+
+  // this function computes the new communicators based on a
+  // list of points
+  void update_comm(Loci::fact_db* factsP, // pointer to current Loci face_db
+                   const list<TurboPoint>& pts,
+                   Communicator& pull, Communicator& push)
+  {
+    typedef Communicator::P2pCommInfo PCI;
+    // first collect all the faces
+    Loci::entitySet faces;
+    for(list<TurboPoint>::const_iterator li=pts.begin();li!=pts.end();++li)
+      faces += li->face;
+    // clear the previous comm
+    pull.clear();
+    push.clear();
+
+    if(!factsP->is_distributed_start()) {
+      // the sequential case
+
+      // local numbering for pull.recv[i] & push.send[i]
+      entitySet local = remap_entitySet(faces, pt_g2l);
+
+      // add to the vectors
+      pull.recv.push_back(PCI(0, faces, local));
+      push.send.push_back(PCI(0, faces, local));
+
+      pull.recv_alloc = local;
+      push.send_alloc = local;
+      
+      // local numbering for pull.send[i] & push.recv[i]
+      local = remap_entitySet(faces, seq_g2l);
+
+      // add to the vector
+      pull.send.push_back(PCI(0, faces, local));
+      push.recv.push_back(PCI(0, faces, local));
+
+      pull.send_alloc = local;
+      push.recv_alloc = local;
+      
+      // cache the pack/unpack maps
+      pull.pack.setRep(seq_l2g.Rep());
+      pull.unpack.setRep(pt_g2l.Rep());
+      push.pack.setRep(pt_l2g.Rep());
+      push.unpack.setRep(seq_g2l.Rep());
+
+      return;
+    }
+
+    // parallel case
+    Loci::fact_db::distribute_infoP df = factsP->get_distribute_info();
+    // obtaining Loci fact database's entity partition
+    const std::vector<Loci::entitySet>& ptn=factsP->get_init_ptn();
+    // obtain entity set partition for the faces
+    std::vector<Loci::entitySet> face_dist(ptn.size());
+    for(size_t i=0;i<ptn.size();++i)
+      face_dist[i] = faces & ptn[i];
+    // then transpose it
+    std::vector<Loci::entitySet> face_distT(ptn.size());
+    transpose_vector_entitySet_opt(face_dist, face_distT);
+
+    // to the pull_comm,
+    // face_dist is the receiving set and face_distT is the sending set
+
+    // to the push_comm,
+    // face_dist is the sending set and face_distT is the receiving set.
+
+    // to the pull_comm
+    // the pack map is Loci's l2g map since in the pull, the faces are
+    // sending information to the points,
+    // the unpack map is pt_g2l since the face info. received by the
+    // points need to be renumbered using the new local number for faces
+
+    // to the push_comm
+    // the pack map is pt_l2g since in the push, the points are sending
+    // its local face data to the remote face partition,
+    // likewise the unpack map is Loci's g2l map
+
+    // we will process the dist vector first, which corresponds
+    // to the send vector in the push_comm and the recv vector
+    // in the pull_comm.
+    entitySet alloc = EMPTY;
+    
+    for(size_t i=0;i<face_dist.size();++i) {
+      const entitySet& es = face_dist[i];
+      if(es != EMPTY) {
+        // local numbering for pull.recv[i] & push.send[i]
+        entitySet local = remap_entitySet(es, pt_g2l);
+        alloc += local;
+        // add to the vectors
+        pull.recv.push_back(PCI(i, es, local));
+        push.send.push_back(PCI(i, es, local));
+      }
+    }
+    pull.recv_alloc = alloc;
+    push.send_alloc = alloc;
+
+    // we then process the distT vector, which corresponds to
+    // the send vector in the pull_comm and the recv vector
+    // in the push_comm
+    alloc = EMPTY;
+    for(size_t i=0;i<face_distT.size();++i) {
+      const entitySet& es = face_distT[i];
+      if(es != EMPTY) {
+        // local numbering for pull.send[i] & push.recv[i]
+        entitySet local = remap_entitySet(es, df->g2l);
+        alloc += local;
+        // add to the vector
+        pull.send.push_back(PCI(i, es, local));
+        push.recv.push_back(PCI(i, es, local));
+      }
+    }
+    pull.send_alloc = alloc;
+    push.recv_alloc = alloc;
+
+    // cache the pack/unpack maps
+    pull.pack.setRep(df->l2g.Rep());
+    pull.unpack.setRep(pt_g2l.Rep());
+    push.pack.setRep(pt_l2g.Rep());
+    push.unpack.setRep(df->g2l.Rep());    
+  }
+
+  ////////////////////////////////////////////////////////////////
+  // this is the part of the code that walks all the points
+  ////////////////////////////////////////////////////////////////
+  
+  // history records used in point walking
+  std::map<int, set<int> >* point_walk_history = 0;
+
+  namespace {
+    // this is a small auxiliary struct used to help to select
+    // which face to cross in the point walking process
+    struct WalkTopoAux {
+      Loci::Entity cell;        // the cell to move to
+      Loci::Entity face;        // the face that has been crossed
+      double dt;
+      WalkTopoAux(const Loci::Entity& c,const Loci::Entity& f,double d):
+        cell(c),face(f),dt(d) {}
+      bool
+      operator<(const WalkTopoAux& wta) const {
+        return dt < wta.dt;
+      }
+    };
+
+    // given the grid topology info. and a point,
+    // this function decides whether the point is "outside"
+    // the current containing cell, it returns "true" if
+    // the point is outside the current containing cell,
+    // "false" if inside.
+    // in case of outside, it also sets the neighboring cell
+    // that the point should move to
+
+    // the flag "c" indicates whether or not the calculation
+    // is done using a cylindrical coordinate system
+    // true indicates yes, false indicates using the normal
+    // Cartesian coordinate.
+    // in case the cylindrical coordinate is used, the
+    // facecenter and face normal vector are calculated
+    // on the fly inside this function (using face2node and pos).
+
+    // this version does not track face crossing history
+    bool walk_point(const TurboPoint& p,
+                    bool c,
+                    double dot_threshold,
+                    const_multiMap& face2node,
+                    Loci::const_store<vec3d>& pos,
+                    const_Map& cl, const_Map& cr,
+                    const_multiMap& upper,
+                    const_multiMap& lower,
+                    Map* l2g,
+                    Loci::Entity& target_cell)
+    {
+      bool walk = false;
+      vector<WalkTopoAux> walk_aux;
+
+      // looping over the lower faces
+      int fsz = lower[p.cell].size();
+      for(int i=0;i<fsz;++i) {
+        int f = lower[p.cell][i];
+        // convert to global number
+        int fg = f;
+        if(l2g)
+          fg = (*l2g)[f];
+
+        vec3d v1, v2;
+        if(c) {
+          // calculate cylindrical representation
+          // we will compute the face center and normal for f first
+	  if(curve_face(face2node,pos,f)) {
+	    vec3d center = cylind_facecenter(face2node,pos,f);
+	    vec3d normal = cylind_facenormal(center,face2node,pos,f);
+	    v1 = norm_cylind(cart_to_cylind(p.pos)-center);
+	    normalize(v1) ;
+	    // the face normal has to point toward the cellcenter
+	    // since this is a lower face, the normal already points
+	    // toward the cellcenter
+	    v2 = normal;
+	  } else {
+	    // use Cartesian data directly
+	    vec3d center = cart_facecenter(face2node,pos,f) ;
+	    vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+	    v1 = p.pos - center ;
+	    normalize(v1);
+	    // the face normal has to point toward the cellcenter
+	    // since this is a lower face, the normal already points
+	    // toward the cellcenter
+	    v2 = normal;
+	  }
+        } else {
+          // use Cartesian data directly
+	  vec3d center = cart_facecenter(face2node,pos,f) ;
+	  vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+          v1 = p.pos - center ;
+          normalize(v1);
+          // the face normal has to point toward the cellcenter
+          // since this is a lower face, the normal already points
+          // toward the cellcenter
+          v2 = normal;
+        }
+
+        double dt = dot(v1,v2);
+        if(dt < -dot_threshold) {
+          walk = true;
+          walk_aux.push_back(WalkTopoAux(cl[f],fg,dt));
+        }
+      }
+      // looping over the upper faces
+      fsz = upper[p.cell].size();
+      for(int i=0;i<fsz;++i) {
+        int f = upper[p.cell][i];
+        int fg = f;
+        if(l2g)
+          fg = (*l2g)[f];
+
+        vec3d v1, v2;
+        if(c) {
+          // calculate cylindrical representation
+          // we will compute the face center and normal for f first
+	  if(curve_face(face2node,pos,f)) {
+	    vec3d center = cylind_facecenter(face2node,pos,f);
+	    vec3d normal = cylind_facenormal(center,face2node,pos,f);
+	    v1 = norm_cylind(cart_to_cylind(p.pos)-center);
+	    // the face normal has to point toward the cellcenter
+	    // since this is an upper face, the normal has to be flipped
+	    v2 = -1.0 * normal;
+	  } else {
+	    vec3d center = cart_facecenter(face2node,pos,f) ;
+	    vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+	    v1 = p.pos - center;
+	    normalize(v1);
+	    v2 = -1.0 * normal ;
+	  }
+        } else {
+	  vec3d center = cart_facecenter(face2node,pos,f) ;
+	  vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+          v1 = p.pos - center;
+          normalize(v1);
+          v2 = -1.0 * normal ;
+        }
+        
+        double dt = dot(v1,v2);
+        if(dt < -dot_threshold) {
+          walk = true;
+          walk_aux.push_back(WalkTopoAux(cr[f],fg,dt));
+        }
+      }
+      // decide which face to cross
+      if(walk) {
+        std::sort(walk_aux.begin(),walk_aux.end());
+        target_cell = walk_aux[0].cell;
+      }
+      return walk;
+    }
+    
+    // this version tracks face crossing history
+    bool walk_point_wht(const TurboPoint& p,
+                        bool c,
+                        double dot_threshold,
+                        const_multiMap& face2node,
+                        Loci::const_store<vec3d>& pos,
+                        const_Map& cl, const_Map& cr,
+                        const_multiMap& upper,
+                        const_multiMap& lower,
+                        Map* l2g,
+                        Loci::Entity& target_cell)
+    {
+      bool walk = false;
+      vector<WalkTopoAux> walk_aux;
+      // retrieve the face history if there's one
+      map<int,set<int> >::iterator mi =
+        point_walk_history->find(p.id);
+      set<int>* crossed_faces = 0;
+      if(mi != point_walk_history->end())
+        crossed_faces = &(mi->second);
+
+      // looping over the lower faces
+      int fsz = lower[p.cell].size();
+      for(int i=0;i<fsz;++i) {
+        // check if the face is already crossed
+        int f = lower[p.cell][i];
+        // convert to global number
+        int fg = f;
+        if(l2g)
+          fg = (*l2g)[f];
+        if(crossed_faces) {
+          if(crossed_faces->find(fg) != crossed_faces->end())
+            continue;
+        }
+        // if not, then we calculate
+        vec3d v1, v2;
+        if(c) {
+	  if(curve_face(face2node,pos,f)) {
+	    // calculate cylindrical representation
+	    // we will compute the face center and normal for f first
+	    vec3d center = cylind_facecenter(face2node,pos,f);
+	    vec3d normal = cylind_facenormal(center,face2node,pos,f);
+	    v1 = norm_cylind(cart_to_cylind(p.pos)-center);
+	    // the face normal has to point toward the cellcenter
+	    // since this is a lower face, the normal already points
+	    // toward the cellcenter
+	    v2 = normal;
+	  } else {
+	    // use Cartesian data directly
+	    vec3d center = cart_facecenter(face2node,pos,f) ;
+	    vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+	    v1 = p.pos - center;
+	    normalize(v1);
+	    v2 = normal ;
+	  }
+        } else {
+          // use Cartesian data directly
+	  vec3d center = cart_facecenter(face2node,pos,f) ;
+	  vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+          v1 = p.pos - center;
+          normalize(v1);
+          v2 = normal ;
+        }
+        
+        double dt = dot(v1,v2);
+        if(dt < -dot_threshold) {
+          walk = true;
+          walk_aux.push_back(WalkTopoAux(cl[f],fg,dt));
+        }
+      }
+      // looping over the upper faces
+      fsz = upper[p.cell].size();
+      for(int i=0;i<fsz;++i) {
+        int f = upper[p.cell][i];
+        int fg = f;
+        if(l2g)
+          fg = (*l2g)[f];
+        if(crossed_faces) {
+          if(crossed_faces->find(fg) != crossed_faces->end())
+            continue;
+        }
+
+        vec3d v1, v2;
+        if(c) {
+          if(curve_face(face2node,pos,f)) {
+	    // calculate cylindrical representation
+	    // we will compute the face center and normal for f first
+	    vec3d center = cylind_facecenter(face2node,pos,f);
+	    vec3d normal = cylind_facenormal(center,face2node,pos,f);
+	    v1 = norm_cylind(cart_to_cylind(p.pos)-center);
+	    // the face normal has to point toward the celclenter
+	    // since this is an upper face, the normal has to be flipped
+	    v2 = -1.0 * normal;
+	  } else {
+	    vec3d center = cart_facecenter(face2node,pos,f) ;
+	    vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+	    v1 = p.pos - center;
+	    normalize(v1);
+	    v2 = -1.0 * normal ;
+	  }
+        } else {
+	  vec3d center = cart_facecenter(face2node,pos,f) ;
+	  vec3d normal = cart_facenormal(center,face2node,pos,f) ;
+          v1 = p.pos - center;
+          normalize(v1);
+          v2 = -1.0 * normal ;
+        }
+        
+        double dt = dot(v1,v2);
+        if(dt < -dot_threshold) {
+          walk = true;
+          walk_aux.push_back(WalkTopoAux(cr[f],fg,dt));
+        }
+      }
+      // decide which face to cross
+      if(walk) {
+        std::sort(walk_aux.begin(),walk_aux.end());
+        target_cell = walk_aux[0].cell;
+        Loci::Entity face_crossed = walk_aux[0].face;
+        // record history
+        if(crossed_faces)
+          crossed_faces->insert(face_crossed);
+        else
+          (*point_walk_history)[p.id].insert(face_crossed);
+      }
+      return walk;
+    }
+
+    // move all the points by 1 step, the walking function is parameterized
+    // since we want to have two versions (tracks face crossing or not)
+    template<class WalkFun> void
+    move_points(list<TurboPoint>& to_locate,
+                list<TurboPoint>& located,
+                bool c,         // use cylindrical coordinate or not
+                double dot_threshold,
+                const_multiMap& face2node,
+                Loci::const_store<vec3d>& pos,
+                const_Map& cl, const_Map& cr,
+                const_multiMap& upper, const_multiMap& lower,
+                Loci::fact_db* factsP,
+                WalkFun walk_point_function) {
+      // code for parallel processing
+      if(factsP->is_distributed_start()) {
+        // get the distribute_info structure
+        Loci::fact_db::distribute_infoP df = factsP->get_distribute_info();
+        
+        Loci::constraint geom_cells = factsP->get_variable("geom_cells");
+        Loci::entitySet local_cells = *geom_cells;
+        Loci::store<list<TurboPoint> > transfer_points;
+        transfer_points.allocate(local_cells);
+
+        bool point_moved = false;
+      
+        list<TurboPoint>::iterator li = to_locate.begin();
+        while(li != to_locate.end()) {
+          Loci::Entity neighbor;
+          if(walk_point_function(*li,c,dot_threshold,
+                                 face2node,pos,
+                                 cl,cr,upper,lower,
+                                 &(df->l2g),neighbor)) {
+            li->cell = neighbor;
+            // we will need to remove the point and record it
+            // in the store transfer_points to be communicated later
+            list<TurboPoint>::iterator li2 = li; ++li2;
+            list<TurboPoint>& lp = transfer_points[neighbor];
+            lp.splice(lp.end(), to_locate, li);
+            li = li2;
+            point_moved = true;
+            continue;
+          }
+          // if a point does not move through any interior faces,
+          // then it is going to stay in the current cell.
+          list<TurboPoint>::iterator li_bak = li;
+          ++li_bak;
+          located.splice(located.end(), to_locate, li);
+          li = li_bak;
+        } // end of while
+
+        if(!Loci::GLOBAL_OR(point_moved)) // no need to communicate
+          return;                        // if no points moved
+
+        // we will need to send points in the transfer_points
+        // store to any neighboring processes.
+        vector<int> send_counts(df->copy.size(), 0);
+        for(size_t i=0;i<send_counts.size();++i) {
+          entitySet send_dom = df->copy[i].entities & local_cells;
+          int count = 0;
+          for(entitySet::const_iterator ei=send_dom.begin();
+              ei!=send_dom.end();++ei)
+            count += transfer_points[*ei].size();
+          send_counts[i] = count;
+        }
+        // communicate the size first
+        vector<int> recv_counts(df->xmit.size(), 0);
+        vector<MPI_Request> requests(df->xmit.size());
+        // post receive requests
+        for(size_t i=0;i<recv_counts.size();++i) {
+          MPI_Irecv(&recv_counts[i], 1, MPI_INT, df->xmit[i].proc,
+                    df->xmit[i].proc, MPI_COMM_WORLD, &requests[i]);
+        }
+        // send the size
+        for(size_t i=0;i<send_counts.size();++i) {
+          MPI_Send(&send_counts[i], 1, MPI_INT,
+                   df->copy[i].proc, df->myid, MPI_COMM_WORLD);
+        }
+        // wait all Irecv to finish
+        if(!df->xmit.empty()) {
+          MPI_Waitall(df->xmit.size(), &requests[0], MPI_STATUSES_IGNORE);
+        }
+        // now we've got the receive size, we can actually
+        // perform the send/recv of points, we will first construct
+        // a send/recv buffer and respective displacements.
+        int total_send_size = 0;
+        for(size_t i=0;i<send_counts.size();++i)
+          total_send_size += send_counts[i];
+
+        vector<int> send_displs(df->copy.size(), 0);
+        if(!df->copy.empty()) {
+          send_displs[0] = 0;
+          for(size_t i=1;i<send_displs.size();++i)
+            send_displs[i] = send_displs[i-1] + send_counts[i-1];
+        }
+
+        int total_recv_size = 0;
+        for(size_t i=0;i<recv_counts.size();++i)
+          total_recv_size += recv_counts[i];
+
+        vector<int> recv_displs(df->xmit.size(), 0);
+        if(!df->xmit.empty()) {
+          recv_displs[0] = 0;
+          for(size_t i=1;i<recv_displs.size();++i)
+            recv_displs[i] = recv_displs[i-1] + recv_counts[i-1];
+        }
+      
+        unsigned char* send_buffer =
+          new unsigned char[total_send_size*sizeof(TurboPoint)];
+        
+        TurboPoint* idx = reinterpret_cast<TurboPoint*>(send_buffer);
+        for(size_t i=0;i<send_counts.size();++i) {
+          entitySet send_dom = df->copy[i].entities & local_cells;
+          for(entitySet::const_iterator ei=send_dom.begin();
+              ei!=send_dom.end();++ei) {
+            list<TurboPoint>::iterator li;
+            // first convert the point containing cell number
+            // to the global number
+            Entity cell_g = df->l2g[*ei];          
+            for(li=transfer_points[*ei].begin();
+                li!=transfer_points[*ei].end();++li) {
+              li->cell = cell_g;
+              *idx = *li;
+              ++idx;
+            }
+          }
+        }
+
+        unsigned char* recv_buffer =
+          new unsigned char[total_recv_size*sizeof(TurboPoint)];
+        // post receive requests first
+        size_t req_idx = 0;
+        for(size_t i=0;i<recv_counts.size();++i) {
+          if(recv_counts[i] > 0) {
+            // only do recv if there is something to receive
+            MPI_Irecv(&recv_buffer[recv_displs[i]*sizeof(TurboPoint)],
+                      recv_counts[i]*sizeof(TurboPoint), MPI_BYTE,
+                      df->xmit[i].proc, df->xmit[i].proc,
+                      MPI_COMM_WORLD, &requests[req_idx++]);
+          }
+        }
+        // send the buffer
+        for(size_t i=0;i<send_counts.size();++i) {
+          if(send_counts[i] > 0) {
+            // only do send if there is something to send
+            MPI_Send(&send_buffer[send_displs[i]*sizeof(TurboPoint)],
+                     send_counts[i]*sizeof(TurboPoint), MPI_BYTE,
+                     df->copy[i].proc, df->myid, MPI_COMM_WORLD);
+          }
+        }
+        // wait all Irecv to finish
+        if(req_idx > 0) {
+          MPI_Waitall(req_idx, &requests[0], MPI_STATUSES_IGNORE);
+        }
+
+        // release the send_buffer first because it is no longer needed
+        delete[] send_buffer;
+      
+        // then unpack the recv_buffer to the list "to_locate"
+        idx = reinterpret_cast<TurboPoint*>(recv_buffer);
+        for(int i=0;i<total_recv_size;++i) {
+          // first convert the cell number to be local
+          idx->cell = df->g2l[idx->cell];
+          to_locate.push_back(*idx);
+          ++idx;
+        }
+
+        // release the recv_buffer
+        delete[] recv_buffer;
+
+        // in the final step, we will need to move all the particles
+        // in the transfer_particles store that belong to the local
+        // process to the list "to_locate"
+        entitySet local_dom = local_cells & df->my_entities;
+        for(entitySet::const_iterator ei=local_dom.begin();
+            ei!=local_dom.end();++ei) {
+          to_locate.splice(to_locate.end(), transfer_points[*ei]);
+        }
+        // end of parallel section
+      } else {
+        // sequential code
+        list<TurboPoint>::iterator li = to_locate.begin();
+        while(li != to_locate.end()) {
+          Loci::Entity neighbor;
+          if(walk_point_function(*li,c,dot_threshold,
+                                 face2node,pos,
+                                 cl,cr,upper,lower,0,neighbor)) {
+            li->cell = neighbor;
+            ++li;
+            continue;
+          }
+          // if a point does not move through any interior faces,
+          // then it is going to stay in the current cell.
+          list<TurboPoint>::iterator li_bak = li;
+          ++li_bak;
+          located.splice(located.end(), to_locate, li);
+          li = li_bak;
+        } // end of while
+      }
+    } // end of move_points
+
+    // this function repeated call move_points to locate all the points
+    void locate_points(list<TurboPoint>& lp,
+                       bool c,  // use cylindrical coordinate or not
+                       const_multiMap& face2node,
+                       Loci::const_store<vec3d>& pos,
+                       const_Map& cl, const_Map& cr,
+                       const_multiMap& upper,
+                       const_multiMap& lower,                       
+                       double dot_threshold,
+                       int face_history_tracing_start,
+                       int max_walking_step_warning) {
+      Loci::fact_db* factsP = Loci::exec_current_fact_db;
+      
+      list<TurboPoint>& to_locate = lp;
+      list<TurboPoint> located;
+
+      // set the current walking step to 0 before start
+      int current_walking_step = 0;
+
+      while(true) {
+        // see if we have walked too much
+        if(current_walking_step > max_walking_step_warning) {
+          if(Loci::MPI_rank == 0) {
+            cout << "******Interface walking code warning: " << endl;
+            cout << "* Total walking step > "
+                 << max_walking_step_warning << endl;
+          }
+          int ls = to_locate.size();
+          int gls = 0;
+          MPI_Reduce(&ls, &gls, 1, MPI_INT, MPI_SUM, 0, MPI_COMM_WORLD);
+          if(Loci::MPI_rank == 0) {
+            cout << "* Code may have problems! Removing the remaining "
+                 << gls << " points" << endl;
+          }
+
+          to_locate.clear();
+        }
+
+        if(Loci::GLOBAL_AND(to_locate.empty()))
+          break;
+
+        if(current_walking_step < face_history_tracing_start) {
+          move_points(to_locate,located,c,dot_threshold,
+                      face2node,pos,
+                      cl,cr,upper,lower,factsP,walk_point);
+        } else {
+          if(!point_walk_history)
+            point_walk_history = new map<int,set<int> >;
+          
+          move_points(to_locate,located,c,dot_threshold,
+                      face2node,pos,
+                      cl,cr,upper,lower,factsP,walk_point_wht);
+        }
+        ++current_walking_step;
+      }
+      to_locate.splice(to_locate.end(), located);
+
+      if(point_walk_history) {
+        delete point_walk_history;
+        point_walk_history = 0;
+      }
+
+      if(Loci::MPI_rank == 0)
+	cout << "turboInterface: interpolation points located in "
+	     << current_walking_step << " steps" << endl;
+    }
+    
+  }   // end of unnamed namespace
+  
+  /////////////////////////////////////////////////////////////////////
+  // end of points walking code
+  /////////////////////////////////////////////////////////////////////
+
+  // here is a rule that computes the face normal flip factor
+  $type facenormal_flip store<vector<double> >;
+  $rule pointwise(facenormal_flip <- cellcenter,
+                  lower->facecenter, lower->area,
+                  upper->facecenter, upper->area,
+                  boundary_map->facecenter, boundary_map->area) {
+    vector<double>& fv = $facenormal_flip;
+    int fsz = $lower.size();
+    for(int i=0;i<fsz;++i) {
+      vec3d fn = $lower[i]->$area.n;
+      vec3d aux = $cellcenter - $lower[i]->$facecenter;
+      fv.push_back( (dot(fn,aux)>=0) ? 1.0 : (-1.0));
+    }
+      
+    fsz = $upper.size();
+    for(int i=0;i<fsz;++i) {
+      vec3d fn = $upper[i]->$area.n;
+      vec3d aux = $cellcenter - $upper[i]->$facecenter;
+      fv.push_back( (dot(fn,aux)>=0) ? 1.0 : (-1.0));
+    }
+
+
+    fsz = $boundary_map.size();
+    for(int i=0;i<fsz;++i) {
+      vec3d fn = $boundary_map[i]->$area.n;
+      vec3d aux = $cellcenter - $boundary_map[i]->$facecenter;
+      fv.push_back( (dot(fn,aux)>=0) ? 1.0 : (-1.0));
+    }
+  }
+
+  // followings are rules that update the points in the {n} iteration,
+  // that includes, updating its position, walk all the points, update
+  // the communicator structure.
+  void seed_walk(list<TurboPoint>& lp) {
+    Loci::fact_db* factsP = Loci::exec_current_fact_db;
+
+    // in parallel case, we need to redistribute the points to
+    // their containing cells and convert the cells to local number as well
+    if(factsP->is_distributed_start()) {
+      const vector<Loci::entitySet>& ptn = factsP->get_init_ptn();
+      Loci::fact_db::distribute_infoP df = factsP->get_distribute_info();
+      // collect all the cells
+      Loci::entitySet cells;
+      for(list<TurboPoint>::const_iterator li=lp.begin();li!=lp.end();++li)
+        cells += li->cell;
+      // build a cell->points mapping
+      std::map<Loci::Entity,std::vector<list<TurboPoint>::iterator> > c2p;
+      for(list<TurboPoint>::iterator li=lp.begin();li!=lp.end();++li)
+        c2p[li->cell].push_back(li);
+      // split cells according to process partition
+      std::vector<Loci::entitySet> cells_ptn(ptn.size());
+      for(size_t i=0;i<ptn.size();++i)
+        cells_ptn[i] = cells & ptn[i];
+      // prepare the comm buffer
+      std::vector<int> send_counts(ptn.size(),0);
+      std::vector<TurboPoint> send_buffer(lp.size());
+      int buf_idx = 0;
+      for(size_t i=0;i<ptn.size();++i) {
+        const entitySet& cs = cells_ptn[i];
+        for(entitySet::const_iterator ei=cs.begin();ei!=cs.end();++ei) {
+          std::vector<list<TurboPoint>::iterator>& ps = c2p[*ei];
+          send_counts[i] += ps.size();
+          std::vector<list<TurboPoint>::iterator>::iterator vi;
+          for(vi=ps.begin();vi!=ps.end();++vi)
+            send_buffer[buf_idx++] = *(*vi);
+        }
+        send_counts[i] *= sizeof(TurboPoint);
+      }
+      // buffer is now packed, release the original list
+      lp.clear();
+      // compute addition comm structure
+      std::vector<int> send_displs(ptn.size(),0);
+      for(size_t i=1;i<ptn.size();++i)
+        send_displs[i] = send_displs[i-1] + send_counts[i-1];
+      std::vector<int> recv_counts(ptn.size(),0);
+      MPI_Alltoall(&send_counts[0], 1, MPI_INT,
+                   &recv_counts[0], 1, MPI_INT, MPI_COMM_WORLD);
+      std::vector<int> recv_displs(ptn.size(),0);
+      for(size_t i=1;i<ptn.size();++i)
+        recv_displs[i] = recv_displs[i-1] + recv_counts[i-1];
+      int total_recv_size =
+        (recv_displs[ptn.size()-1]+recv_counts[ptn.size()-1])
+        /sizeof(TurboPoint);
+      // communicate!
+      std::vector<TurboPoint> lp_new(total_recv_size);
+      MPI_Alltoallv(&send_buffer[0], &send_counts[0],
+                    &send_displs[0], MPI_BYTE,
+                    &lp_new[0], &recv_counts[0],
+                    &recv_displs[0], MPI_BYTE, MPI_COMM_WORLD);
+      // unpack the comm results
+      for(std::vector<TurboPoint>::const_iterator
+            vi=lp_new.begin();vi!=lp_new.end();++vi)
+        lp.push_back(*vi);
+      // finally convert the cell numbers in local numbering
+      for(list<TurboPoint>::iterator li=lp.begin();li!=lp.end();++li)
+        li->cell = df->g2l[li->cell];
+    }
+  }
+  
+  // build the points first in {n} iteration
+  $rule blackbox(turboPt1Init{n=0} <-
+                 turbo_dot_threshold,turbo_walk_history_start,
+                 turbo_max_walking_warning,turboSurfaces,
+                 turbo_use_cylindrical),
+    prelude {
+    $turboPt1Init{n=0}->clear() ;
+  } ;
+
+  $rule blackbox(turboPt1{n} <- $n{n},
+                 turboPt1Init{n},turboBCIds,ref->(turboBCID,turboBCPartner),
+		 (lower{n},upper{n})->face2node{n}->pos{n},
+		 face2node{n}->pos{n},
+                 cl,cr,ci,turboSurfaces,
+                 turbo_dot_threshold,turbo_walk_history_start,
+                 turbo_max_walking_warning,
+                 turbo_use_cylindrical),
+    inplace(turboPt1{n}|turboPt1Init{n}), prelude {
+    if(*$$n{n} == 0) {
+      if(*$turbo_use_cylindrical) {
+	if(Loci::MPI_rank == 0)
+	  cout << "Turbo interface with cylindrical coordinates" << endl;
+      } else {
+	if(Loci::MPI_rank == 0)
+	  cout << "Turbo interface with Cartesian coordinates" << endl;
+      }
+
+      Loci::fact_db* factsP = Loci::exec_current_fact_db ;
+      Loci::fact_db::distribute_infoP df = 0;
+      if(factsP->is_distributed_start())
+	df = factsP->get_distribute_info();
+
+      Loci::constraint turboFaces = factsP->get_variable("turboInterface_BC") ;
+      Loci::entitySet dom = *turboFaces ;
+      
+      if(df!=0) {
+	dom &= df->my_entities ;
+      }
+      vector<pair<pair<int,int>,vector3d<float> > > initDBLocal ;
+      store<vec3d> floc ;
+      store<int> fbcid ;
+      floc.allocate(dom) ;
+      fbcid.allocate(dom) ;
+      for(Loci::entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei) {
+	floc[*ei] = cart_facecenter($face2node{n},$pos{n},*ei) ;
+	fbcid[*ei] = $turboBCID[$ref[*ei]] ;
+	int partner = $turboBCPartner[$ref[*ei]] ;
+	int cell = $ci[*ei] ;
+	vect3d cpt = floc[*ei] ;
+	if(df!=0)
+	  cell = df->l2g[cell] ;
+	pair<pair<int,int>,vector3d<float> > info ;
+	info.first.first = partner ;
+	info.first.second = cell ;
+	info.second = cpt ;
+	initDBLocal.push_back(info) ;
+      }
+      // Gather together the initDB
+      int lsz = initDBLocal.size() ;
+      int p = Loci::MPI_processes ;
+      vector<int> sizes(p) ;
+      MPI_Allgather(&lsz,1,MPI_INT,&sizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+      vector<int> offsets(p+1) ;
+      offsets[0] = 0 ;
+      for(int i=0;i<p;++i)
+	offsets[i+1] = offsets[i]+sizes[i] ;
+      vector<pair<pair<int,int>,vector3d<float> > > initDB(offsets[p]) ;
+      int sztype = sizeof(pair<pair<int,int>,vector3d<float> >) ;
+      for(int i=0;i<p;++i) {
+	sizes[i] *= sztype ;
+	offsets[i+1] *= sztype ;
+      }
+      MPI_Allgatherv(&initDBLocal[0],sztype*lsz,MPI_BYTE,
+		     &initDB[0],&sizes[0],&offsets[0],MPI_BYTE,
+		     MPI_COMM_WORLD) ;
+
+
+      
+      list<TurboPoint>& pts1 = *$turboPt1{n};
+      createSeedPoints(pts1,initDB,*$turboBCIds,			
+		       floc,fbcid,factsP) ;
+
+      // we need to initially using the kd tree to seed the walk
+      // and then redistribute the points to their containing cells.
+      // seed the walk first
+      seed_walk(pts1);
+      // the locate the points
+      //      locate_points(pts1,*$turbo_use_cylindrical,
+      //		    $face2node{n},$pos{n},
+      //		    $cl,$cr,$upper{n},$lower{n},
+      //		    *$turbo_dot_threshold,*$turbo_walk_history_start,
+      //		    *$turbo_max_walking_warning);
+      // update the communicators
+      update_comm(factsP, pts1, p1_pull_comm, p1_push_comm);
+    }
+  };
+
+  
+  // Compute the point that will be used to find the cell to extract 
+  // information from.
+  $type searchPnt store<vec3d>;
+  $rule pointwise(searchPnt <- face2node->pos,area,spaceH2,turbo_use_cylindrical)
+    ,constraint(turboInterface_BC) {
+    vec3d fc(0,0,0) ;
+    int nn = $face2node.size();
+    if($turbo_use_cylindrical) {
+
+      const int nn = $face2node.size() ;
+      vector<vec3d> cpos(nn) ;
+      for(int i=0;i<nn;++i)
+        cpos[i] = cart_to_cylind($face2node[i]->$pos);
+
+      vec3d orig = cpos[0] ;
+      for(int i=0;i<nn;++i)
+	cpos[i] = norm_cylind(cpos[i]-orig) ;
+
+      vec3d nodesum(0,0,0);
+      double lensum = 0;
+      for(int i=0;i<nn-1;++i) {
+	vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
+	vec3d edge = (cpos[i]-cpos[i+1]);
+	double len = sqrt(dot(edge,edge));
+	nodesum += len*mid;
+	nodesum = nodesum;
+	lensum += len;
+      }
+      // last edge
+      vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
+      vec3d edge = cpos[0]-cpos[nn-1];
+      double len = sqrt(dot(edge,edge));
+      nodesum += len*mid;
+      nodesum = nodesum;
+      lensum += len;
+
+      fc = cylind_to_cart(nodesum/lensum + orig) ;
+    } else {
+      vector<vec3d> cpos(nn);
+      for(int i=0;i<nn;++i)
+	cpos[i] = $face2node[i]->$pos ;
+
+      vec3d nodesum(0,0,0);
+      double lensum = 0;
+      for(int i=0;i<nn-1;++i) {
+	vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
+	vec3d edge = (cpos[i]-cpos[i+1]);
+	double len = sqrt(dot(edge,edge));
+	nodesum += len*mid;
+	nodesum = nodesum;
+	lensum += len;
+      }
+      // last edge
+      vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
+      vec3d edge = cpos[0]-cpos[nn-1];
+      double len = sqrt(dot(edge,edge));
+      nodesum += len*mid;
+      nodesum = nodesum;
+      lensum += len;
+
+      fc = nodesum/lensum ;
+    }
+    
+    $searchPnt = fc + $area.n*$spaceH2 ;
+  }
+
+  inline void insertPoints(list<TurboPoint> &pts1, Loci::storeRepP inrep) {
+    vector<Loci::storeRepP> in(1),out(1) ;
+    in[0] = inrep ;
+    get_remote_stores(in,out,p1_pull_comm) ;
+    store<vec3d> remote_searchPnt(out[0]) ;
+    for(list<TurboPoint>::iterator li=pts1.begin();li!=pts1.end();++li) {
+      Entity fg = li->face;
+      // convert face to local number
+      Entity fl = pt_g2l[fg];
+      li->pos = remote_searchPnt[fl] ; 
+    }
+  }
+
+  inline void getInterfaceLinkage(map<int,int>& link,
+				  const list<TurboPoint>& pts1,
+				  Loci::fact_db* factsP) {
+    vector<pair<int,int> > linkv;
+    vector<int> link_faces;
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      linkv.push_back(pair<int,int>(li->face,li->cell));
+      link_faces.push_back(li->face);
+    }
+    // if a parallel run, then we will need to redistribute
+    // the link so that all the faces are local
+    if(factsP->is_distributed_start()) {
+      // first renumber all the cell to global numbering
+      Loci::fact_db::distribute_infoP df = factsP->get_distribute_info();
+      for(size_t i=0;i<linkv.size();++i) {
+        int c = linkv[i].second;
+        linkv[i].second = df->l2g[c];
+      }
+      // generate a distribution map and then redistribute
+      vector<int> pmap;
+      generate_process_map(factsP->get_init_ptn(), link_faces, pmap);
+      distribute_vector(pmap, linkv, MPI_COMM_WORLD);
+      // renumber the faces to the local numbering
+      for(size_t i=0;i<linkv.size();++i) {
+        int f = linkv[i].first;
+        linkv[i].first = df->g2l[f];
+      }
+    }
+    // finally convert the vector to a map
+    link.clear();
+    for(size_t i=0;i<linkv.size();++i) {
+      int f = linkv[i].first;
+      int c = linkv[i].second;
+      link[f] = c;
+    }
+  }
+
+  // then we will need to locate the points again.
+  // 
+
+  $rule blackbox(turboPt1_located{n,it}<-
+                 turboPt1{n,it},searchPnt{n,it},
+                 face2node{n,it}->pos{n,it},
+		 $it{n,it},turboSurfaces,
+                 cl,cr,lower,upper,
+                 turbo_dot_threshold,turbo_walk_history_start,
+                 turbo_max_walking_warning,
+                 turbo_use_cylindrical),
+    inplace(turboPt1_located{n,it}|turboPt1{n,it}), prelude {
+    if(*($$it{n,it}) == 0) {
+      list<TurboPoint>& pts1 = *$turboPt1{n,it};
+      // update the point positions
+      insertPoints(pts1,$searchPnt{n,it}.Rep()) ;
+      // the locate the points
+      locate_points(pts1,*$turbo_use_cylindrical,
+		    $face2node{n,it},$pos{n,it},
+		    $cl,$cr,$upper,$lower,
+		    *$turbo_dot_threshold,*$turbo_walk_history_start,
+		    *$turbo_max_walking_warning);
+      // update the communicators
+      Loci::fact_db* factsP = Loci::exec_current_fact_db;
+      update_comm(factsP, pts1, p1_pull_comm, p1_push_comm);
+    }
+  };                 
+
+  // also after locating each point, we will need to build
+  // a mapping relation between the boundary faces with the
+  // corresponding cells on the other side.  this is mainly
+  // used to provide necessary information for the particle
+  // module in case the particles want to cross such boundaries.
+  $type pass_through_link blackbox<map<int,int> >;
+  $rule blackbox(pass_through_link{n}<-turboPt1{n}),prelude {
+    Loci::fact_db* factsP = Loci::exec_current_fact_db;
+    const list<TurboPoint>& pts1 = *$turboPt1{n};
+    map<int,int>& link = *$pass_through_link{n};
+    getInterfaceLinkage(link,pts1,factsP) ;
+  } ;
+
+  $rule blackbox(turboPt1{n,it=0} <- turboPt1{n},turboSurfaces),
+    inplace(turboPt1{n,it=0}|turboPt1{n}), 
+    prelude {};
+
+  $rule blackbox(turboPt1{n,it+1} <- turboPt1_located{n,it},turboSurfaces),
+    inplace(turboPt1{n,it+1}|turboPt1_located{n,it}),
+    prelude {};
+
+  $rule blackbox(turboPt1Init{n+1} <-turboPt1{n,it},turboSurfaces),
+    conditional(newton_finished{n,it}),
+    inplace(turboPt1Init{n+1}|turboPt1{n,it}), prelude {};
+
+ 
+  $type turboInterpWeights blackbox<pair<Loci::storeRepP,Loci::storeRepP> >  ;
+
+  
+  $rule unit(turboInterpWeights),constraint(UNIVERSE),prelude {};
+
+  
+
+  $rule apply(turboInterpWeights<-ci->lower->cl->cellcenter,
+	      ci->upper->cr->cellcenter, ci->cellcenter, facecenter,
+	      turboPt1_located)[Loci::NullOp],constraint(turboInterface_BC),
+    option(disable_threading), prelude {
+    
+    const list<TurboPoint>& pts1 = *$turboPt1_located;
+
+    store<vect3d> ccrecv ;
+    // get the local store domains
+    entitySet faces;
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      faces += pt_g2l[li->face];
+    }
+    ccrecv.allocate(faces);
+
+    entitySet dom = entitySet(seq);
+
+    store<vect3d> ccsend ;
+    ccsend.allocate(dom) ;
+    FORALL(dom,ii) {
+      ccsend[ii] = $cellcenter[$ci[ii]] ;
+    } ENDFORALL ;
+    
+    vector<Loci::storeRepP> in(1), out(1);
+    in[0] = ccsend.Rep();
+    get_remote_stores(in,out,p1_pull_comm) ;
+    ccrecv.setRep(out[0]) ;
+    FORALL(dom,ii) {
+      ccsend[ii] = $facecenter[ii] ;
+    } ENDFORALL ;
+    out[0] = 0 ;
+    in[0] = ccsend.Rep() ;
+    get_remote_stores(in,out,p1_pull_comm) ;
+    $turboInterpWeights->second = out[0] ;
+    
+    store<vector<vect3d> > wgts ;
+    wgts.allocate(faces) ;
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      int id =  pt_g2l[li->face];
+      int cc = li->cell ;
+      int usz = $upper[cc].size() ;
+      int lsz = $lower[cc].size() ;
+      int sz = 1+usz+lsz ;
+
+      if(sz > 3) {
+	vector<vect3d> deltas(sz) ;
+	int cnt = 0 ;
+	vect3d center = $cellcenter[cc] ;
+	deltas[0] = ccrecv[id]-center ;
+	cnt++ ;
+	for(int i=0;i<usz;++i) {
+	  deltas[cnt] = $cellcenter[$cr[$upper[cc][i]]]-center ;
+	  cnt++ ;
+	}
+	for(int i=0;i<lsz;++i) {
+	  deltas[cnt] = $cellcenter[$cl[$lower[cc][i]]]-center ;
+	  cnt++ ;
+	}
+	vector<double> wts(sz) ;
+	for(int i=0;i<sz;++i) {
+	  wts[i] = 1./norm(deltas[i]) ;
+	  deltas[i] *= wts[i] ;
+	}
+	double uwindfactor = 0.75 ;
+	wts[0] *= uwindfactor ;
+	deltas[0] *= uwindfactor ;
+	vector<vect3d> wout(sz) ;
+	computeWeights(&wout[0],&deltas[0],&wts[0],sz) ;
+	wgts[id].swap(wout) ;
+      } else {
+	vector<vect3d> wout(sz) ;
+	for(int i=0;i<sz;++i)
+	  wout[i] = vect3d(0,0,0) ;
+	wgts[id].swap(wout) ;
+      }
+    }
+    
+    $turboInterpWeights->first = wgts.Rep() ;
+
+  } ;
+  // rules for interpolation
+  $type interpolateTurboScalar(X) store<double>;
+  $type X store<double>;
+  $rule pointwise(interpolateTurboScalar(X){n,it} <-
+                  turboInterpWeights{n,it},facecenter{n,it},
+                  ci{n,it}->cellcenter{n,it},
+                  ci{n,it}->lower{n,it}->cl{n,it}->cellcenter{n,it},
+                  ci{n,it}->upper{n,it}->cr{n,it}->cellcenter{n,it},
+                  ci{n,it}->X{n,it}, turboPt1_located{n,it}),
+    constraint(turboInterface_BC),option(disable_threading), prelude
+  {
+    store<double> s1;
+
+    const list<TurboPoint>& pts1 = *$turboPt1_located{n,it};
+
+    // get the local store domains
+    entitySet faces;
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      faces += pt_g2l[li->face];
+    }
+    s1.allocate(faces);
+
+
+    entitySet dom = entitySet(seq);
+
+    store<double> Xsend ;
+    Xsend.allocate(dom) ;
+    FORALL(dom,ii) {
+      Xsend[ii] = $X{n,it}[$ci{n,it}[ii]] ;
+    } ENDFORALL ;
+    
+    vector<Loci::storeRepP> in(1), out(1);
+    in[0] = Xsend.Rep();
+    get_remote_stores(in,out,p1_pull_comm) ;
+    store<double> Xrecv ;
+    Xrecv.setRep(out[0]) ;
+    
+    store<vector<vect3d> > wgts ;
+    wgts.setRep($turboInterpWeights{n,it}->first) ;
+    store<vect3d> fcenter ;
+    fcenter.setRep($turboInterpWeights{n,it}->second) ;
+    // interpolate to face center
+
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      int id  = pt_g2l[li->face];
+      int cc  = li->cell ;
+      int usz = $upper{n,it}[cc].size() ;
+      int lsz = $lower{n,it}[cc].size() ;
+
+      real Xc = $X{n,it}[cc] ;
+      double maxX = max(Xc,Xrecv[id]) ;
+      double minX = min(Xc,Xrecv[id]) ;
+      vect3d gradX  = wgts[id][0]*(Xrecv[id]-Xc) ;
+      int cnt = 1 ;
+
+      for(int i=0;i<usz;++i) {
+	double Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]] ;
+	gradX += wgts[id][cnt]*(Xu-Xc) ;
+	maxX = max(maxX,Xu) ;
+	minX = min(minX,Xu) ;
+	cnt++ ;
+      }
+      for(int i=0;i<lsz;++i) {
+	double Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]] ;
+	gradX += wgts[id][cnt]*(Xl-Xc) ;
+	maxX = max(maxX,Xl) ;
+	minX = min(minX,Xl) ;
+	cnt++ ;
+      }
+      vect3d ccenter = $cellcenter{n,it}[cc] ;
+      double Xi = $X{n,it}[cc] + dot(gradX,fcenter[id]-ccenter) ;
+
+      s1[id] = max(minX,min(maxX,Xi)) ;
+
+    }
+    // the push s1 the face partition
+    store<double> s1f ;
+    //    vector<Loci::storeRepP> in(1), out(1);
+    in[0] = s1.Rep();
+    out[0] = 0 ;
+    get_remote_stores(in, out, p1_push_comm);
+    s1f.setRep(out[0]);
+
+    // then average to local store
+    //    entitySet dom = entitySet(seq);
+
+    for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei) {
+      $interpolateTurboScalar(X){n,it}[*ei] = (s1f[*ei]) ;
+    }
+
+  };
+
+  $type interpolateTurboV3d(X) store<vec3d>;
+  $type X store<vec3d>;
+  $rule pointwise(interpolateTurboV3d(X){n,it} <-
+                  turboInterpWeights{n,it},facecenter{n,it},
+                  ci{n,it}->cellcenter{n,it},
+                  ci{n,it}->lower{n,it}->cl{n,it}->cellcenter{n,it},
+                  ci{n,it}->upper{n,it}->cr{n,it}->cellcenter{n,it},
+                  ci{n,it}->X{n,it}, turboPt1_located{n,it}),
+    constraint(turboInterface_BC),option(disable_threading), prelude
+  {
+
+    const list<TurboPoint>& pts1 = *$turboPt1_located{n,it};
+
+    // get the local store domains
+    entitySet faces;
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      faces += pt_g2l[li->face];
+    }
+    store<vect3d> s1;
+    s1.allocate(faces);
+
+
+    entitySet dom = entitySet(seq);
+
+    store<vect3d> Xsend ;
+    Xsend.allocate(dom) ;
+    FORALL(dom,ii) {
+      Xsend[ii] = $X{n,it}[$ci{n,it}[ii]] ;
+    } ENDFORALL ;
+    
+    vector<Loci::storeRepP> in(1), out(1);
+    in[0] = Xsend.Rep();
+    get_remote_stores(in,out,p1_pull_comm) ;
+    store<vect3d> Xrecv ;
+    Xrecv.setRep(out[0]) ;
+    
+    store<vector<vect3d> > wgts ;
+    wgts.setRep($turboInterpWeights{n,it}->first) ;
+    store<vect3d> fcenter ;
+    fcenter.setRep($turboInterpWeights{n,it}->second) ;
+    // interpolate to face center
+    for(list<TurboPoint>::const_iterator
+          li=pts1.begin();li!=pts1.end();++li) {
+      int id  = pt_g2l[li->face];
+      int cc  = li->cell ;
+      int usz = $upper{n,it}[cc].size() ;
+      int lsz = $lower{n,it}[cc].size() ;
+
+      for(int v=0;v<3;++v) {
+	double Xc = $X{n,it}[cc][v] ;
+	double maxX = max(Xc,Xrecv[id][v]) ;
+	double minX = min(Xc,Xrecv[id][v]) ;
+	vect3d gradX  = wgts[id][0]*(Xrecv[id][v]-Xc) ;
+	int cnt = 1 ;
+
+	for(int i=0;i<usz;++i) {
+	  double Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]][v] ;
+	  gradX += wgts[id][cnt]*(Xu-Xc) ;
+	  maxX = max(maxX,Xu) ;
+	  minX = min(minX,Xu) ;
+	  cnt++ ;
+	}
+	for(int i=0;i<lsz;++i) {
+	  double Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]][v] ;
+	  gradX += wgts[id][cnt]*(Xl-Xc) ;
+	  maxX = max(maxX,Xl) ;
+	  minX = min(minX,Xl) ;
+	  cnt++ ;
+	}
+	vect3d ccenter = $cellcenter{n,it}[cc] ;
+	double Xi = $X{n,it}[cc][v] + dot(gradX,fcenter[id]-ccenter) ;
+	s1[id][v] = max(minX,min(maxX,Xi)) ;
+      }
+    }
+
+    // the push s1 the face partition
+    store<vect3d> s1f ;
+    //    vector<Loci::storeRepP> in(1), out(1);
+    in[0] = s1.Rep();
+    out[0] = 0 ;
+    get_remote_stores(in, out, p1_push_comm);
+    s1f.setRep(out[0]);
+
+    // copy to local store 
+    for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei) {
+      $interpolateTurboV3d(X){n,it}[*ei] = s1f[*ei] ;
+    }
+  } ;
+
+
+  $rule pointwise(u_f{n,it}<-interpolateTurboV3d(u){n,it}),
+    constraint(turboInterface_BC) {
+    $u_f{n,it} = $interpolateTurboV3d(u){n,it};
+  }
+
+  $rule pointwise(gagePressure_f{n,it}<-
+                  interpolateTurboScalar(gagePressure){n,it}),
+    constraint(turboInterface_BC) {
+    $gagePressure_f{n,it} = $interpolateTurboScalar(gagePressure){n,it};
+  }
+
+  $rule pointwise(temperature_f{n,it} <- 
+		  interpolateTurboScalar(temperature){n,it}),
+    constraint(turboInterface_BC) {
+    $temperature_f{n,it} = $interpolateTurboScalar(temperature){n,it};
+  }
+
+
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma),constraint(turboInterface_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    hllc_flux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	      $Rtilde, $gamma,$us_n) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma)[Loci::Summation],constraint(turboInterface_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    hllc_fjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+	     $Rtilde, $gamma,$us_n) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+  
+  ////////////////////////////////////////////////////////////////
+  // implementation for the utility functions
+  ////////////////////////////////////////////////////////////////
+  void
+  transpose_vector_entitySet_opt(const vector<entitySet>& in,
+                                 vector<entitySet>& out)
+  {
+    vector<bool> pack_interval(Loci::MPI_processes,false);
+    // first compute the send count and displacement
+    vector<int> send_counts(Loci::MPI_processes,0);
+    for(int i=0;i<Loci::MPI_processes;++i) {
+      // we don't pack empty entitySet
+      if(in[i] == EMPTY) {
+        send_counts[i] = 0;
+        continue;
+      }
+      // since if sending intervals, the send size will
+      // be 2 * the number of intervals, then if that is
+      // larger than the total element size, then we choose
+      // to communicate elements directly, otherwise, we
+      // choose to send the intervals
+      int num_intervals = in[i].num_intervals();
+      num_intervals*=2;
+      int size = in[i].size();
+      if(num_intervals >= size) {
+        pack_interval[i] = false;
+        // +1 since we include a flag in the head to indicate
+        // whether this is interval, or elements packed
+        send_counts[i] = size + 1;
+      } else {
+        pack_interval[i] = true;
+        send_counts[i] = num_intervals + 1;
+      }
+    }
+    vector<int> send_displs(Loci::MPI_processes,0);
+    send_displs[0] = 0;
+    for(int i=1;i<Loci::MPI_processes;++i)
+      send_displs[i] = send_displs[i-1] + send_counts[i-1];
+    // then communicate this get the recv info.
+    vector<int> recv_counts(Loci::MPI_processes,0);
+    MPI_Alltoall(&send_counts[0], 1, MPI_INT,
+                 &recv_counts[0], 1, MPI_INT, MPI_COMM_WORLD);
+    vector<int> recv_displs(Loci::MPI_processes,0);
+    recv_displs[0] = 0;
+    for(int i=1;i<Loci::MPI_processes;++i)
+      recv_displs[i] = recv_displs[i-1] + recv_counts[i-1];
+    // all info. gathered, ready to do MPI_Alltoallv
+    // first pack data into a raw buffer.
+    int buf_size = send_counts[Loci::MPI_processes-1] +
+      send_displs[Loci::MPI_processes-1];
+    
+    vector<int> send_buf(buf_size);
+    int buf_idx = 0;
+    for(int i=0;i<Loci::MPI_processes;++i) {
+      // only pack non-empty entitySet
+      if(send_counts[i] == 0)
+        continue;
+      
+      const entitySet& eset = in[i];
+      if(pack_interval[i]) {
+        // packing intervals
+        send_buf[buf_idx++] = 1; // set flag to indicate
+                                  // that this is intervals packed
+        for(size_t k=0;k<eset.num_intervals();++k) {
+          send_buf[buf_idx++] = eset[k].first;
+          send_buf[buf_idx++] = eset[k].second;
+        }
+      } else {
+        send_buf[buf_idx++] = 0; // elements directly packed
+        for(entitySet::const_iterator ei=eset.begin();
+            ei!=eset.end();++ei,++buf_idx)
+          send_buf[buf_idx] = *ei;
+      }
+    }
+    // allocate receive buffer
+    int recv_size = recv_displs[Loci::MPI_processes-1] +
+      recv_counts[Loci::MPI_processes-1];
+
+    vector<int> recv_buf(recv_size);
+    // communicate
+    MPI_Alltoallv(&send_buf[0], &send_counts[0],
+                  &send_displs[0], MPI_INT,
+                  &recv_buf[0], &recv_counts[0],
+                  &recv_displs[0], MPI_INT, MPI_COMM_WORLD);
+    // release buffers that are not needed
+    vector<int>().swap(send_counts);
+    vector<int>().swap(send_displs);
+    vector<int>().swap(send_buf);
+
+    // unpack recv buffer into a vector of entitySet
+    if(out.size() != (size_t)Loci::MPI_processes)
+      out.resize(Loci::MPI_processes);    
+
+    for(int i=0;i<Loci::MPI_processes;++i) {
+      int b = recv_displs[i];
+      int e = b + recv_counts[i];
+      if(b == e)
+        continue;              // empty buffer
+
+      entitySet& eset = out[i];
+      int flag = recv_buf[b];
+      ++b;
+      if(flag == 1) {
+        // if packed with interval
+        for(;b<e;b+=2) {
+          int l = recv_buf[b];
+          int u = recv_buf[b+1];
+          eset += interval(l,u);
+        }
+      } else {
+        // packed with elements
+        for(;b<e;++b) {
+          eset += recv_buf[b];
+        }
+      }
+    }
+
+    // the end...
+  }
+  
+  // a utility that returns the global sum
+  inline int
+  global_sum(int l) {
+    int g;
+    MPI_Allreduce(&l, &g, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
+    return g;
+  }
+
+  vector<entitySet>
+  gather_all_entitySet(const entitySet& eset)
+  {
+    int local_size = eset.size();
+    int global_size = global_sum(local_size);
+    // compute receive counts from all processors
+    int* recv_counts = new int[Loci::MPI_processes];
+    MPI_Allgather(&local_size, 1, MPI_INT,
+                  recv_counts, 1, MPI_INT, MPI_COMM_WORLD);
+    // then compute receive displacement
+    int* recv_displs = new int[Loci::MPI_processes];
+    recv_displs[0] = 0;
+    for(int i=1;i<Loci::MPI_processes;++i)
+      recv_displs[i] = recv_displs[i-1] + recv_counts[i-1];
+    // pack the local eset into an array
+    int* local_eset = new int[local_size];
+    int count = 0;
+    for(entitySet::const_iterator ei=eset.begin();
+        ei!=eset.end();++ei,++count)
+      local_eset[count] = *ei;
+    // allocate the entire array for all data from all processors
+    int* global_eset = new int[global_size];
+    // communicate to obtain all esets from every processors
+    MPI_Allgatherv(local_eset, local_size, MPI_INT,
+                   global_eset, recv_counts, recv_displs,
+                   MPI_INT, MPI_COMM_WORLD);
+    delete[] local_eset;
+    delete[] recv_counts;
+    // unpack the raw buffer into a vector<entitySet>
+    vector<entitySet> ret(Loci::MPI_processes);
+    int k = 0;
+    for(int i=0;i<Loci::MPI_processes;++i) {
+      int limit;
+      if(i == Loci::MPI_processes-1)
+        limit = global_size;
+      else
+        limit = recv_displs[i+1];
+      for(;k<limit;++k)
+        ret[i] += global_eset[k];
+    }
+    delete[] recv_displs;
+    delete[] global_eset;
+
+    return ret;
+  }
+
+  void
+  generate_process_map(const std::vector<entitySet>& ptn,
+                       const std::vector<int>& items,
+                       std::vector<int>& pmap) {
+    std::vector<int> distinct_items ;
+    std::back_insert_iterator<std::vector<int> > di(distinct_items) ;
+    std::unique_copy(items.begin(), items.end(), di) ;
+    entitySet all_items =
+      Loci::create_intervalSet(distinct_items.begin(), distinct_items.end()) ;
+    std::vector<entitySet> dist(ptn.size()) ;
+    entitySet tmp ;
+    for(size_t i=0;i!=ptn.size();++i) {
+      dist[i] = all_items & ptn[i] ;
+      tmp += dist[i] ;
+    }
+    if(tmp != all_items)
+      throw Loci::StringError
+        ("generate_process_map failed! there are items outside of ptn") ;
+    dMap proc_map ;
+    for(size_t p=0;p!=dist.size();++p) {
+      for(entitySet::const_iterator ei=dist[p].begin();
+          ei!=dist[p].end();++ei)
+        proc_map[*ei] = p ;
+    }
+    pmap.resize(items.size(), 0) ;
+    for(size_t i=0;i<pmap.size();++i)
+      pmap[i] = proc_map[items[i]] ;
+  }  
+
+  void
+  get_remote_stores(std::vector<Loci::storeRepP>& in,
+                    const std::vector<Communicator::P2pCommInfo>& send,
+                    const std::vector<Communicator::P2pCommInfo>& recv,
+                    const Map& pack_remap,
+                    const dMap& unpack_remap,
+                    std::vector<Loci::storeRepP>& out)
+  {
+    if(out.size() != in.size())
+      out.resize(in.size());
+    // first we will need to communicate the size of the send buffer
+    // to the receiving process so that they can allocate buffer.
+    // we also need to communicate the pack entitySet in sequence
+    // to the receiving processes so that they can properly unpack
+    // the buffer.
+    // normally, we need to send 3 messages, 1) the size of the
+    // total packed buffer to send to a particular process, 2)
+    // the size of the sequence to send, 3) the sequence itself.
+    // in order to save message start-up time, we combine 1) and
+    // 2) messages together into one message since they are both
+    // integer type.
+    vector<int> pack_size(send.size(),0);
+    vector<int> seq_size(send.size(),0);
+    vector<bool> pack_interval(send.size(),false);
+    vector<sequence> pack_seq(send.size());
+    // compute pack size first
+    for(size_t i=0;i<send.size();++i) {
+      for(size_t k=0;k<in.size();++k) {
+        pack_size[i] += in[k]->pack_size(send[i].set_l);
+      }
+    }
+    // compute the packing sequence in global numbering
+    // and also the way to send the sequence (in intervals
+    // or direct elements), and the sequence send size.
+    for(size_t i=0;i<send.size();++i) {
+      pack_seq[i] = remap_sequence(sequence(send[i].set_l),
+                                   pack_remap);
+      int interval_size = pack_seq[i].num_intervals();
+      int elem_size = pack_seq[i].size();
+      if(2*interval_size < elem_size) {
+        pack_interval[i] = true;
+        seq_size[i] = 2*interval_size + 1;
+      } else {
+        pack_interval[i] = false;
+        seq_size[i] = elem_size + 1;
+      }
+    }
+    // now send the total pack size and seq size first
+    vector<int> recv_msg_size(recv.size()*2,0);
+
+    vector<MPI_Request> requests(recv.size());
+    // first post recv requests
+    int req = 0;
+    // this is used to optimize in the case of sending/receiving
+    // messages to itself, we instead would just do a copy
+    int self_msg_buffer_idx = -1;
+    for(size_t i=0;i<recv.size();++i) {
+      if(recv[i].proc == Loci::MPI_rank) {
+        self_msg_buffer_idx = i;
+      } else {
+        MPI_Irecv(&recv_msg_size[i*2], 2, MPI_INT, recv[i].proc,
+                  recv[i].proc, MPI_COMM_WORLD, &requests[req++]);
+      }
+    }
+    // then post send requests
+    for(size_t i=0;i<send.size();++i) {
+      if(send[i].proc == Loci::MPI_rank) {
+        // just do a copy
+        recv_msg_size[2*self_msg_buffer_idx] = pack_size[i];
+        // this is another optimization, we do not need to
+        // communicate the packing sequence for myself
+        recv_msg_size[2*self_msg_buffer_idx+1] = 0;
+      } else {
+        int tmp[2];
+        // first one is the total pack size
+        tmp[0] = pack_size[i];
+        // second one is the pack sequence size
+        tmp[1] = seq_size[i];
+        MPI_Send(tmp, 2, MPI_INT,
+                 send[i].proc, Loci::MPI_rank, MPI_COMM_WORLD);
+      }
+    }
+    // wait all Irecv to finish
+    if(req > 0) {
+      MPI_Waitall(req, &requests[0], MPI_STATUSES_IGNORE);
+    }
+    // then we actually need to communicate the packing sequence
+    // to all the receiving processes
+
+    // allocate recv buffer first
+    int total_recv_size = 0;
+    for(size_t i=0;i<recv.size();++i)
+      total_recv_size += recv_msg_size[2*i+1];
+    int* unpack_seq_recv_buffer = new int[total_recv_size];
+    int** unpack_seq_recv_buffer_ptr = new int*[recv.size()];
+
+    if(!recv.empty()) {
+      unpack_seq_recv_buffer_ptr[0] = unpack_seq_recv_buffer;
+      for(size_t i=1;i<recv.size();++i)
+        unpack_seq_recv_buffer_ptr[i] = recv_msg_size[2*(i-1)+1] +
+          unpack_seq_recv_buffer_ptr[i-1];
+    }
+    
+    // post recv requests
+    req = 0;
+    for(size_t i=0;i<recv.size();++i) {
+      if(recv[i].proc != Loci::MPI_rank) {
+        MPI_Irecv(unpack_seq_recv_buffer_ptr[i],
+                  recv_msg_size[2*i+1],
+                  MPI_INT, recv[i].proc,
+                  recv[i].proc, MPI_COMM_WORLD, &requests[req++]);
+      }
+    }
+    // do the send
+    for(size_t i=0;i<send.size();++i) {
+      if(send[i].proc != Loci::MPI_rank) {
+        // allocate a send buffer
+        vector<int> buf(seq_size[i]);
+        // pack it
+        if(pack_interval[i]) {
+          // pack intervals
+          buf[0] = 1;
+          int count = 1;
+          const sequence& seq = pack_seq[i];
+          for(size_t k=0;k<seq.num_intervals();++k) {
+            buf[count++] = seq[k].first;
+            buf[count++] = seq[k].second;
+          }
+        } else {
+          // pack elements
+          buf[0] = 0;
+          int count = 1;
+          const sequence& seq = pack_seq[i];
+          for(sequence::const_iterator si=seq.begin();
+              si!=seq.end();++si,++count)
+            buf[count] = *si;
+        }
+        // send the buffer
+        MPI_Send(&buf[0], seq_size[i], MPI_INT,
+                 send[i].proc, Loci::MPI_rank, MPI_COMM_WORLD);
+      } else {
+        self_msg_buffer_idx = i;
+      }
+    }
+    // wait all Irecv to finish
+    if(req > 0) {
+      MPI_Waitall(req, &requests[0], MPI_STATUSES_IGNORE);
+    }
+    // then unpack the sequence buffer
+    vector<sequence> unpack_seq(recv.size());
+    for(size_t i=0;i<recv.size();++i) {
+      if(recv[i].proc == Loci::MPI_rank) {
+        // just copy
+        unpack_seq[i] = pack_seq[self_msg_buffer_idx];
+      } else {
+        // extract the first int to see if the packed
+        // stuff is interval or element
+        sequence& seq = unpack_seq[i];
+        int* p = unpack_seq_recv_buffer_ptr[i];
+        int size = recv_msg_size[2*i+1] - 1;
+        if(*p == 1) {
+          // extract intervals
+          ++p;
+          for(int k=0;k<size;k+=2) {
+            int b = *p; ++p;
+            int e = *p; ++p;
+            seq += interval(b,e);
+          }
+        } else {
+          // extract elements
+          ++p;
+          for(int k=0;k<size;++k,++p)
+            seq += *p;
+        }
+      }
+    }
+    // release all un-necessary buffers
+    vector<int>().swap(seq_size);
+    vector<bool>().swap(pack_interval);
+    vector<sequence>().swap(pack_seq);
+    delete[] unpack_seq_recv_buffer_ptr;
+    delete[] unpack_seq_recv_buffer;
+
+    // remap the unpack sequence to the new numbering
+    for(size_t i=0;i<recv.size();++i) {
+      unpack_seq[i] = remap_sequence(unpack_seq[i], unpack_remap);
+    }
+    
+    // now we have enough information to send/recv the real
+    // contents in the storeRepP
+
+    // allocate a recv buffer first.
+    total_recv_size = 0;
+    for(size_t i=0;i<recv.size();++i)
+      total_recv_size += recv_msg_size[2*i]; // the unpack size for i
+    unsigned char* unpack_buffer = new unsigned char[total_recv_size];
+    unsigned char** unpack_buffer_ptr = new unsigned char*[recv.size()];
+
+    if(!recv.empty()) {
+      unpack_buffer_ptr[0] = unpack_buffer;
+      for(size_t i=1;i<recv.size();++i)
+        unpack_buffer_ptr[i] = recv_msg_size[2*(i-1)] +
+          unpack_buffer_ptr[i-1];
+    }
+    // post recv requests
+    req = 0;
+    for(size_t i=0;i<recv.size();++i) {
+      if(recv[i].proc == Loci::MPI_rank) {
+        self_msg_buffer_idx = i;
+      } else {
+        MPI_Irecv(unpack_buffer_ptr[i], recv_msg_size[2*i],
+                  MPI_PACKED, recv[i].proc, recv[i].proc,
+                  MPI_COMM_WORLD, &requests[req++]);
+      }
+    }
+    // actually pack and send
+    for(size_t i=0;i<send.size();++i) {
+      if(send[i].proc == Loci::MPI_rank) {
+        unsigned char* pack_buffer =
+          unpack_buffer_ptr[self_msg_buffer_idx];
+        int position = 0;
+        for(size_t k=0;k<in.size();++k) {
+          in[k]->pack(pack_buffer, position,
+                      pack_size[i], send[i].set_l);
+        }
+        
+      } else {
+        // first allocate the pack buffer
+        unsigned char* pack_buffer = new unsigned char[pack_size[i]];
+        // then do the pack
+        int position = 0;
+        for(size_t k=0;k<in.size();++k) {
+          // pack the contents
+          in[k]->pack(pack_buffer, position,
+                      pack_size[i], send[i].set_l);
+        }
+        // done all the packing, send it
+        MPI_Send(pack_buffer, pack_size[i], MPI_PACKED,
+                 send[i].proc, Loci::MPI_rank, MPI_COMM_WORLD);
+        // destroy the send buffer
+        delete[] pack_buffer;
+      }
+    }
+    // wait all Irecv to finish
+    if(req > 0) {
+      MPI_Waitall(req, &requests[0], MPI_STATUSES_IGNORE);
+    }
+
+    // then unpack the receiving buffer
+
+    // first compute the new domain for all the out storeRepP
+    entitySet new_domain;
+    for(size_t i=0;i<recv.size();++i) {
+      new_domain += recv[i].set_g;
+    }
+    // remap it to the new numbering
+    new_domain = remap_entitySet(new_domain, unpack_remap);
+    // allocate all storeRepP in out
+    for(size_t i=0;i<out.size();++i) {
+      out[i] = in[i]->new_store(new_domain);
+    }
+
+    // and finally we will unpack the buffer
+    for(size_t i=0;i<recv.size();++i) {
+      int position = 0;
+      int unpack_buffer_size = recv_msg_size[2*i];
+      for(size_t k=0;k<out.size();++k) {
+        // unpack the contents
+        out[k]->unpack(unpack_buffer_ptr[i], position,
+                       unpack_buffer_size, unpack_seq[i]);
+      }
+    }
+    // release recv buffer and finish up
+    delete[] unpack_buffer_ptr;
+    delete[] unpack_buffer;
+  }
+
+  void
+  get_remote_stores(std::vector<Loci::storeRepP>& in,
+                    std::vector<Loci::storeRepP>& out,
+                    const Communicator& comm)
+  {
+    // extract the mapping info from the comm structure
+    Map pack_remap; pack_remap.setRep(comm.pack.Rep());
+    dMap unpack_remap; unpack_remap.setRep(comm.unpack.Rep());
+
+    get_remote_stores(in, comm.send, comm.recv,
+                      pack_remap, unpack_remap, out);
+  }
+  
+  
+  
+} // end of namespace flowPsi
+void fturbointerface() {
+}
