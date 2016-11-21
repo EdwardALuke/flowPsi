@@ -279,7 +279,7 @@ namespace flowPsi {
     const real tfactor = 1./(2*$Tn-$temperature) ;
     const real dTdTs = ($Tn + $Tn*$temperature*tfactor)*tfactor ;
     const real drdt = -dTdTs*rho/$temperature ;
-    const real drdp = rho/($gagePressure+$Pambient) ;
+    const real drdp = Pcoef*rho/($gagePressure+$Pambient) ;
 
     dqdqstar[0][0] =  dTdTs ;
     dqdqstar[4][4] += Pcoef ;
