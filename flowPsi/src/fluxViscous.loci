@@ -326,29 +326,34 @@ namespace flowPsi {
      const real sada=$area.sada ;
      const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
      const real coef = $muTotal_f*sada/dist ;
-     $fjm[ru][ru] -= coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-     $fjm[ru][rv] -= coef*an.x*an.y*(1./3.) ;
-     $fjm[ru][rw] -= coef*an.x*an.z*(1./3.) ;
-     $fjm[rv][ru] -= coef*an.y*an.x*(1./3.) ;
-     $fjm[rv][rv] -= coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-     $fjm[rv][rw] -= coef*an.y*an.z*(1./3.) ;
-     $fjm[rw][ru] -= coef*an.z*an.x*(1./3.) ;
-     $fjm[rw][rv] -= coef*an.z*an.y*(1./3.) ;
-     $fjm[rw][rw] -= coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     const real third = 1.0/3.0 ;
+     $fjm[ru][ru] -= coef*(1.0 + an.x*an.x*third) ;
+     $fjm[ru][rv] -= coef*an.x*an.y*third ;
+     $fjm[ru][rw] -= coef*an.x*an.z*third ;
 
-     $fjm[ei][ru] -= $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-     $fjm[ei][ru] -= $u_f.y*coef*an.y*an.x*(1./3.) ;
-     $fjm[ei][ru] -= $u_f.z*coef*an.z*an.x*(1./3.) ;
-     $fjm[ei][rv] -= $u_f.x*coef*an.x*an.y*(1./3.) ;
-     $fjm[ei][rv] -= $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-     $fjm[ei][rv] -= $u_f.z*coef*an.z*an.y*(1./3.) ;
-     $fjm[ei][rw] -= $u_f.x*coef*an.x*an.z*(1./3.) ;
-     $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*(1./3.) ;
-     $fjm[ei][rw] -= $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     $fjm[rv][ru] -= coef*an.y*an.x*third ;
+     $fjm[rv][rv] -= coef*(1.0+an.y*an.y*third) ;
+     $fjm[rv][rw] -= coef*an.y*an.z*third ;
+
+     $fjm[rw][ru] -= coef*an.z*an.x*third ;
+     $fjm[rw][rv] -= coef*an.z*an.y*third ;
+     $fjm[rw][rw] -= coef*(1.0 + an.z*an.z*third) ;
+
+     $fjm[ei][ru] -= $u_f.x*coef*(1.0 + an.x*an.x*third) ;
+     $fjm[ei][ru] -= $u_f.y*coef*an.y*an.x*third ;
+     $fjm[ei][ru] -= $u_f.z*coef*an.z*an.x*third ;
+
+     $fjm[ei][rv] -= $u_f.x*coef*an.x*an.y*third ;
+     $fjm[ei][rv] -= $u_f.y*coef*(1.0 + an.y*an.y*third) ;
+     $fjm[ei][rv] -= $u_f.z*coef*an.z*an.y*third ;
+
+     $fjm[ei][rw] -= $u_f.x*coef*an.x*an.z*third ;
+     $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
+     $fjm[ei][rw] -= $u_f.z*coef*(1.0 + an.z*an.z*third) ;
+
      $fjm[ei][ru] -= .5*$vflux[0] ;
      $fjm[ei][rv] -= .5*$vflux[1] ;
      $fjm[ei][rw] -= .5*$vflux[2] ;
-
       
      const real factor = $kconductTotal*sada/dist ;
      $fjm[ei][0] -= factor ;
@@ -366,25 +371,31 @@ namespace flowPsi {
     const real sada=$area.sada ;
     const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
     const real coef = $muTotal_f*sada/dist ;
-    $fjp[ru][ru] += coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-    $fjp[ru][rv] += coef*an.x*an.y*(1./3.) ;
-    $fjp[ru][rw] += coef*an.x*an.z*(1./3.) ;
-    $fjp[rv][ru] += coef*an.y*an.x*(1./3.) ;
-    $fjp[rv][rv] += coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-    $fjp[rv][rw] += coef*an.y*an.z*(1./3.) ;
-    $fjp[rw][ru] += coef*an.z*an.x*(1./3.) ;
-    $fjp[rw][rv] += coef*an.z*an.y*(1./3.) ;
-    $fjp[rw][rw] += coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+    const real third = 1.0/3.0 ;
+    $fjp[ru][ru] += coef*(1.0 + an.x*an.x*third) ;
+    $fjp[ru][rv] += coef*an.x*an.y*third ;
+    $fjp[ru][rw] += coef*an.x*an.z*third ;
 
-    $fjp[ei][ru] += $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-    $fjp[ei][ru] += $u_f.y*coef*an.y*an.x*(1./3.) ;
-    $fjp[ei][ru] += $u_f.z*coef*an.z*an.x*(1./3.) ;
-    $fjp[ei][rv] += $u_f.x*coef*an.x*an.y*(1./3.) ;
-    $fjp[ei][rv] += $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-    $fjp[ei][rv] += $u_f.z*coef*an.z*an.y*(1./3.) ;
-    $fjp[ei][rw] += $u_f.x*coef*an.x*an.z*(1./3.) ;
-    $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*(1./3.) ;
-    $fjp[ei][rw] += $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+    $fjp[rv][ru] += coef*an.y*an.x*third ;
+    $fjp[rv][rv] += coef*(1.0 + an.y*an.y*third) ;
+    $fjp[rv][rw] += coef*an.y*an.z*third ;
+
+    $fjp[rw][ru] += coef*an.z*an.x*third ;
+    $fjp[rw][rv] += coef*an.z*an.y*third ;
+    $fjp[rw][rw] += coef*(1.0 + an.z*an.z*third) ;
+
+    $fjp[ei][ru] += $u_f.x*coef*(1.0 + an.x*an.x*third) ;
+    $fjp[ei][ru] += $u_f.y*coef*an.y*an.x*third ;
+    $fjp[ei][ru] += $u_f.z*coef*an.z*an.x*third ;
+
+    $fjp[ei][rv] += $u_f.x*coef*an.x*an.y*third ;
+    $fjp[ei][rv] += $u_f.y*coef*(1.0 + an.y*an.y*third) ;
+    $fjp[ei][rv] += $u_f.z*coef*an.z*an.y*third ;
+
+    $fjp[ei][rw] += $u_f.x*coef*an.x*an.z*third ;
+    $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*third ;
+    $fjp[ei][rw] += $u_f.z*coef*(1.0 + an.z*an.z*third) ;
+
     $fjp[ei][ru] += 0.5*$vflux[0] ;
     $fjp[ei][rv] += 0.5*$vflux[1] ;
     $fjp[ei][rw] += 0.5*$vflux[2] ;
@@ -405,24 +416,31 @@ namespace flowPsi {
      const real sada=$area.sada ;
      const real dist= dot(an,$facecenter-$ci->$cellcenter) ;
      real coef = $muTotal_f*sada/dist ;
-     $ci->$srcJ[ru][ru] -= coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-     $ci->$srcJ[ru][rv] -= coef*an.x*an.y*(1./3.) ;
-     $ci->$srcJ[ru][rw] -= coef*an.x*an.z*(1./3.) ;
-     $ci->$srcJ[rv][ru] -= coef*an.y*an.x*(1./3.) ;
-     $ci->$srcJ[rv][rv] -= coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-     $ci->$srcJ[rv][rw] -= coef*an.y*an.z*(1./3.) ;
-     $ci->$srcJ[rw][ru] -= coef*an.z*an.x*(1./3.) ;
-     $ci->$srcJ[rw][rv] -= coef*an.z*an.y*(1./3.) ;
-     $ci->$srcJ[rw][rw] -= coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
-     $ci->$srcJ[ei][ru] -= $u_f.x*coef*((4./3.)*an.x*an.x+an.y*an.y+an.z*an.z) ;
-     $ci->$srcJ[ei][ru] -= $u_f.y*coef*an.y*an.x*(1./3.) ;
-     $ci->$srcJ[ei][ru] -= $u_f.z*coef*an.z*an.x*(1./3.) ;
-     $ci->$srcJ[ei][rv] -= $u_f.x*coef*an.x*an.y*(1./3.) ;
-     $ci->$srcJ[ei][rv] -= $u_f.y*coef*(an.x*an.x+(4./3.)*an.y*an.y+an.z*an.z) ;
-     $ci->$srcJ[ei][rv] -= $u_f.z*coef*an.z*an.y*(1./3.) ;
-     $ci->$srcJ[ei][rw] -= $u_f.x*coef*an.x*an.z*(1./3.) ;
-     $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*(1./3.) ;
-     $ci->$srcJ[ei][rw] -= $u_f.z*coef*(an.x*an.x+an.y*an.y+(4./3.)*an.z*an.z) ;
+     real third = 1./3.0 ;
+     $ci->$srcJ[ru][ru] -= coef*(1.0+an.x*an.x*third) ;
+     $ci->$srcJ[ru][rv] -= coef*an.x*an.y*third ;
+     $ci->$srcJ[ru][rw] -= coef*an.x*an.z*third ;
+
+     $ci->$srcJ[rv][ru] -= coef*an.y*an.x*third ;
+     $ci->$srcJ[rv][rv] -= coef*(1.0+an.y*an.y*third) ;
+     $ci->$srcJ[rv][rw] -= coef*an.y*an.z*third ;
+
+     $ci->$srcJ[rw][ru] -= coef*an.z*an.x*third ;
+     $ci->$srcJ[rw][rv] -= coef*an.z*an.y*third ;
+     $ci->$srcJ[rw][rw] -= coef*(1.0+an.z*an.z*third) ;
+
+     $ci->$srcJ[ei][ru] -= $u_f.x*coef*(1.0+an.x*an.x*third) ;
+     $ci->$srcJ[ei][ru] -= $u_f.y*coef*an.y*an.x*third ;
+     $ci->$srcJ[ei][ru] -= $u_f.z*coef*an.z*an.x*third ;
+
+     $ci->$srcJ[ei][rv] -= $u_f.x*coef*an.x*an.y*third ;
+     $ci->$srcJ[ei][rv] -= $u_f.y*coef*(1.0+an.y*an.y*third) ;
+     $ci->$srcJ[ei][rv] -= $u_f.z*coef*an.z*an.y*third ;
+
+     $ci->$srcJ[ei][rw] -= $u_f.x*coef*an.x*an.z*third ;
+     $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
+     $ci->$srcJ[ei][rw] -= $u_f.z*coef*(1.0+an.z*an.z*third) ;
+
      $ci->$srcJ[ei][ru] -= .5*$vflux[0] ;
      $ci->$srcJ[ei][rv] -= .5*$vflux[1] ;
      $ci->$srcJ[ei][rw] -= .5*$vflux[2] ;
