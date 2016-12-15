@@ -709,6 +709,309 @@ namespace flowPsi {
     fj[4][3] += coefd*rl*Ul.z ;
   }
 
+
+  void prec_roeCT_flux(Loci::Array<real, 5> &iflux,
+		       real pgl, real Tl, vect3d Ul,
+		       real pgr, real Tr, vect3d Ur,
+		       vect3d an, real area,
+		       real pambient, real Rt,real gamma, real Us_n,
+		       real Beta) {
+    
+    const real pl = pgl + pambient ;      // right and left pressures
+    const real pr = pgr + pambient ;
+    const real rl = pl/(Rt*Tl) ;
+    const real rr = pr/(Rt*Tr) ;
+
+    const real gm1 = gamma-1. ;
+    const real re0l = rl*(Rt*Tl/gm1 + 0.5*dot(Ul,Ul)) ;
+    const real re0r = rr*(Rt*Tr/gm1 + 0.5*dot(Ur,Ur)) ;
+
+    const real h0l = (re0l+pl)/rl ;
+    const real h0r = (re0r+pr)/rr ;
+
+    const real r_ = sqrt(rl*rr) ;        // Roe average density
+    const real srl = sqrt(rl) ;          // coefficents used for
+    const real srr = sqrt(rr) ;          //  Roe averaging
+    const real roe_factor = 1./(srl+srr) ;
+
+#define AVG(vl,vr)  (0.5*((vl)+(vr))) // Standard Average (arithmetic average)
+#define JMP(vl,vr)  ((vr)-(vl))       // Jump function
+#define RAVG(vl,vr) (((vl)*srl+(vr)*srr)*roe_factor) // Roe average
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real ut_ = dot(U_,an)-Us_n ; //dot(U_-Us,an) ;
+    const real uta_ = dot(U_,an) ;
+    const real q2_ = dot(U_,U_) ;
+
+    const real h0_ = RAVG(h0l,h0r) ;               // Roe total  energy
+    const real h_ = h0_ - 0.5*q2_ ;
+    
+    const real al2 = gamma*Rt*Tl ;
+    const real ar2 = gamma*Rt*Tr ;
+    const real utl = dot(Ul,an)-Us_n ; //dot(Ul-Us,an) ;
+    const real utr = dot(Ur,an)-Us_n ; //dot(Ur-Us,an) ;
+    const real utla = dot(Ul,an) ;
+    const real utra = dot(Ur,an) ;
+
+    // For strong pressure jumps, drop preconditioning so we get
+    // wave speeds correct.
+    if(fabs(pl-pr)/(pl+pr+1e-33) > .1)
+      Beta = 1. ;
+
+    // estimate derivatives of roe state
+
+    real af2 = gm1*h_ ;
+    af2 = max(af2,1e-30) ; //ROE_SOUND_LIMIT*min(sl.aSquared(),sr.aSquared())) ;
+
+
+
+    const real BetaP = Beta+1. ;
+    const real BetaM = Beta-1. ;
+
+    real a_ = sqrt(af2) ;
+    const real sigma = sqrt(ut_*ut_*BetaM*BetaM+4.*Beta*a_*a_) ;
+    real ev1 = fabs(ut_) ;
+    real ev2 = fabs(ut_*BetaP-sigma)/2. ;
+    real ev3 = fabs(ut_*BetaP+sigma)/2. ;
+
+    //The following segment (from #define ENTROPY_FIX to #endif) is provides 
+    //a correction to eigenvalues when the transonic expansion fan ( left 
+    //state is (-) and right state is (+)) exists.  Since Roe scheme is only 
+    //based on discontinuities, with no expansion waves, it can admit 
+    //a violation of the entropy condition by allowing expansion "shocks". 
+    //We add a small amount of dissipation in this case to prevent
+    //solutions with expansion shocks
+#define ENTROPY_FIX
+
+#ifdef ENTROPY_FIX
+
+    real sigmal = sqrt(utl*utl*BetaM*BetaM + 4.*Beta*al2) ;
+    real sigmar = sqrt(utr*utr*BetaM*BetaM + 4.*Beta*ar2) ;
+    // compute left and right state eigenvalues
+    const real e2l = (utl*BetaP-sigmal)/2. ;
+    const real e2r = (utr*BetaP-sigmar)/2. ;
+    const real e3l = (utl*BetaP+sigmal)/2. ;
+    const real e3r = (utr*BetaP+sigmar)/2. ;
+    
+    // entropy fix of Harten and Hyman, See "Numerical Computations
+    // of Internal and External Flows, Volume 2", by C. Hirsch.  pp. 469
+    // This version differs slightly from what is presented in Leveque
+    const real ev2s = (ut_*BetaP-sigma)/2. ;
+    const real ev3s = (ut_*BetaP+sigma)/2. ;
+    const real eps2 = max(real(0),max(ev2s-e2l,e2r-ev2s)) ;
+    const real eps3 = max(real(0),max(ev3s-e3l,e3r-ev3s)) ;
+    ev2 = ev2<eps2?0.5*((ev2s*ev2s)/eps2 + eps2): ev2 ;
+    ev3 = ev3<eps3?0.5*((ev3s*ev3s)/eps3 + eps3): ev3 ;
+    // End of ENTROPY_FIX  
+#endif
+
+    // Jump in contravariant velocity
+    vect3d Uj=JMP(Ul,Ur) ;
+    const real utj = dot(Uj,an) ; 
+    const real pj = JMP(pgl,pgr) ;
+    const real Tj = JMP(Tl,Tr) ;
+      
+    
+    const real BM = BetaM ;
+    const real T1 = ev2-ev3 ;
+    const real T2 = (ev2+ev3-2*ev1 );
+    const real T3 = r_*(BM*BM*ut_*ut_-sigma*sigma)/(4.*sigma) ;
+    const real T4 = T2*sigma + BM*T1*ut_ ;
+    const real T5 = (T2*sigma - BM*T1*ut_)/(2.*sigma) ;
+    const real T6 = ((ev2+ev3)*sigma - BM*T1*ut_)/(2.*sigma) ;
+    const real Cp = gamma*Rt/gm1 ;
+    const real rT_ = -gamma*Rt*r_/(h_*gm1) ;
+    const real rbeta = 1./Beta ;
+    const real ra2 = 1./(a_*a_) ;
+    const real T7 = rbeta*T1*T3*ra2 ;
+    const real T8 = (((rbeta-1)+gamma)*T6 - gm1*T5)*ra2 ;
+    const real T9 = Cp*r_+h0_*rT_ ;
+    const real x1 = gamma*h0_*T1*T3*ra2*rbeta ;
+    const real x2 = -rbeta*gm1*T1*T3*T9*ra2/rT_ ;
+    const real x3 = -T1*T3*rbeta ;
+    const real x4 = .5*r_*T4*uta_/sigma ;
+    const real T10 = (x1+x2+x3+x4) ;
+    const real T11= (rbeta*ra2*h0_ + (T9 - r_*rbeta*Cp)*ra2*gm1 / rT_
+		     - rbeta)*T6 -gm1*ra2*T9*T5/rT_ - uta_*T1 / sigma ;
+    
+
+    iflux[0] = pj*T8 + utj*T7 +  ev1*Tj*rT_ ;
+
+    iflux[1] = U_.x*T7*utj + ev1*(U_.x*Tj*rT_ + r_*Uj.x)+
+      pj*(T8*U_.x - an.x*T1/sigma) + an.x*r_*T4*utj/(2.*sigma) ;
+
+    iflux[2] = U_.y*T7*utj + ev1*(U_.y*Tj*rT_ + r_*Uj.y)+
+      pj*(T8*U_.y - an.y*T1/sigma) + an.y*r_*T4*utj/(2.*sigma) ;
+
+    iflux[3] = U_.z*T7*utj + ev1*(U_.z*Tj*rT_ + r_*Uj.z)+
+      pj*(T8*U_.z - an.z*T1/sigma) + an.z*r_*T4*utj/(2.*sigma) ;
+
+    iflux[4] = pj*T11+T10*utj+ev1*(T9*Tj+r_*dot(U_,Uj)) ;
+    
+    const real Ah = 0.5*area ;
+
+    iflux[0] = Ah*(rl*utl + rr*utr - iflux[0]) ;
+    iflux[1] = Ah*(Ul.x*rl*utl + Ur.x*rr*utr + an.x*(pgl+pgr) - iflux[1] ) ; 
+    iflux[2] = Ah*(Ul.y*rl*utl + Ur.y*rr*utr + an.y*(pgl+pgr) - iflux[2]) ;
+    iflux[3] = Ah*(Ul.z*rl*utl + Ur.z*rr*utr + an.z*(pgl+pgr) - iflux[3]) ;
+    iflux[4] = Ah*((re0l*utl+pl*utla) + (re0r*utr+pr*utra)    - iflux[4]) ;
+  }
+
+
+
+  inline void 
+  RoeJacobian(Loci::Mat<real_fj> &Fj,
+	      real ev1,
+	      real ev2,
+	      real ev3,
+	      vect3d U,
+	      real un,
+	      real a,
+	      real beta,
+	      real sigma,
+	      real gamma,
+	      real Rt,
+	      real rho,
+	      real T,
+	      real h0,
+	      vect3d n,
+	      real area
+	      ) {
+    const int Ti=0 ;
+    const int Pi=4 ;
+    const int mi=1 ;
+    const int ei=4 ;
+    const real BM = beta - 1. ;
+    const real una = dot(U,n) ;
+    const real T1 = ev2-ev3 ;
+    const real T2 = (ev2+ev3-2*ev1 );
+    const real T3 = rho*(BM*BM*un*un-sigma*sigma)/(4.*sigma) ;
+    const real T4 = T2*sigma + BM*T1*un ;
+    const real T5 = (T2*sigma - BM*T1*un)/(2.*sigma) ;
+    const real T6 = ((ev2+ev3)*sigma - BM*T1*un)/(2.*sigma) ;
+    const real gm1 = gamma - 1.0 ;
+    const real Cp = gamma*Rt/gm1 ;
+    const real rT = -gamma*Rt*rho/((h0-0.5*dot(U,U))*gm1) ;
+    const real rbeta = 1./beta ;
+    const real ra2 = 1./(a*a) ;
+    const real T7 = rbeta*T1*T3*ra2 ;
+    const real T8 = (((rbeta-1)+gamma)*T6 - gm1*T5)*ra2 ;
+    const real T9 = Cp*rho+h0*rT ;
+    const real x1 = gamma*h0*T1*T3*ra2*rbeta ;
+    const real x2 = -rbeta*gm1*T1*T3*T9*ra2/rT ;
+    const real x3 = -T1*T3*rbeta ;
+    const real x4 = .5*rho*T4*una/sigma ;
+    const real T10 = (x1+x2+x3+x4) ;
+    const real T11= (rbeta*ra2*h0 + (T9 - rho*rbeta*Cp)*ra2*gm1 / rT
+		     - rbeta)*T6 -gm1*ra2*T9*T5/rT - una*T1 / sigma ;
+    
+    Fj[0][Ti]   += area*ev1*rT ;
+    Fj[0][mi+0] += area*n.x*T7 ;
+    Fj[0][mi+1] += area*n.y*T7 ;
+    Fj[0][mi+2] += area*n.z*T7 ;
+    Fj[0][Pi]   += area*T8 ;
+    
+    Fj[mi+0][Ti]   += area*ev1*rT*U.x ;
+    Fj[mi+1][Ti]   += area*ev1*rT*U.y ;
+    Fj[mi+2][Ti]   += area*ev1*rT*U.z ;
+    Fj[mi+0][mi+0] += area*(n.x*(T7*U.x+n.x*rho*T4/(2.*sigma)) + ev1*rho);
+    Fj[mi+0][mi+1] += area*n.y*(T7*U.x+n.x*rho*T4/(2.*sigma)) ;
+    Fj[mi+0][mi+2] += area*n.z*(T7*U.x+n.x*rho*T4/(2.*sigma)) ;
+    Fj[mi+1][mi+0] += area*n.x*(T7*U.y+n.y*rho*T4/(2.*sigma)) ;
+    Fj[mi+1][mi+1] += area*(n.y*(T7*U.y+n.y*rho*T4/(2.*sigma)) + ev1*rho);
+    Fj[mi+1][mi+2] += area*n.z*(T7*U.y+n.y*rho*T4/(2.*sigma)) ;
+    Fj[mi+2][mi+0] += area*n.x*(T7*U.z+n.z*rho*T4/(2.*sigma)) ;
+    Fj[mi+2][mi+1] += area*n.y*(T7*U.z+n.z*rho*T4/(2.*sigma)) ;
+    Fj[mi+2][mi+2] += area*(n.z*(T7*U.z+n.z*rho*T4/(2.*sigma)) + ev1*rho);
+    Fj[mi+0][Pi]   += area*(T8*U.x-n.x*T1/sigma) ;
+    Fj[mi+1][Pi]   += area*(T8*U.y-n.y*T1/sigma) ;
+    Fj[mi+2][Pi]   += area*(T8*U.z-n.z*T1/sigma) ;
+    Fj[ei][Ti]     += area*ev1*T9 ;
+    Fj[ei][mi+0]   += area*(n.x*T10+ev1*rho*U.x) ;
+    Fj[ei][mi+1]   += area*(n.y*T10+ev1*rho*U.y) ;
+    Fj[ei][mi+2]   += area*(n.z*T10+ev1*rho*U.z) ;
+    Fj[ei][Pi]     += area*T11 ;
+  }
+
+  inline void roeCT_jacobian(Loci::Mat<real_fj> Fj,
+		       real pgl, real Tl, vect3d Ul,
+		       real pgr, real Tr, vect3d Ur,
+		       vect3d an, real area,
+		       real pambient, real Rt,real gamma, real Us_n,
+		       real Beta, int dir) {
+    real gm1 = gamma-1 ;
+
+
+    const real pl = pgl+pambient ;      // right and left pressures
+    const real pr = pgr+pambient ;
+    const real rl = pl/(Rt*Tl) ;
+    const real rr = pr/(Rt*Tr) ;
+
+    const real re0l = rl*(Rt*Tl/gm1 + 0.5*dot(Ul,Ul)) ;
+    const real re0r = rr*(Rt*Tr/gm1 + 0.5*dot(Ur,Ur)) ;
+
+    const real h0l = (re0l+pl)/rl ;
+    const real h0r = (re0r+pr)/rr ;
+
+    const real r_ = sqrt(rl*rr) ;        // Roe average density
+    const real srl = sqrt(rl) ;          // coefficents used for
+    const real srr = sqrt(rr) ;          //  Roe averaging
+    const real roe_factor = 1./(srl+srr) ;
+
+#define AVG(vl,vr)  (0.5*((vl)+(vr))) // Standard Average (arithmetic average)
+#define JMP(vl,vr)  ((vr)-(vl))       // Jump function
+#define RAVG(vl,vr) (((vl)*srl+(vr)*srr)*roe_factor) // Roe average
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real ut_ = dot(U_,an)-Us_n ; //dot(U_-Us,an) ;
+    const real q2_ = dot(U_,U_) ;
+
+    const real h0_ = RAVG(h0l,h0r) ;               // Roe total  energy
+    const real h_ = h0_ - 0.5*q2_ ;
+
+    // For strong pressure jumps, drop preconditioning so we get
+    // wave speeds correct.
+    if(fabs(pl-pr)/(pl+pr+1e-33) > .1)
+      Beta = 1. ;
+
+    // estimate derivatives of roe state
+
+    real af2 = gm1*h_ ;
+    af2 = max(af2,1e-30) ; //ROE_SOUND_LIMIT*min(sl.aSquared(),sr.aSquared())) ;
+
+
+    const real T_ = h_*gm1/(Rt*gamma) ;
+
+    const real BetaP = Beta+1. ;
+    const real BetaM = Beta-1. ;
+
+    real a_ = sqrt(af2) ;
+    const real sigma = sqrt(ut_*ut_*BetaM*BetaM+4.*Beta*a_*a_) ;
+    // Dir based
+    real ev1 = ut_ ;
+    real ev2 = (ut_*BetaP-sigma)/2. ;
+    real ev3 = (ut_*BetaP+sigma)/2. ;
+ 
+    // Select eigenvalues based on direction of jacobian.  Apply
+    // smoothing technique to stabalize the jacobian for large timesteps
+    real d = (dir<0)?-1:1 ;
+
+    const real mxv = max(ev1,max(ev2,ev3)) ;
+    const real mnv = min(ev1,min(ev2,ev3)) ;
+
+    const real smooth_factor = 0.02 ;
+    
+    const real eps = smooth_factor*(mxv-mnv) ;
+    const real eps2 = eps*eps ;
+
+    ev1 = .5*(ev1+d*sqrt(ev1*ev1+eps2)) ;
+    ev2 = .5*(ev2+d*sqrt(ev2*ev2+eps2)) ;
+    ev3 = .5*(ev3+d*sqrt(ev3*ev3+eps2)) ;
+    RoeJacobian(Fj,ev1,ev2,ev3,U_,ut_,a_,Beta,sigma,
+		gamma,Rt,r_,T_,h0_,an,area) ;
+
+  }
+
   $rule pointwise(iflux <- 
 		  leftv3d(u),leftsP(temperature,Zero),
 		  leftsP(gagePressure,minPg),
@@ -716,12 +1019,18 @@ namespace flowPsi {
 		  rightsP(gagePressure,minPg),
 		  area,Pambient,Rtilde,gamma,us_n),
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-    hllc_flux($iflux,
-	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-	      $leftv3d(u),
-	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-	      $rightv3d(u),
-	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+     hllc_flux($iflux,
+     	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+     	      $leftv3d(u),
+     	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+     	      $rightv3d(u),
+     	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    // prec_roeCT_flux($iflux,
+    // 		    $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+    // 		    $leftv3d(u),
+    // 		    $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+    // 		    $rightv3d(u),
+    // 		    $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,1.0) ;
   }
 
   $rule apply(fjp <- 
@@ -731,12 +1040,19 @@ namespace flowPsi {
 		  rightsP(gagePressure,minPg),
 	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-    hllc_fjp($fjp,
-	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-	      $leftv3d(u),
-	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-	      $rightv3d(u),
-	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    // hllc_fjp($fjp,
+    // 	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+    // 	      $leftv3d(u),
+    // 	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+    // 	      $rightv3d(u),
+    // 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    roeCT_jacobian($fjp,
+    		   $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+    		   $leftv3d(u),
+    		   $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+    		   $rightv3d(u),
+    		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+    		   1.0, 1) ;
   }
   $rule apply(fjm <- 
 		  leftv3d(u),leftsP(temperature,Zero),
@@ -745,12 +1061,19 @@ namespace flowPsi {
 		  rightsP(gagePressure,minPg),
 	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-    hllc_fjm($fjm,
-	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-	      $leftv3d(u),
-	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-	      $rightv3d(u),
-	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    roeCT_jacobian($fjm,
+    		   $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+    		   $leftv3d(u),
+    		   $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+    		   $rightv3d(u),
+    		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+    		   1.0, -1) ;
+    // hllc_fjm($fjm,
+    // 	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+    // 	      $leftv3d(u),
+    // 	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+    // 	      $rightv3d(u),
+    // 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
   }
   
   
@@ -800,4 +1123,6 @@ namespace flowPsi {
     $cl->$src -= $iflux ;
   }
   
+
+
 }
