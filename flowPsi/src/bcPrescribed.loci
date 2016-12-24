@@ -654,7 +654,6 @@ namespace flowPsi {
   public:
     scalable_prescribe_bc() ;
     void calculate(Entity cc) {
-            int base_size = 7 ;
       real Tr = data[cc][0] ;
       real pr = data[cc][1] ;
       vect3d ur(data[cc][2],data[cc][3],data[cc][4]) ;

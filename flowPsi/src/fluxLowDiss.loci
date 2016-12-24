@@ -268,8 +268,8 @@ namespace flowPsi {
       const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
       vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
       vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
-      hllc_flux($iflux, pgL,tL,uLp, pgR, tR, uRp,
-                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+      inviscidRiemannFlux($iflux, pgL,tL,uLp, pgR, tR, uRp,
+			  an,sada,$Pambient,$Rtilde,$gamma,$us_n,1.0) ;
     } else {
       for(int i=0;i<5;++i)
 	$iflux[i] = 0 ;
@@ -388,8 +388,8 @@ namespace flowPsi {
       const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
       const vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
       const vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
-      hllc_flux($iflux, pgL,tL,uLp, pgR, tR, uRp,
-                an,sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+      inviscidRiemannFlux($iflux, pgL,tL,uLp, pgR, tR, uRp,
+			  an,sada,$Pambient,$Rtilde,$gamma,$us_n,1.0) ;
     } else {
       for(int i=0;i<5;++i)
 	$iflux[i] = 0 ;

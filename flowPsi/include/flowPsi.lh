@@ -44,18 +44,18 @@ $type us_n store<flowPsi::real> ;
 $type us store<flowPsi::vect3d> ;
 $type gcl_sum store<flowPsi::real>;
 
-$type mu        store<real> ; // fluid viscosity cell
-$type mu_f      store<real> ; // fluid viscosity face
-$type mu(T)     store<real> ;
-$type tmu       store<real> ; // turbulent viscosity cell
-$type tmu_f     store<real> ; // turbulent viscosity face
-$type muTotal   store<real> ;
-$type muTotal_f store<real> ;
+$type mu        store<flowPsi::real> ; // fluid viscosity cell
+$type mu_f      store<flowPsi::real> ; // fluid viscosity face
+$type mu(T)     store<flowPsi::real> ;
+$type tmu       store<flowPsi::real> ; // turbulent viscosity cell
+$type tmu_f     store<flowPsi::real> ; // turbulent viscosity face
+$type muTotal   store<flowPsi::real> ;
+$type muTotal_f store<flowPsi::real> ;
 
-$type kconduct store<real> ; // fluid conductivity cell
-$type kconduct_f store<real> ; // fluid conductivity face
-$type kconduct(T) store<real> ;
-$type turbulentPrandtlNumber param<real> ; // Turbulent Prandtl number
+$type kconduct store<flowPsi::real> ; // fluid conductivity cell
+$type kconduct_f store<flowPsi::real> ; // fluid conductivity face
+$type kconduct(T) store<flowPsi::real> ;
+$type turbulentPrandtlNumber param<flowPsi::real> ; // Turbulent Prandtl number
 // Contributions from fluxes to cell
 $type src store<Loci::Array<flowPsi::real,5> > ;
 // Right hand side of Newton method
@@ -64,6 +64,15 @@ $type rhs store<Loci::Array<flowPsi::real,5> > ;
 $type iflux store<Loci::Array<flowPsi::real,5> > ;
 // Viscous Flux
 $type vflux store<Loci::Array<flowPsi::real,4> > ;
+
+// Low Speed Preconditioning Work
+$type Mref store<flowPsi::real> ; // Reference Mach number used for preconditioning
+$type PLimPC param<flowPsi::real> ;// Pressure jump limit on preconditioning
+$type Minf param<flowPsi::real> ; // Free stream Mach number
+$type etaT param<flowPsi::real> ; // Stagnation point limit factor
+$type Beta store<flowPsi::real> ; // Beta factor used in preconditioning
+
+  
 
 // Jacobian Assembly
 $type fjp storeMat<flowPsi::real_fj> ;
@@ -151,7 +160,7 @@ $type urelax            param<flowPsi::real> ;
 $type dtmax             param<flowPsi::TimeValue> ;
 $type timeStepSize      param<flowPsi::real> ;
 $type cflmax            param<flowPsi::real> ;
-$type cflpdt            store<real> ; // Multiply this by dt to get cfl
+$type cflpdt            store<flowPsi::real> ; // Multiply this by dt to get cfl
 $type cfl               param<std::pair<double,double> > ;
 
 $type dtau              store<flowPsi::real> ;
@@ -215,46 +224,46 @@ $type gravityAccel param<flowPsi::vect3d> ;
 
 // Solver averaging types
 $type meanFreq param<int> ;
-$type meanCount param<real> ;
-$type meanCount_ic param<pair<int,real> > ;
-$type scalarMean(X) store<real> ;
-$type scalarMean_f(X) store<real> ;
-$type scalarMeanAll_f(X) store<real> ;
-$type scalarMeanFaceAll_X_ic store<real> ;
-$type scalarM2(X) store<real> ;
-$type scalarVariance(X) store<real> ;
-$type scalarM2_f(X) store<real> ;
-$type scalarVariance_f(X) store <real> ;
-$type vect3dMean(X) store<vect3d> ;
-$type vect3dMean_f(X) store<vect3d> ;
-$type vect3dM2(X) store<vect3d> ;
-$type vect3dVariance(X) store<vect3d> ;
-$type vect3dM2_f(X) store<vect3d> ;
-$type vect3dVariance_f(X) store<vect3d> ;
-$type vect3dMX2(X) store<vect3d> ;
-$type vect3dCoVariance(X) store<vect3d> ;
-$type vect3dMX2_f(X) store<vect3d> ;
-$type vect3dCoVariance_f(X) store<vect3d> ;
-$type scalarFavreMean(X) store<real> ;
-$type scalarFavreMeanBase(X) store<real> ;
-$type scalarFavreMean_f(X) store<real> ;
-$type scalarFavreMeanBase_f(X) store<real> ;
-$type scalarFavreVar(X) store<real> ;
-$type scalarFavreVarBase(X) store<real> ;
-$type scalarFavreVar_f(X) store<real> ;
-$type scalarFavreVarBase_f(X) store<real> ;
-$type vect3dFavreMean(X) store<vect3d> ;
-$type vect3dFavreMeanBase(X) store<vect3d> ;
-$type vect3dFavreMean_f(X) store<vect3d> ;
-$type vect3dFavreMeanBase_f(X) store<vect3d> ;
-$type vect3dFavreVar(X) store<vect3d> ;
-$type vect3dFavreVarBase(X) store<vect3d> ;
-$type vect3dFavreVar_f(X) store<vect3d> ;
-$type vect3dFavreVarBase_f(X) store<vect3d> ;
-$type vect3dFavreCoVar(X) store<vect3d> ;
-$type vect3dFavreCoVarBase(X) store<vect3d> ;
-$type vect3dFavreCoVar_f(X) store<vect3d> ;
-$type vect3dFavreCoVarBase_f(X) store<vect3d> ;
+$type meanCount param<flowPsi::real> ;
+$type meanCount_ic param<pair<int,flowPsi::real> > ;
+$type scalarMean(X) store<flowPsi::real> ;
+$type scalarMean_f(X) store<flowPsi::real> ;
+$type scalarMeanAll_f(X) store<flowPsi::real> ;
+$type scalarMeanFaceAll_X_ic store<flowPsi::real> ;
+$type scalarM2(X) store<flowPsi::real> ;
+$type scalarVariance(X) store<flowPsi::real> ;
+$type scalarM2_f(X) store<flowPsi::real> ;
+$type scalarVariance_f(X) store <flowPsi::real> ;
+$type vect3dMean(X) store<flowPsi::vect3d> ;
+$type vect3dMean_f(X) store<flowPsi::vect3d> ;
+$type vect3dM2(X) store<flowPsi::vect3d> ;
+$type vect3dVariance(X) store<flowPsi::vect3d> ;
+$type vect3dM2_f(X) store<flowPsi::vect3d> ;
+$type vect3dVariance_f(X) store<flowPsi::vect3d> ;
+$type vect3dMX2(X) store<flowPsi::vect3d> ;
+$type vect3dCoVariance(X) store<flowPsi::vect3d> ;
+$type vect3dMX2_f(X) store<flowPsi::vect3d> ;
+$type vect3dCoVariance_f(X) store<flowPsi::vect3d> ;
+$type scalarFavreMean(X) store<flowPsi::real> ;
+$type scalarFavreMeanBase(X) store<flowPsi::real> ;
+$type scalarFavreMean_f(X) store<flowPsi::real> ;
+$type scalarFavreMeanBase_f(X) store<flowPsi::real> ;
+$type scalarFavreVar(X) store<flowPsi::real> ;
+$type scalarFavreVarBase(X) store<flowPsi::real> ;
+$type scalarFavreVar_f(X) store<flowPsi::real> ;
+$type scalarFavreVarBase_f(X) store<flowPsi::real> ;
+$type vect3dFavreMean(X) store<flowPsi::vect3d> ;
+$type vect3dFavreMeanBase(X) store<flowPsi::vect3d> ;
+$type vect3dFavreMean_f(X) store<flowPsi::vect3d> ;
+$type vect3dFavreMeanBase_f(X) store<flowPsi::vect3d> ;
+$type vect3dFavreVar(X) store<flowPsi::vect3d> ;
+$type vect3dFavreVarBase(X) store<flowPsi::vect3d> ;
+$type vect3dFavreVar_f(X) store<flowPsi::vect3d> ;
+$type vect3dFavreVarBase_f(X) store<flowPsi::vect3d> ;
+$type vect3dFavreCoVar(X) store<flowPsi::vect3d> ;
+$type vect3dFavreCoVarBase(X) store<flowPsi::vect3d> ;
+$type vect3dFavreCoVar_f(X) store<flowPsi::vect3d> ;
+$type vect3dFavreCoVarBase_f(X) store<flowPsi::vect3d> ;
 
 $type scalarTransportP(X,C) store<flowPsi::real> ;
 $type scalarTransport(X,C) store<flowPsi::real> ;

@@ -179,17 +179,18 @@ namespace flowPsi {
     $tmu=0.0 ;
   }
 
-  $rule pointwise(muTotal<-mu),inplace(muTotal|mu),constraint(LaminarSimulation,mu), prelude {} ;
+  $rule pointwise(muTotal<-mu),constraint(LaminarSimulation,mu)
+  { $muTotal = $mu ; } 
   
-  $rule pointwise(muTotal<-mu,tmu),inplace(muTotal|mu),constraint(TurbulentSimulation,mu) {
-    $muTotal = $mu + $tmu ;
-  }
+  $rule pointwise(muTotal<-mu,tmu),constraint(TurbulentSimulation,mu)
+  { $muTotal = $mu + $tmu ; }
 
-  $rule pointwise(muTotal_f<-mu_f),inplace(muTotal_f|mu_f),constraint(LaminarSimulation,area), prelude {} ;
+  $rule pointwise(muTotal_f<-mu_f),constraint(LaminarSimulation,area)
+  { $muTotal_f = $mu_f ; }
 
-  $rule pointwise(muTotal_f<-mu_f,tmu_f),inplace(muTotal_f|mu_f),constraint(TurbulentSimulation,area) {
-    $muTotal_f = $mu_f + $tmu_f ;
-  }
+  $rule pointwise(muTotal_f<-mu_f,tmu_f),constraint(TurbulentSimulation,area)
+  { $muTotal_f = $mu_f + $tmu_f ; }
+
 
   $rule pointwise(tmu_f<-(cr,cl)->(vol,tmu)) { 
     $tmu_f=($cr->$tmu*$cl->$vol+$cl->$tmu*$cr->$vol)/($cr->$vol+$cl->$vol) ;

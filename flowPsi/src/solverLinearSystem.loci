@@ -147,8 +147,9 @@ namespace flowPsi {
   }
 
   $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
-		  Rtilde,gamma,iblank),
+		  Rtilde,gamma,iblank,Beta),
     constraint(geom_cells,timeStepSteadyState), inplace(fluid_D|srcJ) {
+
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
 	$fluid_D[i][j] = -$srcJ[i][j] ;
@@ -156,18 +157,29 @@ namespace flowPsi {
     const real rT = 1./$temperature ;
     const real rho = ($gagePressure+$Pambient)/($Rtilde*$temperature) ;
     const real q = 0.5*dot($u,$u) ;
-    $fluid_D[0][0] -= coef*rT*rho ;
-    $fluid_D[1][0] -= coef*rT*rho*$u.x ;
-    $fluid_D[2][0] -= coef*rT*rho*$u.y ;
-    $fluid_D[3][0] -= coef*rT*rho*$u.z ;
-    $fluid_D[4][0] -= coef*rT*rho*q ;
+    const real TFactor = -coef*rT*rho ;
+    $fluid_D[0][0] += TFactor ;
+    $fluid_D[1][0] += TFactor*$u.x ;
+    $fluid_D[2][0] += TFactor*$u.y ;
+    $fluid_D[3][0] += TFactor*$u.z ;
+    $fluid_D[4][0] += TFactor*q ;
     
+    const real rbeta = 1.; // /$Beta ;
+    const real g = $gamma ;
+    const real gm1 = g-1. ;
     real rP = 1./($gagePressure+$Pambient) ;
-    $fluid_D[0][4] += coef*rP*rho ;
-    $fluid_D[1][4] += coef*rP*rho*$u.x ;
-    $fluid_D[2][4] += coef*rP*rho*$u.y ;
-    $fluid_D[3][4] += coef*rP*rho*$u.z ;
-    $fluid_D[4][4] += coef*(1./($gamma-1.) + rP*rho*q) ;
+    const real Pfactor = rbeta*coef*rP*rho ;
+    $fluid_D[0][4] += Pfactor ;
+    $fluid_D[1][4] += Pfactor*$u.x ;
+    $fluid_D[2][4] += Pfactor*$u.y ;
+    $fluid_D[3][4] += Pfactor*$u.z ;
+    $fluid_D[4][4] += rbeta*coef*(1./gm1 + rP*rho*q) ;
+    const real T2 = TFactor*(1.-rbeta)*gm1*$temperature*rP/g ;
+    $fluid_D[0][4] += T2 ;
+    $fluid_D[1][4] += T2*$u.x ;
+    $fluid_D[2][4] += T2*$u.y ;
+    $fluid_D[3][4] += T2*$u.z ;
+    $fluid_D[4][4] += T2*q ;
     
     $fluid_D[1][1] += coef*rho ;
     $fluid_D[2][2] += coef*rho ;

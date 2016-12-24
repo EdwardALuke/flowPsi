@@ -66,6 +66,10 @@ namespace flowPsi {
     $cr->$gagePressure = $pmap->$cl->$gagePressure ;
   }
 
+  $rule pointwise(cr->Beta<-pmap->cl->Beta) {
+    $cr->$Beta = $pmap->$cl->$Beta ;
+  }
+
   // this fix will allow gradients of u to be computed when all boundaries
   // are periodic
   $rule pointwise(gagePressure_f),constraint(ci->gagePressure,geom_cells) {}

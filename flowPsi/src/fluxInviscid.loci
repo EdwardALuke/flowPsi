@@ -24,11 +24,84 @@ $include "flowPsi.lh"
 
 namespace flowPsi {
 
+
+  //#######################################################################
+  //#
+  //# Preconditioning parameter setup for Chorin-Turkel preconditioner
+  //#
+  //#######################################################################
+
+  // Compute  a reference mach number for preconditioning
+  $rule unit(Mref<-u,soundSpeed) {
+    $Mref = norm($u)/$soundSpeed ;
+  }
+
+  $rule default(PLimPC) {
+    $PLimPC = 10.0 ;
+  }
+  
+  // Limiting of preconditioning due to pressure jumps
+  $rule apply(cl->Mref<-(cl,cr)->gagePressure,cl->(rho,soundSpeed),PLimPC)
+  [Loci::Maximum], constraint((cl,cr)->u) {
+    real dP = fabs($cl->$gagePressure-$cr->$gagePressure) ;
+    real r = $cl->$rho ;
+    real a = $cl->$soundSpeed ;
+    real Mpjp = $PLimPC*dP/(r*a*a) ;
+    join($cl->$Mref,Mpjp) ;
+  }
+
+  $rule apply(cr->Mref<-(cl,cr)->gagePressure, cr->(rho,soundSpeed),PLimPC)
+  [Loci::Maximum], constraint((cl,cr)->u) {
+    real dP = fabs($cl->$gagePressure-$cr->$gagePressure) ;
+    real r = $cr->$rho ;
+    real a = $cr->$soundSpeed ;
+    real Mpjp = $PLimPC*dP/(r*a*a) ;
+    join($cr->$Mref,Mpjp) ;
+  }
+
+  // Limiting of preconditioning due to viscous effects
+  $rule apply(cl->Mref<-area, (cl,cr)->(soundSpeed,vol,rho),muTotal_f)
+  [Loci::Maximum], constraint(ViscousSimulation,(cl,cr)->u) {
+    const real dh = $cl->$vol/max($area.sada,1e-30) ;
+    const real mu = $muTotal_f ;
+    const real rho = ($cl->$rho+$cr->$rho) ;
+    const real nu = mu/rho ;
+    join($cl->$Mref,nu/(dh*$cl->$soundSpeed)) ;
+  }
+  $rule apply(cr->Mref<-area, (cl,cr)->(soundSpeed,vol,rho),muTotal_f)
+  [Loci::Maximum], constraint(ViscousSimulation,(cl,cr)->u) {
+    const real dh = $cr->$vol/max($area.sada,1e-30) ;
+    const real mu = $muTotal_f ;
+    const real rho = ($cl->$rho+$cr->$rho) ;
+    const real nu = mu/rho ;
+    join($cr->$Mref,nu/(dh*$cr->$soundSpeed)) ;
+  }
+
+  $rule default(Minf) { $Minf = 1.0 ; }
+  $rule default(etaT) { $etaT = 0.25 ;}
+
+  $type Mlim2 param<real> ;
+  $rule singleton(Mlim2<-Minf,etaT) {
+    real M2 = $Minf*$Minf ;
+    $Mlim2 = 1.0 ;
+    if($Minf<0.5) 
+      $Mlim2 = $etaT*2.*M2/(1.-2.*M2) ;
+  }
+  
+  $rule pointwise(Beta<-Mref,Minf,Mlim2),
+    constraint(geom_cells) {
+    real M = $Mref ;
+    real M2 = min(0.5,M*M) ;
+    $Beta = min(1.0,max(M2/(1.-M2),$Mlim2)) ;
+  }
+
+
   void hllc_flux(Loci::Array<real, 5> &iflux,
 		 real pgl, real Tl, vect3d Ul,
 		 real pgr, real Tr, vect3d Ur,
 		 vect3d an, real area,
-		 real pambient, real Rt,real gamma, real Us_n) {
+		 real pambient, real Rt,real gamma, real Us_n,
+		 real Beta) {
     real gm1 = gamma-1 ;
     real rl = (pgl+pambient)/(Rt*Tl) ;
     real rr = (pgr+pambient)/(Rt*Tr) ;
@@ -51,19 +124,27 @@ namespace flowPsi {
     // Roe sound speed
     const real a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
 
-    const real evl_ = ut_-a_ ;
-    const real evr_ = ut_+a_ ;
+    const real BetaP = Beta+1. ;
+    const real BetaM = Beta-1. ;
 
-    const real al = sqrt(gamma*Rt*Tl) ;
-    const real ar = sqrt(gamma*Rt*Tr) ;
+    const real sigma = sqrt(max(ut_*ut_*BetaM*BetaM+4.*Beta*a_*a_,1e-30)) ;
+
+    const real evl_ = 0.5*(ut_*BetaP - sigma) ;
+    const real evr_ = 0.5*(ut_*BetaP + sigma) ;
+
     const real utla = dot(Ul,an) ;
     const real utra = dot(Ur,an) ;
     const real utl = utla-Us_n ; 
     const real utr = utra-Us_n ; 
+    const real al2 = gamma*Rt*Tl ;
+    const real ar2 = gamma*Rt*Tr ;
+    const real sigmar = sqrt(max(utr*utr*BetaM*BetaM+4.*Beta*ar2,0.0)) ;
+    const real sigmal = sqrt(max(utl*utl*BetaM*BetaM+4.*Beta*al2,0.0)) ;
 
-    // right and left wave speeds
-    real SR = max(evr_,utr+ar) ;
-    real SL = min(evl_,utl-al) ;
+    // left and right wave speeds
+    real SL = min(evl_,.5*(utl*BetaP - sigmal)) ;
+    real SR = max(evr_,.5*(utr*BetaP + sigmar)) ;
+
     real lmdot = rl*utl ;
     real rmdot = rr*utr ;
     real pl = pgl+pambient ;
@@ -117,11 +198,12 @@ namespace flowPsi {
   }
   
   // jacobian with respect to right side variables (negative going information)
-  void hllc_fjm(Mat<real_fj> fj,
+  void hllc_fjm(Mat<real_fj> &fj,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
 		vect3d an, real area,
-		real pambient, real Rt,real gamma, real Us_n) {
+		real pambient, real Rt,real gamma, real Us_n,
+		real Beta) {
     const real_fj gm1 = gamma-1 ;
     const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
     const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
@@ -147,19 +229,27 @@ namespace flowPsi {
     const real_fj h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
     const real_fj a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
 
-    const real_fj evl_ = ut_-a_ ;
-    const real_fj evr_ = ut_+a_ ;
+    const real BetaP = Beta+1. ;
+    const real BetaM = Beta-1. ;
 
-    const real_fj al = sqrt(gamma*Rt*Tl) ;
-    const real_fj ar = sqrt(gamma*Rt*Tr) ;
+    const real sigma = sqrt(max(ut_*ut_*BetaM*BetaM+4.*Beta*a_*a_,1e-30)) ;
+
+    const real evl_ = 0.5*(ut_*BetaP - sigma) ;
+    const real evr_ = 0.5*(ut_*BetaP + sigma) ;
+
     const real_fj utla = dot(Ul,an) ;
     const real_fj utra = dot(Ur,an) ;
     const real_fj utl = utla-Us_n ; 
     const real_fj utr = utra-Us_n ; 
+    const real al2 = gamma*Rt*Tl ;
+    const real ar2 = gamma*Rt*Tr ;
+    const real sigmar = sqrt(max(utr*utr*BetaM*BetaM+4.*Beta*ar2,0.0)) ;
+    const real sigmal = sqrt(max(utl*utl*BetaM*BetaM+4.*Beta*al2,0.0)) ;
 
-    // right and left wave speeds
-    const real_fj SR = max(evr_,utr+ar) ;
-    const real_fj SL = min(evl_,utl-al) ;
+    // left and right wave speeds
+    real SL = min(evl_,.5*(utl*BetaP - sigmal)) ;
+    real SR = max(evr_,.5*(utr*BetaP + sigmar)) ;
+
     // contact (middle) wave speed
     const real_fj rbot = 1./(rr*(SR-utr)-rl*(SL-utl)) ;
     const real_fj SM = (rr*utr*(SR-utr)-rl*utl*(SL-utl)+pgl-pgr)*rbot ;
@@ -377,11 +467,12 @@ namespace flowPsi {
 
   }
   // jacobian with respect to left side variables (positive going information)
-  void hllc_fjp(Mat<real_fj> fj,
+  void hllc_fjp(Mat<real_fj> &fj,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
 		vect3d an, real area,
-		real pambient, real Rt,real gamma, real Us_n) {
+		real pambient, real Rt,real gamma, real Us_n,
+		real Beta) {
     const real_fj gm1 = gamma-1 ;
     const real_fj rl = (pgl+pambient)/(Rt*Tl) ;
     const real_fj rr = (pgr+pambient)/(Rt*Tr) ;
@@ -406,20 +497,27 @@ namespace flowPsi {
 
     const real_fj h0_ = RAVG(h0l,h0r) ;               // Roe total enthalpy
     const real_fj a_ = sqrt(max(gm1*(h0_-0.5*dot(U_,U_)),0.0)) ;
+    const real BetaP = Beta+1. ;
+    const real BetaM = Beta-1. ;
 
-    const real_fj evl_ = ut_-a_ ;
-    const real_fj evr_ = ut_+a_ ;
+    const real sigma = sqrt(max(ut_*ut_*BetaM*BetaM+4.*Beta*a_*a_,1e-30)) ;
 
-    const real_fj al = sqrt(gamma*Rt*Tl) ;
-    const real_fj ar = sqrt(gamma*Rt*Tr) ;
+    const real evl_ = 0.5*(ut_*BetaP - sigma) ;
+    const real evr_ = 0.5*(ut_*BetaP + sigma) ;
+
     const real_fj utla = dot(Ul,an) ;
     const real_fj utra = dot(Ur,an) ;
     const real_fj utl = utla-Us_n ; 
     const real_fj utr = utra-Us_n ; 
+    const real al2 = gamma*Rt*Tl ;
+    const real ar2 = gamma*Rt*Tr ;
+    const real sigmar = sqrt(max(utr*utr*BetaM*BetaM+4.*Beta*ar2,0.0)) ;
+    const real sigmal = sqrt(max(utl*utl*BetaM*BetaM+4.*Beta*al2,0.0)) ;
 
-    // right and left wave speeds
-    const real_fj SR = max(evr_,utr+ar) ;
-    const real_fj SL = min(evl_,utl-al) ;
+    // left and right wave speeds
+    real SL = min(evl_,.5*(utl*BetaP - sigmal)) ;
+    real SR = max(evr_,.5*(utr*BetaP + sigmar)) ;
+
     // contact (middle) wave speed
     const real_fj rbot = 1./(rr*(SR-utr)-rl*(SL-utl)) ;
     const real_fj SM = (rr*utr*(SR-utr)-rl*utl*(SL-utl)+pgl-pgr)*rbot ;
@@ -710,12 +808,12 @@ namespace flowPsi {
   }
 
 
-  void prec_roeCT_flux(Loci::Array<real, 5> &iflux,
-		       real pgl, real Tl, vect3d Ul,
-		       real pgr, real Tr, vect3d Ur,
-		       vect3d an, real area,
-		       real pambient, real Rt,real gamma, real Us_n,
-		       real Beta) {
+  void roeCT_flux(Loci::Array<real, 5> &iflux,
+		  real pgl, real Tl, vect3d Ul,
+		  real pgr, real Tr, vect3d Ur,
+		  vect3d an, real area,
+		  real pambient, real Rt,real gamma, real Us_n,
+		  real Beta) {
     
     const real pl = pgl + pambient ;      // right and left pressures
     const real pr = pgr + pambient ;
@@ -933,12 +1031,12 @@ namespace flowPsi {
     Fj[ei][Pi]     += area*T11 ;
   }
 
-  inline void roeCT_jacobian(Loci::Mat<real_fj> Fj,
-		       real pgl, real Tl, vect3d Ul,
-		       real pgr, real Tr, vect3d Ur,
-		       vect3d an, real area,
-		       real pambient, real Rt,real gamma, real Us_n,
-		       real Beta, int dir) {
+  void roeCT_jacobian(Loci::Mat<real_fj> &Fj,
+		      real pgl, real Tl, vect3d Ul,
+		      real pgr, real Tr, vect3d Ur,
+		      vect3d an, real area,
+		      real pambient, real Rt,real gamma, real Us_n,
+		      real Beta, int dir) {
     real gm1 = gamma-1 ;
 
 
@@ -1017,20 +1115,19 @@ namespace flowPsi {
 		  leftsP(gagePressure,minPg),
 		  rightv3d(u),rightsP(temperature,Zero),
 		  rightsP(gagePressure,minPg),
-		  area,Pambient,Rtilde,gamma,us_n),
+		  area,Pambient,Rtilde,gamma,us_n,
+		  (cl,cr)->Beta),
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-     hllc_flux($iflux,
-     	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-     	      $leftv3d(u),
-     	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-     	      $rightv3d(u),
-     	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-    // prec_roeCT_flux($iflux,
-    // 		    $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-    // 		    $leftv3d(u),
-    // 		    $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-    // 		    $rightv3d(u),
-    // 		    $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,1.0) ;
+    
+     inviscidRiemannFlux($iflux,
+			 $leftsP(gagePressure,minPg),
+			 $leftsP(temperature,Zero),
+			 $leftv3d(u),
+			 $rightsP(gagePressure,minPg),
+			 $rightsP(temperature,Zero),
+			 $rightv3d(u),
+			 $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+			 max($cl->$Beta,$cr->$Beta)) ;
   }
 
   $rule apply(fjp <- 
@@ -1038,42 +1135,32 @@ namespace flowPsi {
 		  leftsP(gagePressure,minPg),
 		  rightv3d(u),rightsP(temperature,Zero),
 		  rightsP(gagePressure,minPg),
-	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
+	      area,Pambient,Rtilde,gamma,us_n,
+	      (cl,cr)->Beta)[Loci::Summation],
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-    // hllc_fjp($fjp,
-    // 	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-    // 	      $leftv3d(u),
-    // 	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-    // 	      $rightv3d(u),
-    // 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-    roeCT_jacobian($fjp,
-    		   $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-    		   $leftv3d(u),
-    		   $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-    		   $rightv3d(u),
-    		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
-    		   1.0, 1) ;
+    inviscidRiemannFjp($fjp,
+		       $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+		       $leftv3d(u),
+		       $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+		       $rightv3d(u),
+		       $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+		       max($cl->$Beta,$cr->$Beta)) ;
   }
   $rule apply(fjm <- 
-		  leftv3d(u),leftsP(temperature,Zero),
-		  leftsP(gagePressure,minPg),
-		  rightv3d(u),rightsP(temperature,Zero),
-		  rightsP(gagePressure,minPg),
-	      area,Pambient,Rtilde,gamma,us_n)[Loci::Summation],
+	      leftv3d(u),leftsP(temperature,Zero),
+	      leftsP(gagePressure,minPg),
+	      rightv3d(u),rightsP(temperature,Zero),
+	      rightsP(gagePressure,minPg),
+	      area,Pambient,Rtilde,gamma,us_n,
+	      (cl,cr)->Beta)[Loci::Summation],
     constraint((cl,cr)->(u,temperature,gagePressure)) {
-    roeCT_jacobian($fjm,
-    		   $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-    		   $leftv3d(u),
-    		   $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-    		   $rightv3d(u),
-    		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
-    		   1.0, -1) ;
-    // hllc_fjm($fjm,
-    // 	      $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
-    // 	      $leftv3d(u),
-    // 	      $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
-    // 	      $rightv3d(u),
-    // 	      $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
+    inviscidRiemannFjm($fjm,
+		       $leftsP(gagePressure,minPg),$leftsP(temperature,Zero),
+		       $leftv3d(u),
+		       $rightsP(gagePressure,minPg),$rightsP(temperature,Zero),
+		       $rightv3d(u),
+		       $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n,
+		       max($cl->$Beta,$cr->$Beta) ) ;
   }
   
   
