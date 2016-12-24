@@ -105,8 +105,6 @@ namespace flowPsi {
     $fv2=1.0-($xcoeff/(1.0+$xcoeff*$fv1)) ;
   }
 
-  $type tmu store<real> ;
-
   $rule pointwise(sa::tmu<-nuTilde,rho,fv1,SP_info) {
     $tmu=$nuTilde*$fv1*$rho ;
   }
