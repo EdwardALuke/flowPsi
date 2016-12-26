@@ -71,6 +71,7 @@ $type PLimPC param<flowPsi::real> ;// Pressure jump limit on preconditioning
 $type Minf param<flowPsi::real> ; // Free stream Mach number
 $type etaT param<flowPsi::real> ; // Stagnation point limit factor
 $type Beta store<flowPsi::real> ; // Beta factor used in preconditioning
+$type Beta_f store<flowPsi::real> ; // Beta factor used in preconditioning
 
   
 

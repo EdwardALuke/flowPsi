@@ -80,12 +80,28 @@ namespace flowPsi {
   // Compute eigenvalues for cfl estimation
   $type maxev_f store<real> ;
 
-  $rule pointwise(maxev_f<-area,us_n,(cl,cr)->(u,soundSpeed)) {
-    $maxev_f = max(fabs(dot($cl->$u,$area.n)-$us_n)+$cl->$soundSpeed,
-                   fabs(dot($cr->$u,$area.n)-$us_n)+$cr->$soundSpeed) ;
+  $rule pointwise(maxev_f<-area,us_n,(cl,cr)->(u,soundSpeed,Beta)) {
+    real beta = max($cl->$Beta,$cr->$Beta) ;
+    const real BetaP = beta+1. ;
+    const real BetaM = beta-1. ;
+    const real utl = dot($cl->$u,$area.n)-$us_n ;
+    const real utr = dot($cr->$u,$area.n)-$us_n ;
+    const real al = $cl->$soundSpeed ;
+    const real ar = $cr->$soundSpeed ;
+    const real sigmal = sqrt(utl*utl*BetaM*BetaM+4.*beta*al*al) ;
+    const real sigmar = sqrt(utr*utr*BetaM*BetaM+4.*beta*ar*ar) ;
+    const real mevl = 0.5*max(fabs(utl*BetaP-sigmal),fabs(utl*BetaP+sigmal)) ;
+    const real mevr = 0.5*max(fabs(utr*BetaP-sigmar),fabs(utr*BetaP+sigmar)) ;
+    $maxev_f = max(mevl,mevr) ;
   }
-  $rule pointwise(maxev_f<-area,us_n,u_f,soundSpeed_f),constraint(ci->u) {
-    $maxev_f = fabs(dot($u_f,$area.n)-$us_n)+$soundSpeed_f ;
+  $rule pointwise(maxev_f<-area,us_n,u_f,soundSpeed_f,ci->Beta),constraint(ci->u) {
+    real beta = $ci->$Beta ;
+    const real BetaP = beta+1. ;
+    const real BetaM = beta-1. ;
+    const real utf = dot($u_f,$area.n)-$us_n ;
+    const real af = $soundSpeed_f ;
+    const real sigmaf = sqrt(utf*utf*BetaM*BetaM+4.*beta*af*af) ;
+    $maxev_f = 0.5*max(fabs(utf*BetaP-sigmaf),fabs(utf*BetaP+sigmaf)) ;
   }
   
   $rule pointwise(cflpdt<-vol,(upper,lower,boundary_map)->(maxev_f,area)) {

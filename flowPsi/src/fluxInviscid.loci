@@ -60,20 +60,37 @@ namespace flowPsi {
   }
 
   // Limiting of preconditioning due to viscous effects
-  $rule apply(cl->Mref<-area, (cl,cr)->(soundSpeed,vol,rho),muTotal_f)
-  [Loci::Maximum], constraint(ViscousSimulation,(cl,cr)->u) {
+  $rule apply(cl->Mref<-area, (cl,cr)->(soundSpeed,vol,rho,mu))
+  [Loci::Maximum], constraint(LaminarSimulation,(cl,cr)->u) {
     const real dh = $cl->$vol/max($area.sada,1e-30) ;
-    const real mu = $muTotal_f ;
-    const real rho = ($cl->$rho+$cr->$rho) ;
-    const real nu = mu/rho ;
+    const real mum = max($cl->$mu,$cr->$mu)  ;
+    const real rho = 0.5*($cl->$rho+$cr->$rho) ;
+    const real nu = mum/rho ;
     join($cl->$Mref,nu/(dh*$cl->$soundSpeed)) ;
   }
-  $rule apply(cr->Mref<-area, (cl,cr)->(soundSpeed,vol,rho),muTotal_f)
-  [Loci::Maximum], constraint(ViscousSimulation,(cl,cr)->u) {
+  $rule apply(cr->Mref<-area, (cl,cr)->(soundSpeed,vol,rho,mu))
+  [Loci::Maximum], constraint(LaminarSimulation,(cl,cr)->u) {
     const real dh = $cr->$vol/max($area.sada,1e-30) ;
-    const real mu = $muTotal_f ;
-    const real rho = ($cl->$rho+$cr->$rho) ;
-    const real nu = mu/rho ;
+    const real mum = max($cl->$mu,$cr->$mu) ;
+    const real rho =0.5*($cl->$rho+$cr->$rho) ;
+    const real nu = mum/rho ;
+    join($cr->$Mref,nu/(dh*$cr->$soundSpeed)) ;
+  }
+
+  $rule apply(cl->Mref<-area, (cl,cr)->(soundSpeed,vol,rho,mu,tmu))
+  [Loci::Maximum], constraint(TurbulentSimulation,(cl,cr)->u) {
+    const real dh = $cl->$vol/max($area.sada,1e-30) ;
+    const real mum = max($cl->$mu,$cr->$mu)+max($cl->$tmu,$cl->$tmu) ;
+    const real rho = 0.5*($cl->$rho+$cr->$rho) ;
+    const real nu = mum/rho ;
+    join($cl->$Mref,nu/(dh*$cl->$soundSpeed)) ;
+  }
+  $rule apply(cr->Mref<-area, (cl,cr)->(soundSpeed,vol,rho,mu,tmu))
+  [Loci::Maximum], constraint(TurbulentSimulation,(cl,cr)->u) {
+    const real dh = $cr->$vol/max($area.sada,1e-30) ;
+    const real mum = max($cl->$mu,$cr->$mu)+max($cl->$tmu,$cr->$tmu) ;
+    const real rho =0.5*($cl->$rho+$cr->$rho) ;
+    const real nu = mum/rho ;
     join($cr->$Mref,nu/(dh*$cr->$soundSpeed)) ;
   }
 
@@ -96,6 +113,12 @@ namespace flowPsi {
   }
 
 
+  $rule pointwise(Beta_f<-ci->u,ci->soundSpeed,Minf,Mlim2) {
+    real M = norm($ci->$u)/$ci->$soundSpeed ;
+    real M2 = min(0.5,M*M) ;
+    $Beta_f = min(1.0,max(M2/(1.-M2),$Mlim2)) ;
+  } ;
+		  
   void hllc_flux(Loci::Array<real, 5> &iflux,
 		 real pgl, real Tl, vect3d Ul,
 		 real pgr, real Tr, vect3d Ur,
