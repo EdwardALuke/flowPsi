@@ -14,7 +14,7 @@ TARGET = flowpsi
 OBJS =  \
 	main.o gridTools.o gridSetup.o gridReader.o gridDynamic.o \
 	gridAxisymmetry.o gridCoriolis.o gridComponents.o gridMRF.o\
-	bcInputs.o bcTurboInterface.o bcTools.o \
+	bcInputs.o bcTurboInterface.o bcTools.o bcInterface.o \
 	bcPrescribed.o bcImpermeable.o bcInflow.o bcOutflow.o \
 	bcIsentropic.o bcFixedMass.o bcFixedMassOutflow.o bcViscousWall.o \
 	solverTimestep.o solverNewton.o solverEoS.o solverIC.o \

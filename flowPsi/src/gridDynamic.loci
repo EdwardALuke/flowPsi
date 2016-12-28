@@ -36,9 +36,9 @@ $include "flowPsi.lh"
 
 namespace flowPsi {
   
-  $rule pointwise(iblank),constraint(geom_cells) {
-    $iblank = 0 ;
-  }
+//  $rule pointwise(iblank),constraint(geom_cells) {
+//    $iblank = 0 ;
+//  }
 
   $type movingMesh store<bool> ;
   
@@ -71,7 +71,6 @@ namespace flowPsi {
     $us_n = dot(us,$area.n) ;
   }
 
-  
   $rule pointwise(moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
     constraint(movingMesh,area) {
     int fsz = $face2node.size() ;
@@ -124,7 +123,7 @@ namespace flowPsi {
       us_n_int += dot(ah,xp-xm);
     }
     // Get grid velocity at face by dividing by face area
-    $us_n{n,it} = .25*us_n_int/(3.*$area{n,it}.sada*$dtmax) ;
+    $us_n{n,it} = .25*us_n_int/(3.*max($area{n,it}.sada,1e-30)*$dtmax) ;
   }
   // Compute absolute grid velocity for viscous walls
 

@@ -22,6 +22,7 @@
 #include <Loci.h>
 #include <Tools/tools.h>
 #include "gridComponent.h"
+#include <flowPsiIO.h>
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -51,6 +52,8 @@ namespace flowPsi {
   
   $type componentMotion param<options_list> ;
   $type componentHierarchy param<options_list> ;
+  $type componentGeometry param<options_list> ;
+  $type componentPriority param<options_list> ;
 
   $rule optional(componentMotion),
     comments("Specify motions of individual mesh components") {
@@ -58,6 +61,19 @@ namespace flowPsi {
 
   $rule default(componentHierarchy),
     comments("Specifies the parent/child relationships between components") {
+  }
+
+  $rule optional(componentGeometry),
+    comments("Specifies hole cutting geometry for overset grids") {}
+
+  $rule default(componentPriority),
+    comments("Specifies component priority in hole cutting") {}
+
+  $type holeCuttingTolerance param<double> ;
+
+  $rule default(holeCuttingTolerance),
+    comments("Specifies the distance to surface that becomes ambiguous for determining which component is closest.") {
+    $holeCuttingTolerance = 1e-3 ; // default 1mm
   }
 
   $type componentMotionTypes blackbox<std::set<std::string> > ;
@@ -451,6 +467,8 @@ namespace flowPsi {
   
   // Prescribed motion starts here... First we implement a cubic spline
 
+  // Prescribed motion starts here... First we implement a cubic spline
+
   // Compute spline derivatives
   void splineD(vector<double> &xp, const vector<double> &x,
                const vector<double> &t) {
@@ -466,13 +484,13 @@ namespace flowPsi {
         xp[i] = dx2/dt2 ;
       else if(dt2 < 1e-33)
         xp[i] = dx1/dt1 ;
-      else 
-        xp[i] = .5*(dx1/dt1+dx2/dt2) ;
+      else
+        xp[i] = (dx1+dx2)/(dt1+dt2) ;
     }
     double x1l = x[1]-x[0] ;
     double t1l = t[1]-t[0] ;
-    xp[0] = x1l/t1l ;
-    if(n>2) {
+    xp[0] = x1l/max(t1l,1e-33) ;
+    if(n>2 && t1l > 1e-33) {
       double x2l = x[2]-x[0] ;
       double t2l = t[2]-t[0] ;
       if(t[2]-t[1] > 1e-33)
@@ -534,7 +552,7 @@ namespace flowPsi {
     constraint(componentPrescribed_X),parametric(volumeTag(X)),
     prelude {
 
-    if(Loci::MPI_rank) {
+    if(Loci::MPI_rank==0) {
       string filename = "motion_" + *$volumeTag(X) + ".dat" ;
       ifstream infile(filename.c_str(),ios::in) ;
       if(infile.fail()) {
@@ -544,6 +562,7 @@ namespace flowPsi {
 
       int npnts = 0 ;
       infile >> npnts ;
+
       if(npnts <= 1 || npnts > 10000000) {
         cerr << "unreasonable number of points, " << npnts << ", in file '" << filename << "'." << endl ;
         cerr << "check file for validity"<< endl ;
@@ -644,4 +663,1173 @@ namespace flowPsi {
       v = $componentTransformsn_X[i].applyRotation(v) ;
     $componentVectorRotation_X.z = v ;
   }
+
+  $type surfaceNodeNormal store<vector3d<float> > ;
+
+  $rule unit(surfaceNodeNormal<-pos) {
+    $surfaceNodeNormal = vector3d<float>(0,0,0) ;
+  }
+
+
+  $rule apply(face2node->surfaceNodeNormal<-area)[Loci::Summation],constraint(AllWallBCs) {
+    vect3d n = $area.n ;
+    real a = 1.0; //$area.sada ;
+    vector3d<float> an(a*n.x,a*n.y,a*n.z) ;
+    int sz = $face2node.size() ;
+    for(int i=0;i<sz;++i)
+      join($face2node[i]->$surfaceNodeNormal,an) ;
+  }
+
+  // Compute the cone angle (in dot product form) for surfaceNodeNormal
+  $type surfaceNodeAngle store<float> ;
+
+  $rule unit(surfaceNodeAngle<-pos) {
+    $surfaceNodeAngle = 1e-25 ;
+  }
+  $rule apply(face2node->surfaceNodeAngle<-face2node->(surfaceNodeNormal,pos))
+  [Loci::Maximum],constraint(AllWallBCs) {
+    int sz = $face2node.size() ;
+    for(int i=0;i<sz;++i) {
+      vector3d<float> n = $face2node[i]->$surfaceNodeNormal ;
+      n *= 1./(norm(n)+1e-30) ;
+      vect3d pi = $face2node[i]->$pos ;
+      for(int j=0;j<sz;++j)
+        if(i!=j) {
+          vector3d<float> dpj = $face2node[j]->$pos-pi ;
+          dpj *= 1./norm(dpj) ;
+          join($face2node[i]->$surfaceNodeAngle,dot(n,dpj)) ;
+        }
+    }
+  }
+
+
+  $type stencilSize2 param<double> ;
+  $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
+
+  $type crossComponentDist_node store<float> ;
+  $type crossComponentDistGrad_node store<vector3d<float> > ;
+  $type crossComponentID_node store<int> ;
+
+  $type node2surf Map ;
+
+  $type distanceFieldGradient store<vector3d<float> > ;
+
+  $rule pointwise(distanceFieldGradient<-pos,node2surf->(pos,surfaceNodeNormal)) {
+    vector3d<float> dv = $pos-$node2surf->$pos ;
+    double ldv = max(norm(dv),1e-30f) ;
+    vector3d<float> sn = -1.*$node2surf->$surfaceNodeNormal ;
+    double lsn = max(norm(sn),1e-30f) ;
+    $distanceFieldGradient = (ldv< 1e-10)?((1./lsn)*sn):((1./ldv)*dv) ;
+  }
+  // Here we will try to find the closest point using a bounding box search
+  $type componentPriorityList param< vector<real> > ;
+  $rule singleton(componentPriorityList<-componentNameList,componentPriority) {
+    int sz = $componentNameList.size() ;
+    vector<real> priorities(sz,1.0) ;
+    for(int i=0;i<sz;++i) {
+      string componentName = $componentNameList[i] ;
+
+      if($componentPriority.optionExists(componentName)) {
+	real p = 1.0 ;
+	$componentPriority.getOption(componentName,p) ;
+	priorities[i] = p ;
+      }
+    }
+    $componentPriorityList = priorities ;
+  }
+
+  $rule pointwise(crossComponentDist_node,crossComponentDistGrad_node,crossComponentID_node<-pos,distanceFieldGradient,node2surf->pos,componentID_node,componentPriorityList,holeCuttingTolerance,componentNameList,componentGeometryList,stencilSize2),
+  option(disable_threading),prelude {
+    entitySet dom = entitySet(seq) ;
+    int nc = (*$componentNameList).size() ;
+    float delta = sqrt(*$stencilSize2) ;
+    //    Loci::debugout << "delta = " << delta << endl ;
+    vector<Array<float,6> > bbox_set(nc) ;
+    for(int i=0;i<nc;++i) {
+      bbox_set[i][0] = 1e33 ;
+      bbox_set[i][1] =-1e33 ;
+      bbox_set[i][2] = 1e33 ;
+      bbox_set[i][3] =-1e33 ;
+      bbox_set[i][4] = 1e33 ;
+      bbox_set[i][5] =-1e33 ;
+    }
+    // Find bounding box for each component
+    FORALL(dom,nd) {
+      int id = $componentID_node[nd] ;
+      $crossComponentID_node[nd] = -1 ; // No component by default
+      $crossComponentDist_node[nd] = 1e30 ;
+      $crossComponentDistGrad_node[nd] = vector3d<float>(0,0,0) ;
+      bbox_set[id][0] = min(bbox_set[id][0],float($pos[nd].x-delta)) ;
+      bbox_set[id][1] = max(bbox_set[id][1],float($pos[nd].x+delta)) ;
+      bbox_set[id][2] = min(bbox_set[id][2],float($pos[nd].y-delta)) ;
+      bbox_set[id][3] = max(bbox_set[id][3],float($pos[nd].y+delta)) ;
+      bbox_set[id][4] = min(bbox_set[id][4],float($pos[nd].z-delta)) ;
+      bbox_set[id][5] = max(bbox_set[id][5],float($pos[nd].z+delta)) ;
+    } ENDFORALL ;
+    int p = Loci::MPI_processes ;
+
+    vector<Array<float,6> > bbox_all(nc*p) ;
+#ifdef VERBOSE
+    Loci::debugout << "local bbox set for components:" << endl ;
+    for(int i=0;i<nc;++i) {
+      Loci::debugout << "c=" << i
+		     << "- [" << bbox_set[i][0] << ","<< bbox_set[i][1] << "] ["
+		     << bbox_set[i][2] << ","<< bbox_set[i][3] << "] ["
+		     << bbox_set[i][4] << ","<< bbox_set[i][5] << "] " << endl ;
+    }
+#endif
+    // Exchange request bounding boxes
+    MPI_Allgather(&bbox_set[0],sizeof(Array<float,6>)*nc,MPI_BYTE,
+                  &bbox_all[0],sizeof(Array<float,6>)*nc,MPI_BYTE,
+                  MPI_COMM_WORLD) ;
+
+    vector<vector<int> > send_sets ;
+    vector<int> component_search ;
+
+    vector<pair<int,int> > send_list ;
+    for(int j=0;j<nc;++j) { // loop over components
+      if(bbox_set[j][0] < bbox_set[j][1]) { // valid bbox
+        // does it intersect any other processors
+        for(int i=0;i<p;++i) {
+          int ic = i*nc ;
+          for(int k=0;k<nc;++k)
+            if(k!=j && bbox_all[ic+k][0] < bbox_all[ic+k][1]) {
+              // does the bounding box intersect
+              if(bbox_set[j][1] >= bbox_all[ic+k][0] &&
+                 bbox_set[j][0] <= bbox_all[ic+k][1] &&
+                 bbox_set[j][3] >= bbox_all[ic+k][2] &&
+                 bbox_set[j][2] <= bbox_all[ic+k][3] &&
+                 bbox_set[j][5] >= bbox_all[ic+k][4] &&
+                 bbox_set[j][4] <= bbox_all[ic+k][5]) {
+                send_list.push_back(pair<int,int>(i,k)) ;
+              }
+            }
+        }
+      }
+    }
+#ifdef VERBOSE
+    Loci::debugout << "send_list =" ;
+    for(size_t i=0;i<send_list.size();++i)
+      Loci::debugout << " (" << send_list[i].first << ' ' << send_list[i].second
+                     << ")" ;
+    Loci::debugout << endl ;
+#endif
+
+    vector<vector<int> > send_set(p) ;
+    for(size_t i=0;i<send_list.size();++i) {
+      int proc = send_list[i].first ; // processor
+      int comp = send_list[i].second ; // component
+      Array<float,6> bbox = bbox_all[proc*nc+comp] ;
+      FORALL(dom,nd) {
+        int id = $componentID_node[nd] ;
+        if(id != comp &&
+           $pos[nd].x > bbox[0] && $pos[nd].x < bbox[1] &&
+						$pos[nd].y > bbox[2] && $pos[nd].y < bbox[3] &&
+										     $pos[nd].z > bbox[4] && $pos[nd].z < bbox[5]) {
+          send_set[proc].push_back(nd) ;
+        }
+  } ENDFORALL ;
+}
+
+    // remove duplicates
+  for(int i=0;i<p;++i) {
+    if(send_set[i].size() > 1) {
+      std::sort(send_set[i].begin(),send_set[i].end()) ;
+      vector<int>::const_iterator se =
+	std::unique(send_set[i].begin(),send_set[i].end()) ;
+      vector<int> tmp(se-send_set[i].begin()) ;
+      for(size_t j=0;j<tmp.size();++j)
+	tmp[j] = send_set[i][j] ;
+      tmp.swap(send_set[i]) ;
+    }
+  }
+
+#ifdef VERBOSE
+Loci::debugout << "send_sizes =" ;
+for(int i=0;i<p;++i)
+  Loci::debugout << ' ' << send_set[i].size() ;
+Loci::debugout << endl;
+#endif
+
+vector<int> send_sz(p) ;
+for(int i=0;i<p;++i)
+  send_sz[i] = send_set[i].size() ;
+vector<int> recv_sz(p) ;
+MPI_Alltoall(&send_sz[0],1,MPI_INT,&recv_sz[0],1,MPI_INT,
+	     MPI_COMM_WORLD) ;
+
+vector<int> recv_off(p+1) ;
+recv_off[0] = 0 ;
+for(int i=0;i<p;++i)
+  recv_off[i+1] = recv_off[i]+recv_sz[i] ;
+vector<Array<float,7> > recv_pnts(recv_off[p]) ;
+vector<int> recv_ids(recv_off[p]) ;
+
+// Post Irecv's
+vector<MPI_Request> req_queue ;
+for(int i=0;i<p;i++) {
+  if(recv_sz[i] > 0) {
+    if(i != Loci::MPI_rank) {
+      MPI_Request tmp ;
+      MPI_Irecv(&recv_pnts[recv_off[i]],7*recv_sz[i],MPI_FLOAT,i,10,
+		MPI_COMM_WORLD,&tmp) ;
+      req_queue.push_back(tmp) ;
+      MPI_Irecv(&recv_ids[recv_off[i]],recv_sz[i],MPI_INT,i,11,
+		MPI_COMM_WORLD,&tmp) ;
+      req_queue.push_back(tmp) ;
+    }
+  }
+ }
+
+bool self_send = false ;
+// Post sends
+for(int i=0;i<p;i++) {
+  if(send_sz[i] > 0) {
+    if(i == Loci::MPI_rank) {
+      int sz = send_sz[i] ;
+      if(sz > 0)
+	self_send = true ;
+
+      for(int j=0;j<sz;++j) {
+	int nd = send_set[i][j] ;
+	recv_pnts[recv_off[i]+j][0] = $pos[nd].x ;
+	recv_pnts[recv_off[i]+j][1] = $pos[nd].y ;
+	recv_pnts[recv_off[i]+j][2] = $pos[nd].z ;
+	float dist = norm($pos[nd]-$pos[$node2surf[nd]]) ;
+	recv_pnts[recv_off[i]+j][3] = dist ;
+	vector3d<float> ncorrect = $distanceFieldGradient[nd] ;
+	recv_pnts[recv_off[i]+j][4] = ncorrect.x ;
+	recv_pnts[recv_off[i]+j][5] = ncorrect.y ;
+	recv_pnts[recv_off[i]+j][6] = ncorrect.z ;
+	recv_ids[recv_off[i]+j] = $componentID_node[nd] ;
+      }
+    } else {
+      int sz = send_sz[i] ;
+      vector<Array<float,7> > send_buf(send_sz[i]) ;
+      vector<int> send_id(send_sz[i]) ;
+
+      for(int j=0;j<sz;++j) {
+	int nd = send_set[i][j] ;
+	send_buf[j][0] = $pos[nd].x ;
+	send_buf[j][1] = $pos[nd].y ;
+	send_buf[j][2] = $pos[nd].z ;
+	float dist = norm($pos[nd]-$pos[$node2surf[nd]]) ;
+	send_buf[j][3] = dist ;
+	vector3d<float> ncorrect = $distanceFieldGradient[nd] ;
+	send_buf[j][4] = ncorrect.x ;
+	send_buf[j][5] = ncorrect.y ;
+	send_buf[j][6] = ncorrect.z ;
+	send_id[j] = $componentID_node[nd] ;
+	if(send_id[j] > nc || send_id[j]<0) {
+	  cerr << "Something wrong with componentID" << endl ;
+	}
+      }
+      MPI_Send(&send_buf[0],7*sz,MPI_FLOAT,i,10,MPI_COMM_WORLD) ;
+      MPI_Send(&send_id[0],sz,MPI_INT,i,11,MPI_COMM_WORLD) ;
+    }
+  }
+ }
+
+if(req_queue.size() > 0) {
+  vector<MPI_Status> stat_queue(req_queue.size()) ;
+  MPI_Waitall(req_queue.size(),&req_queue[0],&stat_queue[0]) ;
+ }
+
+#ifdef VERBOSE
+Loci::debugout << "req_queue.size() ==" << req_queue.size() << endl ;
+Loci::debugout << "recv_sizes =" ;
+for(int i=0;i<p;++i)
+  Loci::debugout << ' ' << recv_sz[i] ;
+Loci::debugout << endl;
+#endif
+
+if(req_queue.size() > 0 || self_send) {
+  // Now create kd tree and search for closest pt
+  int rsz = recv_pnts.size() ;
+  // break out data by component
+  vector<vector<Loci::kdTree::coord3d> > pnts(nc) ;
+  vector<vector<int> > pnt_id(nc) ;
+  for(int i=0;i<rsz;++i) {
+    Loci::kdTree::coord3d c3d ;
+
+    c3d[0] = recv_pnts[i][0] ;
+    c3d[1] = recv_pnts[i][1] ;
+    c3d[2] = recv_pnts[i][2] ;
+    int id = recv_ids[i] ;
+    if(id > nc || id<0) {
+      cerr << "received_id invalid" << endl ;
+    } else {
+      pnts[id].push_back(c3d) ;
+      pnt_id[id].push_back(i) ;
+    }
+  }
+  vector<Loci::kdTree::kd_tree *> kdlist(nc) ;
+  for(int i=0;i<nc;++i)
+    if(pnts[i].size() == 0)
+      kdlist[i] = 0 ;
+    else {
+      kdlist[i] = new Loci::kdTree::kd_tree(pnts[i],pnt_id[i]) ;
+    }
+
+  double rmin2 = delta*delta ;
+  FORALL(dom,nd) {
+    int id = $componentID_node[nd] ;
+    Loci::kdTree::coord3d p($pos[nd].x,$pos[nd].y,$pos[nd].z) ;
+    float nearest_dist = 1e30 ;
+    for(int i=0;i<nc;++i) {
+      if(id != i) {
+	double rmin = rmin2 ;
+	int pi = -1 ;
+	// If no geometry is defined, then by default the geometry
+	// is everything.  Otherwise check to see if it is in geometry
+	bool inGeom =
+	  ($componentGeometryList[nd][i] == 0 ||
+	   $componentGeometryList[nd][i]->inGeometry($pos[nd])) ;
+	if(kdlist[i] != 0 && inGeom) {
+	  pi = kdlist[i]->find_closest(p,rmin) ;
+	}
+	if(pi >= 0) {
+	  vect3d loc(recv_pnts[pi][0],recv_pnts[pi][1],recv_pnts[pi][2]) ;
+	  real distloc = recv_pnts[pi][3] ;
+	  vect3d n(recv_pnts[pi][4],recv_pnts[pi][5],recv_pnts[pi][6]) ;
+	  vect3d dv = $pos[nd] -loc ;
+	  double dn = distloc + dot(dv,n) ;
+	  double epsdist = *$holeCuttingTolerance ;
+	  double d = (dn > -epsdist && dn < epsdist)?epsdist:dn ;
+	  double priority = (*$componentPriorityList)[i] ;
+	  double dp = d*priority ;
+	  if($crossComponentID_node[nd] < 0 || nearest_dist > dp) {
+	    nearest_dist = dp ;
+	    $crossComponentID_node[nd] = i ;
+	    $crossComponentDist_node[nd] = d ;
+	    $crossComponentDistGrad_node[nd] = n ;
+	  }
+	} else {
+	  if(inGeom) {
+	    nearest_dist = -1e30 ;
+	    $crossComponentDist_node[nd] = -1e30 ;
+	    $crossComponentID_node[nd] = i ;
+	    $crossComponentDistGrad_node[nd] = vect3d(0,0,0) ;
+	  }
+	}
+      }
+    }
+  } ENDFORALL ;
+  for(int i=0;i<nc;++i)
+    if(kdlist[i] != 0)
+      delete kdlist[i] ;
+ }
+
+} ;
+
+
+  geometry_type *cylinder_type::applyXform(componentXform xform) const {
+    vect3d p1 = xform.applyXform(pt1) ;
+    vect3d p2 = xform.applyXform(pt2) ;
+    return new cylinder_type(p1,p2,radius) ;
+  }
+
+  bool cylinder_type::inGeometry(vect3d pt) const {
+    vect3d p = pt-pt1 ;
+    double t = dot(p,pt2-pt1)*rlen2 ;
+    if(t < 0 || t > 1)
+      return false ;
+    vect3d v = t*(pt2-pt1) ;
+    double r2axis = dot(v-p,v-p) ;
+    if(r2axis < radius2)
+      return true ;
+    return false ;
+  }
+
+  real cylinder_type::distToSurface(vect3d pt) const {
+    vect3d p = pt-pt1 ;
+    double t = dot(p,pt2-pt1)*rlen2 ;
+    if(t < 0 || t > 1) {
+      vect3d v(0,0,0) ;
+      vect3d n = pt2-pt1 ;
+      n*= 1./norm(n) ;
+      if(t > 0.5) {
+	p = pt-pt2 ;
+      }
+      vect3d ps = p-dot(p,n)*n ;
+      real rt2 = dot(ps,ps) ;
+      if(rt2 > radius2)
+	ps *= sqrt(radius2/rt2) ;
+      return norm(ps-p) ;
+    }
+
+    vect3d v = t*(pt2-pt1) ;
+    double r2axis = dot(v-p,v-p) ;
+    if(r2axis < radius2)
+      return 0 ;
+    return sqrt(r2axis)-radius ;
+  }
+
+
+  geometry_type *planelist_type::applyXform(componentXform xform) const {
+    vector<vect3d> ptmp ;
+    vector<vect3d> ntmp ;
+    for(size_t i=0;i<pts.size();++i) {
+      vect3d pt1 = pts[i] ;
+      real np1 = norm(pt1)+1 ;
+      vect3d pt2 = pt1 + np1*normals[i] ;
+      vect3d p1 = xform.applyXform(pt1) ;
+      vect3d p2 = xform.applyXform(pt2) ;
+      ptmp.push_back(p1) ;
+      vect3d n1 = (p2-p1)/np1 ;
+      ntmp.push_back(n1) ;
+    }
+    return new planelist_type(ptmp,ntmp) ;
+  }
+
+  bool planelist_type::inGeometry(vect3d pt) const {
+    bool ingeometry = true ;
+    for(size_t i=0;i<pts.size();++i) {
+      if(dot(pt-pts[i],normals[i]) > 0)
+        ingeometry = false ;
+    }
+    return ingeometry ;
+  }
+  real planelist_type::distToSurface(vect3d pt) const {
+    double maxdist = 0 ;
+    for(size_t i=0;i<pts.size();++i) {
+      maxdist = max(maxdist,dot(pt-pts[i],normals[i])) ;
+    }
+    return max(maxdist,0.0) ;
+  }
+
+  geometry_type *sphere_type::applyXform(componentXform xform) const {
+    vect3d c = xform.applyXform(center) ;
+    return new sphere_type(c,radius) ;
+  }
+
+  bool sphere_type::inGeometry(vect3d pt) const {
+    vect3d p = pt-center ;
+    double r2 = dot(p,p) ;
+    if(r2 < radius2)
+      return true ;
+    return false ;
+  }
+
+  real sphere_type::distToSurface(vect3d pt) const {
+    vect3d p = pt-center ;
+    double r2 = dot(p,p) ;
+    if(r2 < radius2)
+      return 0 ;
+    return sqrt(r2)-radius ;
+  }
+
+  geometry_type *revolution_type::applyXform(componentXform xform) const {
+    vect3d x1 = xform.applyXform(p1) ;
+    vect3d x2 = xform.applyXform(p2) ;
+    return new revolution_type(x1,x2,radius_pairs) ;
+  }
+
+  bool revolution_type::inGeometry(vect3d pt) const {
+    vect3d p = pt-p1 ;
+    double t = dot(p,p2-p1)*rlen2 ;
+    if(t < 0 || t > 1)
+      return false ;
+    vect3d v = t*(p2-p1) ;
+    double r = 0 ;
+    for(size_t i=1;i<radius_pairs.size();++i)
+      if(t >= radius_pairs[i-1].first && t < radius_pairs[i].first) {
+        double t1 = radius_pairs[i-1].first ;
+        double t2 = radius_pairs[i].first ;
+        double w = (t1-t)/(t1-t2) ;
+        r = radius_pairs[i-1].second*(1.-w)+radius_pairs[i].second*w ;
+      }
+
+    double r2axis = dot(v-p,v-p) ;
+    if(r2axis < r*r)
+      return true ;
+    return false ;
+  }
+
+  real revolution_type::distToSurface(vect3d pt) const {
+    vect3d p = pt-p1 ;
+    double t = dot(p,p2-p1)*rlen2 ;
+    if(t < 0)
+      return norm(p) ;
+    if(t > 1)
+      return norm(pt-p2) ;
+
+    vect3d v = t*(p2-p1) ;
+    double r = 0 ;
+    for(size_t i=1;i<radius_pairs.size();++i)
+      if(t >= radius_pairs[i-1].first && t < radius_pairs[i].first) {
+        double t1 = radius_pairs[i-1].first ;
+        double t2 = radius_pairs[i].first ;
+        double w = (t1-t)/(t1-t2) ;
+        r = radius_pairs[i-1].second*(1.-w)+radius_pairs[i].second*w ;
+      }
+
+    double r2axis = dot(v-p,v-p) ;
+    if(r2axis < r*r)
+      return 0 ;
+    return sqrt(r2axis)-r ;
+  }
+
+
+  $type componentGeometryData blackbox<map<string, Loci::CPTR<geometry_type> > > ;
+  $type componentTransformMap blackbox<map<string,vector<componentXform> > > ;
+
+  $rule unit(componentGeometryData),constraint(UNIVERSE), prelude {
+    *$componentGeometryData = map<string,Loci::CPTR<geometry_type> >() ;
+  } ;
+
+  $rule apply(componentGeometryData<-componentGeometry)[Loci::NullOp],
+    parametric(volumeTag(X)), prelude {
+    Loci::options_list::option_namelist nl = ($componentGeometry)->getOptionNameList() ;
+    Loci::options_list::option_namelist::const_iterator nli ;
+    for(nli=nl.begin();nli!=nl.end();++nli) {
+      string tag = *nli ;
+      string name ;
+      Loci::options_list::arg_list value_list ;
+      (*$componentGeometry).getOption(tag,name,value_list) ;
+      options_list ol ;
+      ol.Input(value_list) ; // Convert to an options list
+
+      if(name == "cylinder") {
+        vect3d p1(0,0,0) ;
+        bool fail = false ;
+        if(ol.optionExists("p1")) {
+          ol.getOptionUnits("p1","meter",p1) ;
+        } else
+          fail = true ;
+
+        vect3d p2(0,0,0) ;
+        if(ol.optionExists("p2")) {
+          ol.getOptionUnits("p2","meter",p2) ;
+        } else
+          fail = true ;
+
+        double radius = 0 ;
+        if(ol.optionExists("radius")) {
+          ol.getOptionUnits("radius","meter",radius) ;
+        } else
+          fail = true ;
+
+        if(fail) {
+          cerr << "warning, component geometry for " << tag << " must specify p1, p2, and radius"<< endl ;
+        }
+        Loci::CPTR<geometry_type> cyl = new cylinder_type(p1,p2,radius) ;
+
+	$[Once] {
+          cout << "creating geometry for '" << name << "' radius = "
+               << radius << endl ;
+        }
+        (*$componentGeometryData)[tag] = cyl ;
+      } else if(name == "sphere") {
+        vect3d p1(0,0,0) ;
+        bool fail = false ;
+        if(ol.optionExists("center")) {
+          ol.getOptionUnits("center","meter",p1) ;
+        } else
+          fail = true ;
+
+        double radius = 0 ;
+        if(ol.optionExists("radius")) {
+          ol.getOptionUnits("radius","meter",radius) ;
+        } else
+          fail = true ;
+
+        if(fail) {
+          cerr << "warning, component geometry for " << tag << " must specify center and radius"<< endl ;
+        }
+        Loci::CPTR<geometry_type> sph = new sphere_type(p1,radius) ;
+
+
+	$[Once] {
+          cout << "creating geometry for '" << tag << "' " << name << " radius = "
+               << radius << endl ;
+        }
+        (*$componentGeometryData)[tag] = sph ;
+      } else if(name=="revolution") {
+        vect3d p1(0,0,0) ;
+        bool fail = false ;
+        if(ol.optionExists("p1")) {
+          ol.getOptionUnits("p1","meter",p1) ;
+        } else
+          fail = true ;
+
+        vect3d p2(0,0,0) ;
+        if(ol.optionExists("p2")) {
+          ol.getOptionUnits("p2","meter",p2) ;
+        } else
+          fail = true ;
+
+        vector<double> radius ;
+        vector<double> offsets ;
+        if(ol.optionExists("radius")) {
+          Loci::option_value_type ovt= ol.getOptionValueType("radius") ;
+          if(ovt != Loci::LIST) {
+            cerr << "radius for geometry of component '" << tag << "' must be a list" << endl ;
+            Loci::Abort() ;
+          }
+          Loci::options_list::arg_list value_list ;
+          ol.getOption("radius",value_list) ;
+          int sz = value_list.size() ;
+          for(int i=0;i<sz;++i)
+            if(value_list[i].type_of() == Loci::UNIT_VALUE) {
+              Loci::UNIT_type vu ;
+              value_list[i].get_value(vu) ;
+              if(!vu.is_compatible("meter")) {
+                std::cerr << "wrong type of units for radius in component geometry for component '" << tag << "'" << ": " << vu << std::endl ;
+                Loci::Abort() ;
+              }
+              radius.push_back(vu.get_value_in("meter")) ;
+            } else if(value_list[i].type_of() == Loci::REAL) {
+              double r =0 ;
+              value_list[i].get_value(r) ;
+              radius.push_back(r) ;
+            } else {
+              cerr << "wrong type in radius list for geometry of component '" << tag << "'" << endl ;
+              Loci::Abort() ;
+            }
+        }
+        if(ol.optionExists("offsets")) {
+          Loci::option_value_type ovt= ol.getOptionValueType("offsets") ;
+          if(ovt != Loci::LIST) {
+            cerr << "offsets for geometry of component '" << tag << "' must be a list" << endl ;
+            Loci::Abort() ;
+          }
+          Loci::options_list::arg_list value_list ;
+          ol.getOption("offsets",value_list) ;
+          int sz = value_list.size() ;
+          for(int i=0;i<sz;++i)
+            if(value_list[i].type_of() == Loci::REAL) {
+              double o =0 ;
+              value_list[i].get_value(o) ;
+              offsets.push_back(o) ;
+            } else {
+              cerr << "wrong type in offset list for geometry of component '" << tag << "'" << endl ;
+              Loci::Abort() ;
+            }
+        }
+        if(radius.size() != offsets.size()) {
+          cerr << "radius and offset should have same number of entries in geometry for component '" << tag << "'" << endl ;
+          Loci::Abort() ;
+        }
+        int sz = radius.size() ;
+        vector<pair<double,double> > vrad(sz) ;
+        for(int i=0;i<sz;++i) {
+          vrad[i].first = offsets[i] ;
+          vrad[i].second = radius[i] ;
+        }
+
+        Loci::CPTR<geometry_type> rph = new revolution_type(p1,p2,vrad) ;
+        (*$componentGeometryData)[tag] = rph ;
+
+      } else if(name == "planeList") {
+        using namespace Loci ;
+        vector<vect3d> points ;
+        vector<vect3d> normals ;
+
+        if(ol.optionExists("list")) {
+          Loci::option_value_type ovt= ol.getOptionValueType("list") ;
+          if(ovt != Loci::LIST) {
+            cerr << "list for geometry of component '" << tag << "' must be a list" << endl ;
+            Loci::Abort() ;
+          }
+          Loci::options_list::arg_list value_list ;
+          ol.getOption("list",value_list) ;
+          int sz = value_list.size() ;
+          for(int i=0;i<sz;++i) {
+            if(value_list[i].type_of() != FUNCTION) {
+              cerr << "list should be a list of plane functions in component '"
+                   << tag << "'" << endl ;
+            }
+            string name ;
+            value_list[i].get_value(name) ;
+            if(name != "plane") {
+              cerr << "planeList expecting a list of 'plane', not '"
+                   << name << "'" << endl ;
+              Loci::Abort() ;
+            }
+            options_list::arg_list fvalues ;
+            value_list[i].get_value(fvalues) ;
+            options_list fol ;
+            fol.Input(fvalues) ;
+            vect3d pl,nl ;
+            if(fol.optionExists("p")) {
+              fol.getOptionUnits("p","meter",pl) ;
+            } else {
+              cerr << "plane does not define point 'p=' in component '"
+                   << tag << "'" << endl ;
+              Loci::Abort() ;
+            }
+            if(fol.optionExists("n")) {
+              fol.getOptionUnits("n","meter",nl) ;
+            } else {
+              cerr << "plane does not define normal 'n=' in component '"
+                   << tag << "'" << endl ;
+              Loci::Abort() ;
+            }
+            points.push_back(pl) ;
+            normals.push_back(nl) ;
+          }
+
+          Loci::CPTR<geometry_type> ph = new planelist_type(points,normals) ;
+          (*$componentGeometryData)[tag] = ph ;
+
+        } else {
+          cerr << "must specify list of planes for geometry of component '"
+               << tag << "'" << endl ;
+          Loci::Abort() ;
+        }
+      }
+      else {
+        cerr << "unknown geometry type " << name << endl ;
+        Loci::Abort() ;
+      }
+    }
+
+  } ;
+
+
+  // Default, there is no component motion, so the geometry list
+  // is just copied from the geometry data
+  $rule unit(componentGeometryList<-componentNameList,componentGeometryData),
+    prelude {
+    vector<Loci::CPTR<geometry_type> > tmp ;
+    for(size_t i=0;i<(*$componentNameList).size();++i) {
+      map<string,Loci::CPTR<geometry_type> >::const_iterator mi ;
+      mi = (*$componentGeometryData).find((*$componentNameList)[i]) ;
+      if(mi == (*$componentGeometryData).end()) {
+        tmp.push_back(Loci::CPTR<geometry_type>(0)) ;
+      } else {
+        Loci::CPTR<geometry_type> gp = mi->second ;
+        tmp.push_back(gp) ;
+      }
+    }
+    (*$componentGeometryList) = tmp ;
+
+    // Check to make sure that every geometry
+    map<string,Loci::CPTR<geometry_type> >::const_iterator mi ;
+    for(mi=(*$componentGeometryData).begin();
+        mi!=(*$componentGeometryData).end();
+        ++mi) {
+      const string geo_name = mi->first ;
+      bool found = false ;
+      for(size_t i=0;i<(*$componentNameList).size();++i) {
+        if(geo_name == (*$componentNameList)[i])
+          found = true ;
+      }
+      if(!found) {
+	$[Once] {
+          cerr << "componentGeometry id='" << geo_name << "' not found in vog file volume tags"
+               << endl ;
+
+          cerr << "volume tags = [" ;
+          for(size_t i=0;i<(*$componentNameList).size();++i) {
+            cerr << ' ' << (*$componentNameList)[i] ;
+          }
+          cerr << " ]" << endl
+               << "check componentGeometry input in vars file!" << endl ;
+        }
+        Loci::Abort() ;
+      }
+    }
+  } ;
+
+  // Dummy rule to avoid message
+  $rule apply(componentGeometryList<-componentNameList,componentGeometry)[Loci::NullOp], prelude { } ;
+
+  // If there is motion, replace the geometry with the transformed geometry
+  $rule apply(componentGeometryList<-componentNameList,componentGeometryData,componentTransformMap)[Loci::NullOp], prelude {
+    vector<Loci::CPTR<geometry_type> > tmp ;
+    for(size_t i=0;i<(*$componentNameList).size();++i) {
+      map<string,Loci::CPTR<geometry_type> >::const_iterator mi ;
+      mi = (*$componentGeometryData).find((*$componentNameList)[i]) ;
+      if(mi == (*$componentGeometryData).end()) {
+        tmp.push_back(Loci::CPTR<geometry_type>(0)) ;
+      } else {
+        map<string,vector<componentXform> >::const_iterator mi2 ;
+        mi2 = (*$componentTransformMap).find((*$componentNameList)[i]) ;
+        Loci::CPTR<geometry_type> gp = mi->second ;
+        if(mi2 != (*$componentTransformMap).end()) {
+          int sz = mi2->second.size() ;
+          for(int i=0;i<sz;++i) {
+            Loci::CPTR<geometry_type> ngp = gp->applyXform(mi2->second[i]) ;
+            gp = ngp ;
+          }
+        }
+        tmp.push_back(gp) ;
+      }
+    }
+    (*$componentGeometryList) = tmp ;
+  } ;
+
+
+  // Note on iblank values:
+  // iblank = 0: not blanked, simulate as normal, donate simulated value to
+  //             interpolation
+  // iblank = 1: Simulate, but don't donate simulated value to interpolation
+  // iblank = 2: Don't Simulate, instead interpolate values "cloud"
+  // iblank = 3: Don't simulate, advance values in time as constant function
+  //
+
+
+  $type interpolateMinStencilSize param<double> ;
+
+  $rule unit(stencilSize2<-interpolateMinStencilSize) {
+    $stencilSize2 = $interpolateMinStencilSize*$interpolateMinStencilSize ;
+  }
+
+  $rule apply(stencilSize2<-facecenter,ci->cellcenter,face2node->pos)
+  [Loci::Maximum],constraint(interface_BC) {
+    vect3d d1 = $facecenter-$ci->$cellcenter ;
+    double md = 4.*dot(d1,d1) ;
+    join($stencilSize2,md) ;
+  }
+
+  $type xblank store<flowPsi::byte_t> ; // Just hole cutting
+  $type yblank store<flowPsi::byte_t> ; // With proximity override
+
+  $rule apply(stencilSize2<-face2node->(xblank,pos))[Loci::Maximum] {
+    int sz = $face2node.size() ;
+    int xsum = 0;
+    for(int i=0;i<sz;++i)
+      xsum += $face2node[i]->$xblank ;
+    if(xsum > 0) {
+      vect3d d = $face2node[0]->$pos - $face2node[sz-1]->$pos ;
+      double len = dot(d,d) ;
+      for(int i=1;i<sz;++i) {
+        d = $face2node[i-1]->$pos - $face2node[i]->$pos ;
+        len = max(len,dot(d,d)) ;
+      }
+      join($stencilSize2,len) ;
+    }
+  }
+
+  $rule pointwise(xblank<-pos) {
+    $xblank = 0 ;
+  }
+
+  $rule pointwise(component::xblank<-pos,componentGeometryData,componentName_X), constraint(pos,componentNodes_X,componentGeometry), parametric(volumeTag(X)), option(disable_threading), prelude {
+
+    Loci::entitySet e = Loci::entitySet(seq) ;
+    FORALL(e,nd) {
+      $xblank[nd] = 0 ;
+    } ENDFORALL ;
+    map<string, Loci::CPTR<geometry_type> >:: const_iterator ii ;
+    for(ii=$componentGeometryData->begin();
+        ii!=$componentGeometryData->end();++ii) {
+      if(ii->first != *$componentName_X) {
+        Loci::CPTR<geometry_type> gp = ii->second ;
+
+        FORALL(e,nd) {
+          if(gp->inGeometry($pos[nd]))
+            $xblank[nd] = 2 ;
+        } ENDFORALL ;
+      } else {
+        FORALL(e,nd) {
+          $xblank[nd] = 2 ;
+        } ENDFORALL ;
+      }
+    }
+  } ;
+
+  $rule pointwise(motion::component::xblank<-pos,componentGeometryData,
+                  componentName_X, componentTransformMap),
+    constraint(pos,componentNodes_X,componentTransformMap,componentGeometry),
+    parametric(volumeTag(X)), option(disable_threading), prelude {
+
+    Loci::entitySet e = Loci::entitySet(seq) ;
+    FORALL(e,nd) {
+      $xblank[nd] = 0 ;
+    } ENDFORALL ;
+    map<string, Loci::CPTR<geometry_type> >:: const_iterator ii ;
+    for(ii=$componentGeometryData->begin();
+        ii!=$componentGeometryData->end();++ii) {
+      if(ii->first != *$componentName_X) {
+        Loci::CPTR<geometry_type> gp = ii->second ;
+
+        // Transform geometry to global coordinates
+        map<string,vector<componentXform> >::const_iterator mi ;
+        mi = $componentTransformMap->find(ii->first) ;
+        if(mi != $componentTransformMap->end()) {
+          int sz = mi->second.size() ;
+          for(int i=0;i<sz;++i) {
+            Loci::CPTR<geometry_type> ngp = gp->applyXform(mi->second[i]) ;
+            gp = ngp ;
+          }
+        }
+        FORALL(e,nd) {
+          if(gp->inGeometry($pos[nd]))
+            $xblank[nd] = 2 ;
+        } ENDFORALL ;
+      } else {
+        FORALL(e,nd) {
+          $xblank[nd] = 2 ;
+        } ENDFORALL ;
+      }
+
+    }
+  } ;
+
+
+  $rule pointwise(yblank<-xblank,pos,node2surf->pos,
+		  crossComponentDist_node,crossComponentID_node,
+		  componentID_node,componentPriorityList,holeCuttingTolerance) {
+    $yblank = $xblank ;
+
+    if($xblank != 0) {
+      double priority = $componentPriorityList[$componentID_node] ;
+      if($crossComponentDist_node < 0 || $crossComponentID_node < 0)
+        $yblank = 3 ;
+      else {
+	float epsdist = $holeCuttingTolerance ;
+        float dist = norm($pos - $node2surf->$pos) ;
+        double d = priority*max(dist,epsdist) ;
+	double cross_priority = $componentPriorityList[$crossComponentID_node] ;
+        if(d < cross_priority*$crossComponentDist_node) {
+          $yblank = 0 ;
+        }
+      }
+    }
+  }
+
+  $type zblank_init store<flowPsi::byte_t> ;
+  $type zblank store<flowPsi::byte_t> ;
+  $type zblank_layer store<flowPsi::byte_t> ;
+  $type zblank_layer2 store<flowPsi::byte_t> ;
+
+  $rule unit(zblank_init),constraint(pos) {
+    $zblank_init=0 ;
+  }
+
+  $rule apply(face2node->zblank_init<-face2node->yblank)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    flowPsi::byte_t ymx = $face2node[0]->$yblank ;
+    flowPsi::byte_t ymn = ymx ;
+    for(int i=1;i<fsz;++i) {
+      flowPsi::byte_t yi = $face2node[i]->$yblank ;
+      ymx = max(ymx,yi) ;
+      ymn = min(ymn,yi) ;
+    }
+    if(ymn == 0 && ymx !=0) { // on interface
+      for(int i=0;i<fsz;++i) {
+        join($face2node[i]->$zblank_init,ymx) ;
+      }
+    }
+  }
+
+#ifdef HACK
+  $rule apply(face2node->zblank_init)[Loci::Maximum],constraint(interface_BC) {
+    int fsz = $face2node.size() ;
+    flowPsi::byte_t ymx = 1 ;
+    for(int i=0;i<fsz;++i) {
+      join($face2node[i]->$zblank_init,ymx) ;
+    }
+  }
+#endif
+
+  $rule unit(zblank_layer),constraint(pos) {
+    $zblank_layer=0 ;
+  }
+
+  $rule apply(face2node->zblank_layer<-face2node->zblank_init)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    flowPsi::byte_t ymx = $face2node[0]->$zblank_init ;
+    for(int i=1;i<fsz;++i) {
+      flowPsi::byte_t yi = $face2node[i]->$zblank_init ;
+      ymx = max(ymx,yi) ;
+    }
+    if(ymx != 0)
+      for(int i=0;i<fsz;++i) {
+        join($face2node[i]->$zblank_layer,ymx) ;
+      }
+  }
+
+  $rule unit(zblank_layer2),constraint(pos) {
+    $zblank_layer2=0 ;
+  }
+
+  $rule apply(face2node->zblank_layer2<-face2node->zblank_layer)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    flowPsi::byte_t ymx = $face2node[0]->$zblank_layer ;
+    for(int i=1;i<fsz;++i) {
+      flowPsi::byte_t yi = $face2node[i]->$zblank_layer ;
+      ymx = max(ymx,yi) ;
+    }
+    if(ymx != 0)
+      for(int i=0;i<fsz;++i) {
+        join($face2node[i]->$zblank_layer2,ymx) ;
+      }
+  }
+
+
+  $rule unit(zblank),constraint(pos) {
+    $zblank=0 ;
+  }
+
+  $rule apply(face2node->zblank<-face2node->zblank_layer)[Loci::Maximum] {
+    int fsz = $face2node.size() ;
+    flowPsi::byte_t ymx = $face2node[0]->$zblank_layer ;
+    for(int i=1;i<fsz;++i) {
+      flowPsi::byte_t yi = $face2node[i]->$zblank_layer ;
+      ymx = max(ymx,yi) ;
+    }
+    if(ymx != 0)
+      for(int i=0;i<fsz;++i) {
+        join($face2node[i]->$zblank,ymx) ;
+      }
+  }
+
+#ifdef TRYIT_LATER
+  $rule pointwise(zblank{iblanking=0}<-zblank_init) {
+    $zblank{iblanking=0} = $zblank_init ;
+  }
+  $rule pointwise(zblank{iblanking+1}<-zblank_layer{iblanking}) {
+    $zblank{iblanking+1}=$zblank_layer{iblanking} ;
+  }
+
+  $type blanking_layer_finished param<bool> ;
+  $type OversetStencilLayerSize param<int> ;
+
+  $rule default(OversetStencilLayerSize) {
+    $OversetStencilLayerSize = 2 ;
+  }
+
+  $rule singleton(blanking_layer_finished<-$iblanking,OversetStencilLayerSize) {
+    $blanking_layer_finished = ($$iblanking >=
+                                $OversetStencilLayerSize) ;
+  }
+
+  $rule pointwise(zblank<-zblank{iblanking}),conditional(blanking_layer_finished{iblanking}) {
+    $zblank = $zblank{iblanking} ;
+  }
+#endif
+
+
+  $rule pointwise(iblank<-cellcenter),constraint(geom_cells) {
+    $iblank = 0 ;
+  }
+
+  $rule pointwise(non_trivial::iblank<-(upper,lower,boundary_map)->face2node->(yblank,zblank)),
+    constraint((upper,lower,boundary_map)->face2node->yblank,componentGeometry) {
+    $iblank = 10 ;
+    flowPsi::byte_t maxblank = 0 ;
+    flowPsi::byte_t maxzblank = 0 ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      int fsz = $upper[i]->$face2node.size() ;
+      for(int f=0;f<fsz;++f) {
+        $iblank = min($iblank,$upper[i]->$face2node[f]->$yblank) ;
+        maxblank = max(maxblank,$upper[i]->$face2node[f]->$yblank) ;
+        maxzblank = max(maxzblank,$upper[i]->$face2node[f]->$zblank) ;
+      }
+
+    }
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      int fsz = $lower[i]->$face2node.size() ;
+      for(int f=0;f<fsz;++f) {
+        $iblank = min($iblank,$lower[i]->$face2node[f]->$yblank) ;
+        maxblank = max(maxblank,$lower[i]->$face2node[f]->$yblank) ;
+        maxzblank = max(maxzblank,$lower[i]->$face2node[f]->$zblank) ;
+      }
+    }
+    if(maxblank == 3)
+      if($iblank == 0)
+        $iblank = 2 ;
+    // If blanked outsided of layer then change mode to 3
+    if($iblank == 2 && maxzblank == 0)
+      $iblank = 3 ;
+    //    if($iblank == 0 && maxzblank == 0)
+    //      $iblank = 1 ;
+  }
+
+  $type nblank store<flowPsi::byte_t> ;
+  $rule unit(nblank),constraint(pos) {
+    $nblank = 0 ;
+  }
+
+  $rule apply(face2node->nblank<-(cl,cr)->iblank)[Loci::Maximum] {
+    flowPsi::byte_t tmp = max($cl->$iblank,$cr->$iblank) ;
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nblank,tmp) ;
+  }
+  $rule apply(face2node->nblank<-(ci)->iblank)[Loci::Maximum] {
+    flowPsi::byte_t tmp = $ci->$iblank ;
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nblank,tmp) ;
+  }
+
+  $type nblankf store<float> ;
+  $rule pointwise(nblankf<-nblank) {
+    $nblankf = float($nblank) ;
+    if($nblank == 0)
+      $nblankf = 0.0 ;
+  }
+  $type fblank store<double> ;
+  $rule pointwise(fblank<-iblank) {
+    $fblank = double($iblank) ;
+  }
+
+  $type donorCell store<flowPsi::byte_t> ;
+
+  $rule unit(donorCell),constraint(geom_cells) {
+    $donorCell = 0 ;
+  }
+
+  $rule apply(ci->donorCell<-ci->iblank)[Loci::Maximum],constraint(interface_BC) {
+
+    flowPsi::byte_t val = 1 ;
+    if($ci->$iblank == 0)
+      join($ci->$donorCell,val);
+  }
+
+  $rule apply((cl,cr)->donorCell<-(cl,cr)->iblank)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
+    if(($cl->$iblank & $cr->$iblank) == 0 &&
+       ($cl->$iblank | $cr->$iblank) != 0) {
+      flowPsi::byte_t val = 1 ;
+      join($cl->$donorCell,val) ;
+      join($cr->$donorCell,val) ;
+    }
+  }
+
+  $type cellSize2 store<float> ;
+
+  $rule unit(cellSize2),constraint(geom_cells) {
+    $cellSize2 = 0 ;
+  }
+
+  $rule apply((cl,cr)->cellSize2<-face2node->pos)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
+    int sz = $face2node.size() ;
+    vect3d vd = $face2node[0]->$pos-$face2node[sz-1]->$pos ;
+    double d2 = dot(vd,vd) ;
+    for(int i=1;i<sz;++i) {
+      vd = $face2node[i-1]->$pos-$face2node[i]->$pos ;
+      max(d2,dot(vd,vd)) ;
+    }
+    join($cl->$cellSize2,d2) ;
+    join($cr->$cellSize2,d2) ;
+  }
+
+
+  OUTPUT_SCALAR("nblankf",blank) ;
+
+  $type cidf store<float> ;
+
+  $rule pointwise(cidf<-componentID_node) {
+    $cidf = $componentID_node ;
+  }
+
+  OUTPUT_SCALAR("cidf",cid) ;
+
+  $type ccidf store <float> ;
+  $rule pointwise(ccidf<-crossComponentID_node) {
+    $ccidf = $crossComponentID_node ;
+  }
+
+  OUTPUT_SCALAR("ccidf",ccid) ;
+
+  OUTPUT_SCALAR("crossComponentDist_node",cdist) ;
+  OUTPUT_VECTOR("crossComponentDistGrad_node",cdistgrad) ;
+
 }

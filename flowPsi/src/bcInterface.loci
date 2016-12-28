@@ -1,0 +1,144 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include "flowTypes.h"
+#include <string>
+#include "readGrid.h"
+#include "Tools/stream.h"
+#include "inviscidFlux.h"
+#include "bcTools.h"
+$include "flowPsi.lh"
+#include <map>
+using std::map ;
+
+namespace flowPsi {
+
+  class interface_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "interface"; }
+    std::string variablesChecked() { return ""; }
+    bool checkOptions(const options_list &bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+  register_BC<interface_check> register_interface_check ;
+
+  $type ghostCell1 store<vect3d> ;
+  $rule pointwise(ghostCell1<-facecenter,area,ci->cellcenter),constraint(interface_BC) {
+    real dist = norm($facecenter-$ci->$cellcenter) ;
+    $ghostCell1 = $facecenter + dist*$area.n ;
+  }
+  
+
+  $type interpolateFace(X) store<real> ;
+  $type interpolateFace_v3d(X) store<vect3d> ;
+  $type interpolateFace_M(X) storeVec<real> ;
+
+  $rule pointwise(u_f,gagePressure_f,temperature_f<-
+                  ci->(u,temperature,gagePressure),
+                  interpolateFace_v3d(u),
+                  interpolateFace(temperature),
+                  interpolateFace(gagePressure)),
+	   constraint(interface_BC)
+  {
+    $temperature_f = $interpolateFace(temperature) ;
+    if($temperature_f == 0) {
+      $temperature_f = $ci->$temperature ;
+      $gagePressure_f = $ci->$gagePressure ;
+      $u_f = vect3d(0.,0.,0.) ;
+    } else {
+      $gagePressure_f = $interpolateFace(gagePressure) ;
+      $u_f = $interpolateFace_v3d(u) ;
+    }
+  }
+
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,Eta_pf),constraint(interface_BC) {
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    inviscidRiemannFlux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+			$Rtilde, $gamma,$us_n,$Eta_pf) ;
+  }
+
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Eta_pf)[Loci::Summation],constraint(interface_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
+
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+		       $Rtilde, $gamma,$us_n,$Eta_pf) ;
+
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
+  }
+
+  $type interpolateConnectCell store<int> ;
+  
+  $type interfaceCells store<int> ;
+  $rule pointwise(interfaceCells{n=0}),constraint(interface_BC) {
+    $interfaceCells{n=0} = -1 ;
+  }
+  
+  $rule pointwise(interfaceCells{n,it=0}<-interfaceCells{n}),constraint(interface_BC) {
+    $interfaceCells{n,it=0} = $interfaceCells{n} ;
+  }
+  $rule pointwise(interfaceCells{n,it+1}<-interpolateConnectCell{n,it}),
+    constraint(interface_BC) {
+    $interfaceCells{n,it+1}=$interpolateConnectCell{n,it} ;
+  }
+  $rule pointwise(interfaceCells{n+1}<-interfaceCells{n,it}),constraint(interface_BC),conditional(newtonFinished{n,it}) {
+    $interfaceCells{n+1}=$interfaceCells{n,it} ;
+  }
+  $type pass_through_link blackbox<map<int,int> >;
+  $rule blackbox(pass_through_link{n}<-interfaceCells{n}),prelude {
+    entitySet dom = $interfaceCells{n}.domain() ;
+    map<int,int>& link = *$pass_through_link{n};
+
+    FORALL(dom,ii) {
+      link[ii] = $interfaceCells{n}[ii] ;
+    } ENDFORALL ;
+    
+  } ;
+
+}
+
+
+
+
+
