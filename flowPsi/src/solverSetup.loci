@@ -80,28 +80,28 @@ namespace flowPsi {
   // Compute eigenvalues for cfl estimation
   $type maxev_f store<real> ;
 
-  $rule pointwise(maxev_f<-area,us_n,(cl,cr)->(u,soundSpeed,Beta)) {
-    real beta = max($cl->$Beta,$cr->$Beta) ;
-    const real BetaP = beta+1. ;
-    const real BetaM = beta-1. ;
+  $rule pointwise(maxev_f<-area,us_n,(cl,cr)->(u,soundSpeed,Eta_p)) {
+    const real eta = max($cl->$Eta_p,$cr->$Eta_p) ;
+    const real Eta_P = eta+1. ;
+    const real Eta_M = eta-1. ;
     const real utl = dot($cl->$u,$area.n)-$us_n ;
     const real utr = dot($cr->$u,$area.n)-$us_n ;
     const real al = $cl->$soundSpeed ;
     const real ar = $cr->$soundSpeed ;
-    const real sigmal = sqrt(utl*utl*BetaM*BetaM+4.*beta*al*al) ;
-    const real sigmar = sqrt(utr*utr*BetaM*BetaM+4.*beta*ar*ar) ;
-    const real mevl = 0.5*max(fabs(utl*BetaP-sigmal),fabs(utl*BetaP+sigmal)) ;
-    const real mevr = 0.5*max(fabs(utr*BetaP-sigmar),fabs(utr*BetaP+sigmar)) ;
+    const real sigmal = sqrt(utl*utl*Eta_M*Eta_M+4.*eta*al*al) ;
+    const real sigmar = sqrt(utr*utr*Eta_M*Eta_M+4.*eta*ar*ar) ;
+    const real mevl = 0.5*max(fabs(utl*Eta_P-sigmal),fabs(utl*Eta_P+sigmal)) ;
+    const real mevr = 0.5*max(fabs(utr*Eta_P-sigmar),fabs(utr*Eta_P+sigmar)) ;
     $maxev_f = max(mevl,mevr) ;
   }
-  $rule pointwise(maxev_f<-area,us_n,u_f,soundSpeed_f,ci->Beta),constraint(ci->u) {
-    real beta = $ci->$Beta ;
-    const real BetaP = beta+1. ;
-    const real BetaM = beta-1. ;
+  $rule pointwise(maxev_f<-area,us_n,u_f,soundSpeed_f,ci->Eta_p),constraint(ci->u) {
+    const real eta = $ci->$Eta_p ;
+    const real Eta_P = eta+1. ;
+    const real Eta_M = eta-1. ;
     const real utf = dot($u_f,$area.n)-$us_n ;
     const real af = $soundSpeed_f ;
-    const real sigmaf = sqrt(utf*utf*BetaM*BetaM+4.*beta*af*af) ;
-    $maxev_f = 0.5*max(fabs(utf*BetaP-sigmaf),fabs(utf*BetaP+sigmaf)) ;
+    const real sigmaf = sqrt(utf*utf*Eta_M*Eta_M+4.*eta*af*af) ;
+    $maxev_f = 0.5*max(fabs(utf*Eta_P-sigmaf),fabs(utf*Eta_P+sigmaf)) ;
   }
   
   $rule pointwise(cflpdt<-vol,(upper,lower,boundary_map)->(maxev_f,area)) {

@@ -223,20 +223,15 @@ namespace flowPsi {
     $dtau = dt ;
   }
 
-  // Compute rhs of Newton step 
-  $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtau{n,it},vol{n,it},Pambient,Rtilde,gamma),
-    inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepSteadyState) {
-    const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
-    const real rhonp = ($gagePressure{n,it}+$Pambient)/($Rtilde*$temperature{n,it}) ;
-    const real e0n = $Rtilde*$temperature{n}/($gamma-1.) + .5*dot($u{n},$u{n}) ;
-    const real e0np = $Rtilde*$temperature{n,it}/($gamma-1.) + .5*dot($u{n,it},$u{n,it}) ;
-    const real rdtvol = $vol{n,it}/$dtau{n,it} ;
-    $rhs{n,it}[0] = $src{n,it}[0] - (rhonp-rhon)*rdtvol ;
-    $rhs{n,it}[1] = $src{n,it}[1] - (rhonp*$u{n,it}.x - rhon*$u{n}.x)*rdtvol ;
-    $rhs{n,it}[2] = $src{n,it}[2] - (rhonp*$u{n,it}.y - rhon*$u{n}.y)*rdtvol ;
-    $rhs{n,it}[3] = $src{n,it}[3] - (rhonp*$u{n,it}.z - rhon*$u{n}.z)*rdtvol ;
-    $rhs{n,it}[4] = $src{n,it}[4] - (rhonp*e0np - rhon*e0n)*rdtvol ;
-  }
+
+  
+  // Note, in steady state mode we assume the time derivative is zero
+  // Another way to think of this is we perform a single newton iteration
+  // each step.  Since we initialize the newton method with the previous
+  // timestep value, the time derivative would appear to be zero regardless
+  $rule pointwise(rhs{n,it}<-src{n,it}),
+    inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepSteadyState) ,prelude {} ;
+
   
   $type timePressureBiasControl param<double> ;
   $rule default(timePressureBiasControl) {
@@ -260,6 +255,7 @@ namespace flowPsi {
     $localPBias_next{n,it+1} = $localPBias{n,it} ;
   }
   
+  // Compute rhs of Newton step
   // Time accurate second order scheme using centered variation of
   // Crank-Nicholson
   $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n},gagePressure{n,it},temperature{n},temperature{n,it},u{n},u{n,it},dtmax{n,it},dtau{n,it},vol{n,it},localPBias{n,it},Pambient,Rtilde,gamma),

@@ -115,7 +115,7 @@ namespace flowPsi {
     $temperature_f = $ci->$temperature ;
   }
   
-  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma,ci->Beta),constraint(reflecting_BC) {
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma,ci->Eta_p),constraint(reflecting_BC) {
     const real Tl = $leftsP(temperature,Zero) ;
     const real Pgl = $leftsP(gagePressure,minPg) ;
     const vect3d ul = $leftv3d(u) ;
@@ -124,10 +124,10 @@ namespace flowPsi {
     const real uit = dot(ul,$area.n)-$us_n ;
     const vect3d ur = ul - 2.*uit*$area.n;
     inviscidRiemannFlux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-			$Rtilde, $gamma,$us_n,$ci->$Beta) ;
+			$Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
     $iflux[0] = 0 ; // Mass flux should be zero for this BC
   }
-  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma,ci->Beta)[Loci::Summation],constraint(reflecting_BC) {
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), area,us_n,Pambient,Rtilde,gamma,ci->Eta_p)[Loci::Summation],constraint(reflecting_BC) {
 #define NUMERICAL
 #ifdef NUMERICAL
     real vals[5] ;
@@ -139,7 +139,7 @@ namespace flowPsi {
     vect3d ur = ul - 2.*uit*$area.n;
     Loci::Array<real,5> iflux ;
     inviscidRiemannFlux(iflux,Pgl,Tl,ul,Pgl,Tl,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$ci->$Beta) ;
+		       $Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
     
     const real a2 = $gamma*$Rtilde*Tl ;
     const real eps = 1e-5 ;
@@ -167,7 +167,7 @@ namespace flowPsi {
       Pgl = vals[4] ;
       Loci::Array<real,5> iflux2 ;
       inviscidRiemannFlux(iflux2,Pgl,Tl,ul,Pgl,Tl,ur,$area.n,$area.sada,
-			  $Pambient, $Rtilde, $gamma,$us_n,$ci->$Beta) ;
+			  $Pambient, $Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
       const real rh = 1./(tmp-vals[j]) ;
       for(int i = 1;i<5;++i) {
 	$ci->$srcJ[i][j] -=(iflux[i]-iflux2[i])*rh ;
@@ -191,9 +191,9 @@ namespace flowPsi {
     fjm = mk_Scalar(0.) ;
     fjr = mk_Scalar(0.) ;
     inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$ci->$Beta) ;
+		       $Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
     inviscidRiemannFjm(fjm,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$ci->$Beta) ;
+		       $Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
     const real n[3] = {$area.n.x,$area.n.y,$area.n.z} ;
     const int mi = 1 ;
     for(int i=0;i<5;++i)

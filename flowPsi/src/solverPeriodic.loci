@@ -66,8 +66,8 @@ namespace flowPsi {
     $cr->$gagePressure = $pmap->$cl->$gagePressure ;
   }
 
-  $rule pointwise(cr->Beta<-pmap->cl->Beta) {
-    $cr->$Beta = $pmap->$cl->$Beta ;
+  $rule pointwise(cr->Eta_p<-pmap->cl->Eta_p) {
+    $cr->$Eta_p = $pmap->$cl->$Eta_p ;
   }
 
   // this fix will allow gradients of u to be computed when all boundaries

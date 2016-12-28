@@ -70,10 +70,8 @@ $type Mref store<flowPsi::real> ; // Reference Mach number used for precondition
 $type PLimPC param<flowPsi::real> ;// Pressure jump limit on preconditioning
 $type Minf param<flowPsi::real> ; // Free stream Mach number
 $type etaT param<flowPsi::real> ; // Stagnation point limit factor
-$type Beta store<flowPsi::real> ; // Beta factor used in preconditioning
-$type Beta_f store<flowPsi::real> ; // Beta factor used in preconditioning
-
-  
+$type Eta_p store<flowPsi::real> ; // Eta factor used in preconditioning
+$type Eta_pf store<flowPsi::real> ; // Eta factor used in preconditioning
 
 // Jacobian Assembly
 $type fjp storeMat<flowPsi::real_fj> ;

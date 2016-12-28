@@ -277,7 +277,7 @@ namespace flowPsi {
     $u_f=$uRef ;
   }
 
-  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,Beta_f),constraint(supersonicInflow_BC) {
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,Eta_pf),constraint(supersonicInflow_BC) {
     const real Tl = $leftsP(temperature,Zero) ;
     const real Pgl = $leftsP(gagePressure,minPg) ;
     const vect3d ul = $leftv3d(u) ;
@@ -285,10 +285,10 @@ namespace flowPsi {
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
     inviscidRiemannFlux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-			$Rtilde, $gamma,$us_n,$Beta_f) ;
+			$Rtilde, $gamma,$us_n,$Eta_pf) ;
   }
 
-  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Beta_f)[Loci::Summation],constraint(supersonicInflow_BC) {
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Eta_pf)[Loci::Summation],constraint(supersonicInflow_BC) {
     const real Tr = $temperature_f ;
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
@@ -300,7 +300,7 @@ namespace flowPsi {
     Mat<real_fj> fjp(&tmp1[0],5) ;
     fjp = mk_Scalar(0.) ;
     inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$Beta_f) ;
+		       $Rtilde, $gamma,$us_n,$Eta_pf) ;
 
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
@@ -311,7 +311,7 @@ namespace flowPsi {
   $rule pointwise(gagePressure_f,temperature_f,u_f<-
 		  ci->(gagePressure,temperature,u),
 		  gagePressureRef,temperatureRef,uRef,
-		  area,us_n,Beta_f,
+		  area,us_n,Eta_pf,
 		  Pambient,gamma,Rtilde),
     constraint(farfield_BC) {
     const real uit = dot($ci->$u,$area.n) - $us_n ;
@@ -327,7 +327,7 @@ namespace flowPsi {
 		   $ci->$gagePressure,$ci->$temperature,$ci->$u,
 		   $gagePressureRef,$temperatureRef,$uRef,
 		   $area.n,$us_n,$Pambient,$gamma,$Rtilde,
-		   $Beta_f) ;
+		   $Eta_pf) ;
       }
     } else {
       if(uit < a0) { // Supersonic inflow
@@ -338,12 +338,12 @@ namespace flowPsi {
 	cv_inflow($gagePressure_f,$temperature_f,$u_f,
 		  $ci->$gagePressure,$ci->$temperature,$ci->$u,
 		  $gagePressureRef,$temperatureRef,$uRef,
-		  $area.n,$us_n,$Pambient,$gamma,$Rtilde,$Beta_f) ;
+		  $area.n,$us_n,$Pambient,$gamma,$Rtilde,$Eta_pf) ;
       }
     }
   }
 
-  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,ci->Beta),constraint(farfield_BC) {
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,ci->Eta_p),constraint(farfield_BC) {
     const real Tl = $leftsP(temperature,Zero) ;
     const real Pgl = $leftsP(gagePressure,minPg) ;
     const vect3d ul = $leftv3d(u) ;
@@ -351,10 +351,10 @@ namespace flowPsi {
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
     inviscidRiemannFlux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-			$Rtilde, $gamma,$us_n,$ci->$Beta) ;
+			$Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
   }
 
-  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,ci->Beta)[Loci::Summation],constraint(farfield_BC) {
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,ci->Eta_p)[Loci::Summation],constraint(farfield_BC) {
     const real Tr = $temperature_f ;
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
@@ -366,7 +366,7 @@ namespace flowPsi {
     Mat<real_fj> fjp(&tmp1[0],5) ;
     fjp = mk_Scalar(0.) ;
     inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$ci->$Beta) ;
+		       $Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
 
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
@@ -377,7 +377,7 @@ namespace flowPsi {
   $rule pointwise(gagePressure_f,temperature_f,u_f<-
 		  ci->(gagePressure,temperature,u),
 		  gagePressureRef,temperatureRef,uRef,
-		  area,us_n,Beta_f,
+		  area,us_n,Eta_pf,
 		  Pambient,gamma,Rtilde),
     constraint(inflow_BC) {
     const real uit = dot($ci->$u,$area.n) - $us_n ;
@@ -396,12 +396,12 @@ namespace flowPsi {
 		  $ci->$gagePressure,$ci->$temperature,$ci->$u,
 		  $gagePressureRef,$temperatureRef,$uRef,
 		  $area.n,$us_n,$Pambient,$gamma,$Rtilde,
-		  $Beta_f) ;
+		  $Eta_pf) ;
       }
     }
   }
 
-  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,ci->Beta),constraint(inflow_BC) {
+  $rule pointwise(iflux<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u),gagePressure_f,temperature_f,u_f,area,us_n,Pambient,Rtilde,gamma,ci->Eta_p),constraint(inflow_BC) {
     const real Tl = $leftsP(temperature,Zero) ;
     const real Pgl = $leftsP(gagePressure,minPg) ;
     const vect3d ul = $leftv3d(u) ;
@@ -409,10 +409,10 @@ namespace flowPsi {
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
     inviscidRiemannFlux($iflux,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-			$Rtilde, $gamma,$us_n,$ci->$Beta) ;
+			$Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
   }
 
-  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,ci->Beta)[Loci::Summation],constraint(inflow_BC) {
+  $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,ci->Eta_p)[Loci::Summation],constraint(inflow_BC) {
     const real Tr = $temperature_f ;
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
@@ -424,7 +424,7 @@ namespace flowPsi {
     Mat<real_fj> fjp(&tmp1[0],5) ;
     fjp = mk_Scalar(0.) ;
     inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-			$Rtilde, $gamma,$us_n,$ci->$Beta) ;
+			$Rtilde, $gamma,$us_n,$ci->$Eta_p) ;
 
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)

@@ -31,42 +31,42 @@ namespace flowPsi {
 		 real pgr, real Tr, vect3d Ur,
 		 vect3d an, real area,
 		 real pambient, real Rt,real gamma, real Us_n,
-		 real Beta) ;
+		 real Eta) ;
   void roeCT_jacobian(Loci::Mat<real_fj> &Fj,
 		      real pgl, real Tl, vect3d Ul,
 		      real pgr, real Tr, vect3d Ur,
 		      vect3d an, real area,
 		      real pambient, real Rt,real gamma, real Us_n,
-		      real Beta, int dir) ;
+		      real Eta, int dir) ;
 
   void hllc_flux(Loci::Array<real,5> &iflux,
 		 real pgl, real Tl, vect3d Ul,
 		 real pgr, real Tr, vect3d Ur,
 		 vect3d an, real area,
 		 real pambient, real Rt,real gamma, real Us_n,
-		 real Beta) ;
+		 real Eta) ;
   void hllc_fjm(Mat<real_fj> &fj,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
 		vect3d an, real area,
 		real pambient, real Rt,real gamma, real Us_n,
-		real Beta) ;
+		real Eta) ;
 
   void hllc_fjp(Mat<real_fj> &fj,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
 		vect3d an, real area,
 		real pambient, real Rt,real gamma, real Us_n,
-		real Beta) ;
+		real Eta) ;
 
   inline void inviscidRiemannFlux(Loci::Array<real,5> &iflux,
 				  real pgl, real Tl, vect3d Ul,
 				  real pgr, real Tr, vect3d Ur,
 				  vect3d an, real area,
 				  real pambient, real Rt,real gamma, real Us_n,
-				  real Beta) {
-    hllc_flux(iflux,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta) ;
-    //roeCT_flux(iflux,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta) ;
+				  real Eta) {
+    hllc_flux(iflux,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta) ;
+    //roeCT_flux(iflux,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta) ;
   }
 
   inline void inviscidRiemannFjp(Mat<real_fj> fj,
@@ -74,17 +74,17 @@ namespace flowPsi {
 				 real pgr, real Tr, vect3d Ur,
 				 vect3d an, real area,
 				 real pambient, real Rt,real gamma, real Us_n,
-				 real Beta) {
-    roeCT_jacobian(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta,1) ;
-    //hllc_fjp(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta) ;
+				 real Eta) {
+    roeCT_jacobian(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta,1) ;
+    //hllc_fjp(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta) ;
   }
   inline void inviscidRiemannFjm(Mat<real_fj> fj,
 				 real pgl, real Tl, vect3d Ul,
 				 real pgr, real Tr, vect3d Ur,
 				 vect3d an, real area,
 				 real pambient, real Rt,real gamma, real Us_n,
-				 real Beta) {
-    roeCT_jacobian(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta,-1) ;
-    //hllc_fjm(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Beta) ;
+				 real Eta) {
+    roeCT_jacobian(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta,-1) ;
+    //hllc_fjm(fj,pgl,Tl,Ul,pgr,Tr,Ur,an,area,pambient,Rt,gamma,Us_n,Eta) ;
   }
 }
