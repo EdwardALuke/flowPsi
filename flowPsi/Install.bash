@@ -31,8 +31,8 @@ cp src/flowpsi $INSTALL_PATH/bin
 cp lib/* $INSTALL_PATH/lib
 
 mkdir -p $INSTALL_PATH/docs
-if [ -e guide/guide.pdf ] ; then
-  cp guide/guide.pdf $INSTALL_PATH/docs/flowPsiGuide.pdf
+if [ -e guide/flowPsiGuide.pdf ] ; then
+  cp guide/flowPsiGuide.pdf $INSTALL_PATH/docs/flowPsiGuide.pdf
 fi
 
 

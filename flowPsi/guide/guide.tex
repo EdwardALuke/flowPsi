@@ -290,6 +290,15 @@ problems.  Setting this to 1.0 will change the temporal biasing to
 first order.  The default value of is 0.0 which will only turn on
 pressure biasing for cells that exceed a CFL of 1.0.
 
+\item {\tt Minf}
+
+  This variable is used to activate preconditioning for low speed
+  flows.  Set this variable to the free stream Mach number for the
+  simulation.  This variable is used to set bound the minimum
+  preconditioning parameter in stagnation flows to avoid instability.
+  By default this variable is set to 1 which disables low speed
+  preconditioning.
+  
 \item {\tt print\_freq}
 
   This variable describes the frequency at which CFL numbers and integrated

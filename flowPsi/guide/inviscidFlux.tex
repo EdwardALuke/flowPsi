@@ -6,6 +6,95 @@ available when may be enabled by setting the {\tt inviscidFlux} to
 either 'kec' or 'ssf'.  The 'ssf' scheme will revert to a $4^{th}$
 order accurate skew symmetric scheme on Cartesian meshes.
 
+\subsection{Preconditioned HLLC flux option}
+
+The robust Chorin-Turkel preconditioning is implemented to facilitate
+efficient and accurate solution for low speed flows.  This is
+particularly useful for RANS computations.  Preconditioning provides
+two benefits for approximate Riemann solver codes.  First,
+preconditioning rescales the acoustic wave speeds to be comparable in
+magnitude to the convective waves.  This allows for improved iterative
+convergence to the steady state solution.  Second, preconditioning
+reduces the dissipation of standard flux schemes such as HLLC.  For
+flows below about Mach 0.2, the dissipation of the scheme can make
+accurate solution difficult or impossible.
+
+\subsubsection{Background on preconditioning}
+
+The basic idea behind preconditioning is the provision of modified
+time derivative which rescales the the acoustic wave speeds without
+changing the convective wave speeds.  The time derivative for preconditioning is modified in the following way:
+
+\begin{equation}
+  M P^{-1} \frac{\partial q}{\partial t} = div(F(q)) + div(F_v(q))
+\end{equation}
+where $q=[T, \mathbf{u}, p_g]^T$ is the primitive vector, $M$ is the conservative transformation matrix and $P^{-1}$ is the inverse of the preconditioning matrix.  The conservative transformation matrix is given by
+\begin{equation}
+\frac{\partial Q}{\partial q} = M=\left[
+{\begin{array}{cccccc}
+-\frac{\rho}{T}   & 0    & 0 & 0 & \frac{\rho}{\tilde{R} T}  \\
+-\frac{\rho u}{T} & \rho & 0 & 0 & \frac{\rho u}{\tilde{R} T} \\
+-\frac{\rho v}{T} & 0 & \rho & 0 & \frac{\rho v}{\tilde{R} T} \\
+-\frac{\rho w}{T} & 0& 0 & \rho  & \frac{\rho w}{\tilde{R} T} \\
+f_T & \rho u & \rho v & \rho w & f_p\\
+\end{array}}
+\right],
+\end{equation}
+where $f_T$ and $f_p$ are the derivatives of $\rho e_0$ with respect to pressure and temperature which is given as
+\begin{equation}
+f_T= -\frac{\rho h_0}{T} + \frac{\gamma}{\gamma-1} \rho \tilde{R},
+\end{equation}
+and
+\begin{equation}
+f_p= \frac{h_0}{\tilde{R} T} - 1 
+\end{equation}
+
+The preconditioning matrix is given by
+\begin{equation}
+{\bf P} = \left[
+{\begin{array}{ccccc}
+1 & 0 & 0 & 0 & -\frac{(1-\eta_p)(\gamma-1) T}{a^2 \rho}  \\
+0 & 1 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 0 & \eta_p  \\
+\end{array}}
+\right]
+\end{equation}
+The inverse of ${\bf P}$ can be found as 
+\begin{equation}
+{\bf P}^{-1} = \left[
+{\begin{array}{ccccc}
+1 & 0 & 0 & 0 & -\frac{(1-1/\eta_p)(\gamma-1) T}{a^2 \rho}  \\
+0 & 1 & 0 & 0 & 0 \\
+0 & 0 & 1 & 0 & 0 \\
+0 & 0 & 0 & 1 & 0 \\
+0 & 0 & 0 & 0 & 1/\eta_p  \\
+\end{array}}
+\right],
+\end{equation}
+where $\eta_p$ is the preconditioning parameter which is given by
+\begin{equation}
+  \eta_p = M_r^2/(1-M_r^2)
+\end{equation}
+where $M_r$ is a local Mach number which is bounded such that $M_r^2 \le \frac{1}{2}$.  In addition, to prevent instability in the case caused by Mach number approaching zero, a lower bound on $M_r$ is provided based on an estimated free stream mach number provided by the user.
+
+
+The eigenvalues for this modified system of equations are given by
+\begin{equation}
+\Lambda=[u_n,u_n,u_n, \frac{u_n(1+\eta_p)-\sigma}{2},\frac{u_n(1+\eta_p)+\sigma}{2}].
+\end{equation}
+where $\sigma=\sqrt{u_n^2(1-\eta_p)^2+4\eta_pa^2}$.
+
+
+The change in wave speeds by the preconditioning matrix changes the
+eigenvectors and eigenvalues associated with the approximate Riemann
+solver.  In the case of the HLLC flux, it is sufficient to modify the
+eigenvalues used in the construction of the HLLC flux. For a Roe based
+scheme the new eigenvectors are used to construct a preconditioned Roe
+matrix.  We use the modified HLLC scheme on the RHS of the equations,
+but use the preconditioned Roe matrix as an approximate linearization.
+
 \subsubsection{Skew Symmetric low dissipation flux schemes}
 
 
