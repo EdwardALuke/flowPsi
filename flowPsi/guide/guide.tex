@@ -566,6 +566,106 @@ maximumRunTime: 23.5 hour
 \begin{verbatim}
 coriolis: <axis=[1,0,0], center=[0,0,0], speed=1000 rpm>
 \end{verbatim}
+\item {\tt componentMotion }
+
+This variable is used to describe the independent motion of each component in the volume grid.  Note: to use this, one needs to have created a grid that contains volume tags using the {\tt vogmerge} utility.  The variable contains a list of volume tags assigned to actions, where the actions may be {\tt stationary}, {\tt rotation}, or {\tt prescribed}.  For example, to describe a plane with a rotating propeller where the plane is undergoing prescribed motion in a stationary background mesh, one might use the following prescription:
+\begin{verbatim}
+componentMotion: < prop = rotation(axis=[1,0,0],center=[0,0,0],speed=400rpm),
+                   fuselage = prescribed,
+                   background = stationary >
+\end{verbatim}
+The prescribed file will be read from the file {\tt
+  motion\_fuselage.dat}, or in general from a file that is of the form
+{\tt motion\_}{\it volumeTag}{\tt .dat}.  This file first contains the
+number of interpolant inputs as the first line, then following for
+each input there is a list of eight numbers in the following order:
+{\it time} (in seconds), {\it position} (in meters; 3 components, x,
+y, z), {\it quaternion} (four components of a normalized quaternion
+describing rotations about the preceding position).  A cubic spline
+is used to interpolate between the given values.  If you want to
+create a discontinuity in the spline, then repeat the condition
+for the same time twice.
+
+\item {\tt componentHierarchy }
+
+  This variable is used to establish parent/child relationships
+  between components.  For the previous example, this would be used to
+  establish that the {\tt prop} rotation is described relative to the
+  prescribed motion of the fuselage.  Therefore, we need to establish
+  that the fuselage is the parent component to the prop.  This is
+  accomplished through the following componentHierarchy description:
+\begin{verbatim}
+componentHierarchy: < prop = parent(fuselage) >
+\end{verbatim}
+
+\item {\tt componentGeometry }
+
+  This variable is used to specify the geometry of the hole cut by the
+  enclosing mesh of a component.  This is specifically used when
+  performing relative motion simulations where one component cuts out
+  cells from another components mesh.  At least one component will
+  provide the master mesh and will have no component geometry
+  specified.  For example, the format for specifying the {\tt componentGeometry }
+  for three bodies in a fixed background mesh is:
+\begin{verbatim}
+componentGeometry: < body1 = cylinder(p1=[-1,0,0],p2=[1,0,0],radius=3),
+                     body2 = sphere(center=[2,2,0],radius=1.5),
+                     body3 = revolution(p1=[5,1,1],p2=[7,1,1],
+                             radius=[2.5,4,3],offsets=[0,0.62,1.0]) >
+\end{verbatim}
+  
+  Component geometries can be spheres, cylinders, bodies of
+  revolution, or a list of planes.  The description of these
+  geometries is as follows:
+\begin{itemize}
+\item {\tt cylinder}
+   Arguments {\tt p1} and {\tt p2} define the two end points of the
+   cylinder axis, while {\tt radius} specifies the cylinder radius.
+   For example, a cylinder with an $x$ axis orientation from $x=1$ to
+   $x=2$ with a radius of $.5$ is given by:
+\begin{verbatim}
+cylinder(p1=[1,0,0],p2=[2,0,0],radius=.5)
+\end{verbatim}
+\item {\tt sphere}
+   Arguments {\tt center} and {\tt radius} define the sphere's center
+   and radius, respectively.  For example, a sphere centered at the
+   origin with a radius of 1.5 is given by:
+\begin{verbatim}
+   sphere(center=[0,0,0],radius=1.5) 
+\end{verbatim}
+\item {\tt revolution}
+  This defines a body of revolution about an axis defined by points
+  {\tt p1} and {\tt p2}.  The argument {\tt radius} specifies a list of radii at
+  different points along the axis between {\tt p1} and {\tt p2}, while
+  {\tt offsets} provides a list of weighted values for the relative
+  distance between {\tt p1} and {\tt p2} that the associated radius
+  corresponds to.
+\begin{verbatim}
+  revolution(p1=[50,10,10],p2=[70,10,10],
+             radius=[2.5,4,3],offsets=[0,0.62,1.0])
+\end{verbatim}
+\item{\tt planeList} This defines a geometry through list of planes.
+  The geometry is defined by the region that is on the left side of
+  all of the planes in the list.  Each plane is defined by a point on
+  the plane and a normal vector.  The normal vector should point out
+  of the described volume. This method can be used to describe any
+  convex polyhedral region.  An example of a cube defined using 
+  the {\tt planeList} geometry is given below:
+\begin{verbatim}
+  // Make a box geometry by defining 6 planes
+  // this geometry is a cube with edge lengths 2.8m centered on the origin
+  planeList(list  = [
+  // x coordinate planes
+  // p is a point on the plane and n is an outward pointing normal vector
+  plane(p=[1.4,0,0],n=[1,0,0]),plane(p=[-1.4,0,0],n=[-1,0,0]),
+  // y-coordinate planes
+  plane(p=[0,1.4,0],n=[0,1,0]),plane(p=[0,-1.4,0],n=[0,-1,0]),
+  // z coordinate planes
+  plane(p=[0,0,1.4],n=[0,0,1]),plane(p=[0,0,-1.4],n=[0,0,-1])
+  ])
+\end{verbatim}
+
+
 \end{enumerate}
 
 \subsection{Boundary Condition Specifications}
