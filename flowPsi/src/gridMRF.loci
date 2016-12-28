@@ -1,0 +1,342 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include <Tools/tools.h>
+#include "gridComponent.h"
+#include <iostream>
+#include <fstream>
+#include <string>
+using std::string ;
+using std::endl ;
+using std::cout ;
+using std::cerr ;
+using std::ifstream ;
+using std::ios ;
+#include <vector>
+using std::vector ;
+#include <map>
+using std::map ;
+#include <set>
+using std::set ;
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
+$include "FVM.lh"
+$include "flowPsi.lh"
+
+namespace flowPsi {
+  $type componentMRF param<options_list> ;
+
+$rule optional(componentMRF),
+    comments("Specify rotating frames of reference for individual mesh components") {
+  }
+
+  $type componentMRFTypes blackbox<std::set<std::string> > ;
+
+  $rule unit(componentMRFTypes<-componentMRF),prelude {
+    *$componentMRFTypes = std::set<std::string>() ;
+  } ;
+
+  $rule apply(componentMRFTypes)[Loci::NullOp],
+    constraint(UNIVERSE),prelude {
+    $componentMRFTypes->insert(string("rotation")) ;
+    $componentMRFTypes->insert(string("stationary")) ;
+  } ;
+
+
+  $type componentMRFRotation_X Constraint ;
+  $type componentMRFStationary_X Constraint ;
+  $type volumeTag(X) param<string> ;
+
+  $type componentMRFMotionTypes blackbox<std::set<std::string> > ;
+
+  $rule unit(componentMRFMotionTypes<-componentMRF),prelude {
+    *$componentMRFMotionTypes = std::set<std::string>() ;
+  } ;
+
+  $rule apply(componentMRFMotionTypes)[Loci::NullOp],
+    constraint(UNIVERSE),prelude {
+    $componentMRFMotionTypes->insert(string("rotation")) ;
+    $componentMRFMotionTypes->insert(string("stationary")) ;
+  } ;
+
+$rule constraint(componentMRFRotation_X,componentMRFStationary_X<-volumeTag(X),componentMRF,componentMRFMotionTypes),
+    parametric(volumeTag(X)) {
+    string tag = $volumeTag(X) ;
+    $componentMRFRotation_X = EMPTY ;
+    $componentMRFStationary_X = EMPTY ;
+    if($componentMRF.optionExists(tag)) {
+      string name ;
+      Loci::options_list::arg_list value_list ;
+      $componentMRF.getOption(tag,name,value_list) ;
+      if($componentMRFMotionTypes.find(name) == $componentMRFMotionTypes.end()) {
+        cerr << "unknown componentMRF motion directive '" << name << "' for componentMRF '"
+             << tag << "'" << endl ;
+        Loci::Abort() ;
+      }
+        
+      if(name == "rotation") {
+        $componentMRFRotation_X = ~EMPTY ;
+      } else if(name == "stationary") {
+        $componentMRFStationary_X = ~EMPTY ;
+      }
+    } else {
+      cerr << "No componentMRFMotion information for component '" << tag << "'" << endl ;
+      Loci::Abort() ;
+    }
+  }
+
+  $type componentMRFRotationAxis_X param<vect3d> ;
+  $type componentMRFRotationCenter_X param<vect3d> ;
+  $type componentMRFRotationSpeed_X param<real> ;
+  $type componentName_X blackbox<string> ;
+
+  $rule singleton(componentMRFRotationAxis_X,componentMRFRotationCenter_X,
+                  componentMRFRotationSpeed_X<-componentMRF,componentName_X),
+    constraint(componentMRFRotation_X), parametric(volumeTag(X)) {
+    $componentMRFRotationAxis_X = vect3d(1,0,0) ;
+    $componentMRFRotationCenter_X= vect3d(0,0,0) ;
+    $componentMRFRotationSpeed_X = 0 ;
+    string tag = $componentName_X ;
+    string name ;
+    Loci::options_list::arg_list value_list ;
+    $componentMRF.getOption(tag,name,value_list) ;
+    options_list ol ; 
+    ol.Input(value_list) ; // Convert to an options list
+
+
+    vect3d vec(1,0,0) ;
+    if(ol.optionExists("axis")) { 
+      get_vect3dOption(ol,"axis","",vec) ;
+      vec = vec/(norm(vec)+1e-30) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to x-axis in componentMRF rotation!" << endl ;
+      }
+    }
+    $componentMRFRotationAxis_X = vec ;
+
+    if(ol.optionExists("center")) { 
+      get_vect3dOption(ol,"center","m",$componentMRFRotationCenter_X) ;
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "WARNING: Defaulting to origin for center of componentMRF rotation!" << endl ;
+      }
+    }
+
+    if(ol.optionExists("speed")) {
+      ol.getOptionUnits("speed","rpm",$componentMRFRotationSpeed_X) ;
+      $componentMRFRotationSpeed_X *= 2.*M_PI/60.;  //changes rpm to rad/s
+    } else {
+      if(Loci::MPI_rank) {
+        cerr << "FATAL:  No speed specified in componentMRF rotation specification!" << endl ;
+        Loci::Abort() ;
+      }
+    }
+  }
+
+  // First component is the 1/2 degree revolution, second is the delta
+  // t required to get the half degree revolution
+  $type componentMRFData_X blackbox<std::pair<componentXform,real> > ;
+
+  $rule unit(componentMRFData_X<-componentMRF),parametric(volumeTag(X)) {
+  }
+  $rule apply(componentMRFData_X<-componentMRFRotationSpeed_X,
+	      componentMRFRotationAxis_X,componentMRFRotationCenter_X)[Loci::NullOp],parametric(volumeTag(X)), prelude {
+    const real angle = M_PI/360 ; // half a degree reference angle used to
+                                  // numerically estimate velocity
+    const real dt = angle/(*$componentMRFRotationSpeed_X) ;
+    Quaternion rotation(*$componentMRFRotationAxis_X,angle) ;
+    const vect3d cg = *$componentMRFRotationCenter_X ;
+    componentXform xform ;
+    xform.cg = cg ;
+    xform.new_cg = cg ;
+    xform.q = rotation ;
+    (*$componentMRFData_X).first = xform ;
+    (*$componentMRFData_X).second = dt ;
+  } ;
+
+  //*************************************************************************
+  //*
+  //* Here we compute the grid velocity term.  We could compute the
+  //* analytic grid velocity at the cell center, however, this would not
+  //* satisfy the geometric volume conservation property of rigid body
+  //* rotation.  So instead we compute the position update for a 1 degree
+  //* rotation and then convert this to a velocity by dividing by the time
+  //* it takes to achieve a 1 degree rotation at the given rotational speed.
+  //* This gives us an approximation to the frame velocity that also satisfies
+  //* the volume conservation identity.
+  //*
+  //*************************************************************************
+  $rule pointwise(MRF::us_n<-face2node->pos,componentMRFData_X,area),
+    constraint(area,componentMRFData_X,face2node->componentNodes_X),parametric(volumeTag(X)) {
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    componentXform xform = $componentMRFData_X.first ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos ;
+        const vect3d p2 = $face2node[nd2]->$pos ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = xform.applyXform($face2node[nd1]->$pos) ;
+        const vect3d p2 = xform.applyXform($face2node[nd2]->$pos) ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+
+    // Integrate grid velocities over each triangle
+    real us_n_int = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      // Edge points at {n-1}
+      const vect3d p1m = $face2node[nd1]->$pos ;
+      const vect3d p2m = $face2node[nd2]->$pos ;
+      // Edge points at {n}
+      const vect3d p1p = xform.applyXform($face2node[nd1]->$pos) ;
+      const vect3d p2p = xform.applyXform($face2node[nd2]->$pos) ;
+      // 2*area at {n-1} 
+      const vect3d am = cross(p1m-wc_prev,p2m-wc_prev) ;
+      // 2*area at {n}
+      const vect3d ap = cross(p1p-wc_next,p2p-wc_next) ;
+      // triangle centroid ant {n-1} (factor of 1/3 added at end of loop)
+      const vect3d xm = (wc_prev+p1m+p2m) ;
+      const vect3d xp = (wc_next+p1p+p2p) ;
+      // area at {n-1/2} (factor of .5 added at end of loop)
+      const vect3d ah = (am+ap) ;
+      // Numerical grid velocity dot(us,area) for this triangle
+      // (delta t divided at end of loop)
+      us_n_int += dot(ah,xp-xm);
+    }
+    // Get grid velocity at face by dividing by face area
+    real dt = $componentMRFData_X.second ;
+    $us_n = .25*us_n_int/(3.*$area.sada*dt) ;
+  }
+
+  $rule pointwise(MRF::us<-face2node->pos,us_n,area,componentMRFData_X),
+    constraint(area,componentMRFData_X,face2node->componentNodes_X),parametric(volumeTag(X)) {
+    componentXform xform = $componentMRFData_X.first ;
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos ;
+        const vect3d p2 = $face2node[nd2]->$pos ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = xform.applyXform($face2node[nd1]->$pos) ;
+        const vect3d p2 = xform.applyXform($face2node[nd2]->$pos) ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+
+    // Adjust velocity to match current normal
+    // grid velocity at half step
+    real dt = $componentMRFData_X.second ;
+    vect3d ug = (wc_next-wc_prev)/dt ;
+    // present normal
+    vect3d n = $area.n ;
+    // tangential component of half step grid velocity
+    vect3d utt = ug - dot(ug,n)*n ;
+    vect3d utn = utt/(norm(utt)+1e-30) ;
+    // Tangential component if normal component equals half step normal velocity
+    double ut = sqrt(max(dot(ug,ug)-$us_n*$us_n,0.0)) ;
+
+    // reassemble vector so that half step normal velocity is aligned with
+    // current normal, remainder of grid velocity goes in current tangetial
+    // direction.
+    $us = $us_n*n + ut*utn ;
+  }
+
+  // MRF source term
+  $rule apply(src<-componentMRFRotationAxis_X,componentMRFRotationCenter_X,
+	      componentMRFRotationSpeed_X,componentName_X,
+	      rho,u,vol,cellcenter)[Loci::Summation],
+    constraint(componentMRFRotation_X,volumeTag(X),geom_cells),
+    parametric(volumeTag(X)) {
+    const vect3d omega = ($componentMRFRotationSpeed_X)*($componentMRFRotationAxis_X) ;
+    const vect3d srcterm = (-$vol*$rho)*cross(omega,$u) ;
+    const int mi = 1 ;
+    $src[mi+0] += srcterm.x ;
+    $src[mi+1] += srcterm.y ;
+    $src[mi+2] += srcterm.z ;
+  }
+
+  // Jacobian of MRF source term
+  $rule apply(srcJ<-componentMRFRotationAxis_X,componentMRFRotationCenter_X,
+	      componentMRFRotationSpeed_X,componentName_X,
+	      rho,temperature,gagePressure,Pambient,u,vol,cellcenter)[Loci::Summation],
+    constraint(componentMRFRotation_X,volumeTag(X),geom_cells),
+    parametric(volumeTag(X)) {
+    const vect3d omega = ($componentMRFRotationSpeed_X)*($componentMRFRotationAxis_X) ;
+
+    // derivatives of density part
+    const vect3d srcterm1 = (-$vol)*cross(omega,$u) ;
+    const int mi = 1 ;
+    const int Ti = 0 ;
+    const int Pi = 4 ;
+    const real drdt = -$rho/$temperature ;
+    const real drdp = $rho/($gagePressure+$Pambient) ;
+    $srcJ[mi+0][Ti] += drdt*srcterm1.x ;
+    $srcJ[mi+1][Ti] += drdt*srcterm1.y ;
+    $srcJ[mi+2][Ti] += drdt*srcterm1.z ;
+    $srcJ[mi+0][Pi] += drdp*srcterm1.x ;
+    $srcJ[mi+1][Pi] += drdp*srcterm1.y ;
+    $srcJ[mi+2][Pi] += drdp*srcterm1.z ;
+
+    // derivative of velocity part
+    const real rhovol = -$rho*$vol ;
+    $srcJ[mi+0][mi+1] += -rhovol*omega.z ;
+    $srcJ[mi+0][mi+2] += rhovol*omega.y ;
+    $srcJ[mi+1][mi+0] += rhovol*omega.z ;
+    $srcJ[mi+1][mi+2] += -rhovol*omega.x ;
+    $srcJ[mi+2][mi+0] += -rhovol*omega.y ;
+    $srcJ[mi+2][mi+1] += rhovol*omega.x ;
+  }
+
+
+}
