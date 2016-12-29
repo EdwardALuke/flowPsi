@@ -27,37 +27,47 @@ namespace flowPsi {
   using std::endl ;
 
   // Initialize newton to past timestep value
-  $rule pointwise(temperature{n,it=0}<-temperature{n}),
+  $type temperature_i store<real> ;
+  $type gagePressure_i store<real> ;
+  $type u_i store<vect3d> ;
+  
+  $rule pointwise(temperature_i{n,it=0}<-temperature{n}),
     constraint(geom_cells) {
-    $temperature{n,it=0}= $temperature{n} ;
+    $temperature_i{n,it=0}= $temperature{n} ;
   }
-  $rule pointwise(gagePressure{n,it=0}<-gagePressure{n}),
+  $rule pointwise(gagePressure_i{n,it=0}<-gagePressure{n}),
     constraint(geom_cells) {
-    $gagePressure{n,it=0} = $gagePressure{n} ;
+    $gagePressure_i{n,it=0} = $gagePressure{n} ;
   }
-  $rule pointwise(u{n,it=0}<-u{n}),
+  $rule pointwise(u_i{n,it=0}<-u{n}),
     constraint(geom_cells) {
-    $u{n,it=0} = $u{n} ;
+    $u_i{n,it=0} = $u{n} ;
   }
 
+  // These rules will allow replacement by iblanked cells
+  $rule pointwise(temperature{n,it}<-temperature_i{n,it}),
+  	inplace(temperature{n,it}|temperature_i{n,it}),prelude {} ;
+  $rule pointwise(gagePressure{n,it}<-gagePressure_i{n,it}),
+  	inplace(gagePressure{n,it}|gagePressure_i{n,it}),prelude {} ;
+  $rule pointwise(u{n,it}<-u_i{n,it}),inplace(u{n,it}|u_i{n,it}),prelude {} ;
+
   $type dfluid storeVec<real> ;
-  $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
+  $rule pointwise(temperature_i{n,it+1},gagePressure_i{n,it+1},u_i{n,it+1}<- 
 		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
 		  Pambient),
-		  inplace(temperature{n,it+1}|temperature{n,it}),
-		  inplace(gagePressure{n,it+1}|gagePressure{n,it}),
-    inplace(u{n,it+1}|u{n,it}),constraint(geom_cells,timeStepSteadyState) {
+    inplace(temperature_i{n,it+1}|temperature{n,it}),
+    inplace(gagePressure_i{n,it+1}|gagePressure{n,it}),
+    inplace(u_i{n,it+1}|u{n,it}),constraint(geom_cells,timeStepSteadyState) {
     const real dT = $dfluid{n,it}[0] ;
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
     const real dp = $dfluid{n,it}[4] ;
     real alpha = 1.0 ;
     alpha = min(alpha,0.9*$temperature{n,it}/(fabs(dT)+1e-30)) ;
     alpha = min(alpha,0.9*($gagePressure{n,it}+$Pambient)/(fabs(dp)+1e-30)) ;
-    $temperature{n,it+1} = $temperature{n,it} + alpha*dT;
-    $gagePressure{n,it+1} = $gagePressure{n,it} + alpha*dp ;
-    $u{n,it+1} = $u{n,it} + alpha*du ;
+    $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;
+    $gagePressure_i{n,it+1} = $gagePressure{n,it} + alpha*dp ;
+    $u_i{n,it+1} = $u{n,it} + alpha*du ;
   }
-
 
   $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
 		  temperature{n,it},gagePressure{n,it},u{n,it}),
@@ -72,14 +82,14 @@ namespace flowPsi {
   //      $u{n+1} = $u{n,it} ;
   //    }
   
-  $rule pointwise(temperature{n,it+1},gagePressure{n,it+1},u{n,it+1}<- 
+  $rule pointwise(temperature_i{n,it+1},gagePressure_i{n,it+1},u_i{n,it+1}<- 
 		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
                   localPBias{n,it},
 		  temperature{n},gagePressure{n},
 		  Pambient),
-    inplace(temperature{n,it+1}|temperature{n,it}),
-    inplace(gagePressure{n,it+1}|gagePressure{n,it}),
-    inplace(u{n,it+1}|u{n,it}),
+    inplace(temperature_i{n,it+1}|temperature{n,it}),
+    inplace(gagePressure_i{n,it+1}|gagePressure{n,it}),
+    inplace(u_i{n,it+1}|u{n,it}),
     constraint(geom_cells,timeStepAccurate) {
     const real dT = $dfluid{n,it}[0] ;
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
@@ -101,9 +111,9 @@ namespace flowPsi {
     double dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
     alpha = min(alpha,dplim/max(fabs(dp),1e-30)) ;
 
-    $temperature{n,it+1} = $temperature{n,it} + alpha*dT;
-    $gagePressure{n,it+1} = $gagePressure{n,it} + alpha*dp ;
-    $u{n,it+1} = $u{n,it} + alpha*du ;
+    $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;
+    $gagePressure_i{n,it+1} = $gagePressure{n,it} + alpha*dp ;
+    $u_i{n,it+1} = $u{n,it} + alpha*du ;
   }
 
 

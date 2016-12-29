@@ -1690,7 +1690,7 @@ if(req_queue.size() > 0 || self_send) {
   $type OversetStencilLayerSize param<int> ;
 
   $rule default(OversetStencilLayerSize) {
-    $OversetStencilLayerSize = 2 ;
+    $OversetStencilLayerSize = 4 ;
   }
 
   $rule singleton(blanking_layer_finished<-$iblanking,OversetStencilLayerSize) {

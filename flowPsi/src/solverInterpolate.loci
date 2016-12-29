@@ -2613,7 +2613,9 @@ namespace flowPsi {
 
 
   class interpolateIblankCells : public pointwise_rule {
-    storeVec<real> qpn ;
+    store<real> temperature_i ;
+    store<real> gagePressure_i ;
+    store<vect3d> u_i ;
     const_store<byte_t> iblank ;
     const_multiMap upper,lower ;
     const_Map cl,cr ;
@@ -2624,7 +2626,9 @@ namespace flowPsi {
     interpolateIblankCells() {
       name_store("interpolateCellStencil{n,it}",interpolateCellStencil) ;
       input("interpolateCellStencil{n,it}") ;
-      name_store("qpn{n,it}",qpn) ;
+      name_store("temperature_i{n,it}",temperature_i) ;
+      name_store("gagePressure_i{n,it}",gagePressure_i) ;
+      name_store("u_i{n,it}",u_i) ;
       name_store("iblank{n,it}",iblank) ;
       name_store("upper{n,it}",upper) ;
       name_store("lower{n,it}",lower) ;
@@ -2632,17 +2636,22 @@ namespace flowPsi {
       name_store("cr{n,it}",cr) ;
       name_store("area{n,it}",area) ;
       input("(upper{n,it},lower{n,it})->area{n,it}") ;
-      input("upper{n,it}->cr{n,it}->(iblank{n,it},qpn{n,it})") ;
-      input("lower{n,it}->cl{n,it}->(iblank{n,it},qpn{n,it})") ;
+      input("upper{n,it}->cr{n,it}->(iblank{n,it},temperature_i{n,it})") ;
+      input("upper{n,it}->cr{n,it}->(gagePressure_i{n,it},u_i{n,it})") ;
+      input("lower{n,it}->cl{n,it}->(iblank{n,it},temperature_i{n,it})") ;
+      input("lower{n,it}->cl{n,it}->(gagePressure_i{n,it},u_i{n,it})") ;
       input("iblank{n,it}") ;
-      input("qpn{n,it}") ;
-      output("iblank::qp{n,it}=qpn{n,it}") ;
-      constraint("iblank{n,it},qpn{n,it},componentGeometry{n,it}") ;
+      input("temperature_i{n,it}") ;
+      input("gagePressure_i{n,it}") ;
+      input("u_i{n,it}") ;
+      output("iblank::temperature{n,it}=temperature_i{n,it}") ;
+      output("iblank::gagePressure{n,it}=gagePressure_i{n,it}") ;
+      output("iblank::u{n,it}=u_i{n,it}") ;
+      constraint("iblank{n,it},temperature_i{n,it},gagePressure_i{n,it},u_i{n,it},componentGeometry{n,it}") ;
       disable_threading() ;
     }
     void compute(const sequence &seq) {
       MEMORY_PROFILE(useIblankStencil) ;
-      const int vs = qpn.vecSize() ;
       entitySet odom = entitySet(seq) ;
       entitySet dom = EMPTY ;
       FORALL(odom,ii) {
@@ -2652,11 +2661,25 @@ namespace flowPsi {
       
       Map slookup ;
       slookup = interpolateCellStencil->slookup ;
-      storeVec<real> qpstencil ;
-      const_storeVec<real> qpn_c ;
-      qpn_c.setRep(qpn.Rep()) ;
+      store<real> Tstencil ;
+      store<real> pgstencil ;
+      store<vect3d> ustencil ;
+      const_store<real> T_c ;
+      T_c.setRep(temperature_i.Rep()) ;
+      const_store<real> pg_c ;
+      pg_c.setRep(gagePressure_i.Rep()) ;
+      const_store<vect3d> u_c ;
+      u_c.setRep(u_i.Rep()) ;
       MEMORY_PROFILE(presend) ;
-      sendStencilData(qpstencil,qpn_c,
+      sendStencilData(Tstencil,T_c,
+                      interpolateCellStencil->send_info,
+                      interpolateCellStencil->req_sizes,
+                      interpolateCellStencil->snd_sizes)  ;
+      sendStencilData(pgstencil,pg_c,
+                      interpolateCellStencil->send_info,
+                      interpolateCellStencil->req_sizes,
+                      interpolateCellStencil->snd_sizes)  ;
+      sendStencilData(ustencil,u_c,
                       interpolateCellStencil->send_info,
                       interpolateCellStencil->req_sizes,
                       interpolateCellStencil->snd_sizes)  ;
@@ -2678,20 +2701,24 @@ namespace flowPsi {
           wsum += weights[co][j] ;
         if(wsum > .1) { // sum should be 1, if not stencil is degenerate
           // Weighted sum interpolation
-          for(int i=0;i<vs;++i) {
-            real v = 0 ;
-            for(int j=0;j<4;++j) {
-              v += weights[co][j]*qpstencil[stencils[co][j]][i] ;
-            }
-            qpn[cc][i] = v/wsum ;
-          }
-        }
+	  real T = 0 ;
+	  real pg = 0 ;
+	  vect3d u = vect3d(0,0,0) ;
+	  for(int j=0;j<4;++j) {
+	    T += weights[co][j]*Tstencil[stencils[co][j]] ;
+	    pg += weights[co][j]*pgstencil[stencils[co][j]] ;
+	    u += weights[co][j]*ustencil[stencils[co][j]] ;
+	  }
+	  temperature_i[cc] = T/wsum ;
+	  gagePressure_i[cc] = pg/wsum ;
+	  u_i[cc] = (1./wsum)*u ;
+	}
       } ENDFORALL ;
 
       // Now for all non-participating cells, average appropriately
       FORALL(odom,ii) {
         if(iblank[ii] == 3) {
-          tmp_array<real> qpsum(vs) ;
+
           int usz = upper[ii].size() ;
           int lsz = lower[ii].size() ;
           int imin = 3 ;
@@ -2703,13 +2730,13 @@ namespace flowPsi {
             int ib = iblank[cl[lower[ii][i]]] ;
             imin = min(imin,ib) ;
           }
-          for(int i=0;i<vs;++i) {
-            qpsum[i] = 0 ;
-          }
+	  real tavg = 0 ;
+	  real pgavg = 0 ;
+	  vect3d uavg = vect3d(0,0,0) ;
+
           real sum = 0 ;
           if(imin == 0) {
             // if 3 type cell next to 0 type cell, reflect
-            const int mi = 1 ;
             for(int i=0;i<usz;++i) {
               int crc = cr[upper[ii][i]] ;
               int ib = iblank[crc] ;
@@ -2717,13 +2744,12 @@ namespace flowPsi {
                 real w = area[upper[ii][i]].sada ;
                 const vect3d &n = area[upper[ii][i]].n ;
                 sum += w ;
-                for(int j=0;j<vs;++j)
-                  qpsum[j] += w*qpn[crc][j] ;
-                vect3d vc =vect3d(qpn[crc][mi+0],qpn[crc][mi+1],qpn[crc][mi+2]);
+		tavg += w*temperature_i[crc] ;
+		pgavg += w*gagePressure_i[crc] ;
+
+                vect3d vc =u_i[crc] ;
                 vc -= (2.*dot(vc,n))*n ;
-                qpsum[mi+0] += w*vc.x ;
-                qpsum[mi+1] += w*vc.y ;
-                qpsum[mi+2] += w*vc.z ;
+		uavg += w*vc ;
               }
             }
             for(int i=0;i<lsz;++i) {
@@ -2733,13 +2759,11 @@ namespace flowPsi {
                 real w = area[lower[ii][i]].sada ;
                 const vect3d &n = area[lower[ii][i]].n ;
                 sum += w ;
-                for(int j=0;j<vs;++j)
-                  qpsum[j] += w*qpn[clc][j] ;
-                vect3d vc =vect3d(qpn[clc][mi+0],qpn[clc][mi+1],qpn[clc][mi+2]);
+		tavg += w*temperature_i[clc] ;
+		pgavg += w*gagePressure_i[clc] ;
+                vect3d vc = u_i[clc] ; 
                 vc -= (2.*dot(vc,n))*n ;
-                qpsum[mi+0] += w*vc.x ;
-                qpsum[mi+1] += w*vc.y ;
-                qpsum[mi+2] += w*vc.z ;
+                uavg += w*vc ;
               }
             }
           } else {
@@ -2750,8 +2774,9 @@ namespace flowPsi {
               if(ib == imin) {
                 real w = area[upper[ii][i]].sada ;
                 sum += w ;
-                for(int j=0;j<vs;++j)
-                  qpsum[j] += w*qpn[crc][j] ;
+		tavg += w*temperature_i[crc] ;
+		pgavg += w*gagePressure_i[crc] ;
+		uavg += w*u_i[crc] ;
               }
             }
             for(int i=0;i<lsz;++i) {
@@ -2760,16 +2785,17 @@ namespace flowPsi {
               if(ib == imin) {
                 real w = area[lower[ii][i]].sada ;
                 sum += w ;
-                for(int j=0;j<vs;++j)
-                  qpsum[j] += w*qpn[clc][j] ;
+		tavg += w*temperature_i[clc] ;
+		pgavg+= w*gagePressure_i[clc] ;
+		uavg += w*u_i[clc] ;
               }
             }
-          }
+	  }
           real rsum = 1./sum ;
-          for(int i=0;i<vs;++i) {
-            qpn[ii][i] = qpsum[i]*rsum ;
-          }
-        }
+	  temperature_i[ii] = tavg*rsum ;
+	  gagePressure_i[ii] = pgavg*rsum ;
+	  u_i[ii] = rsum*uavg ;
+	}
       } ENDFORALL ;
     }
   } ;
