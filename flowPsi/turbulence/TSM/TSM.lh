@@ -1,0 +1,63 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+$include "flowPsi.lh"
+
+// (TSM) Transition Sensitive (turbulence 3 Eq) Model Variables
+$type cbpcr param<real>;
+$type Mtsm param<real>;
+$type walters param<TSM3eq_param> ;
+
+// turbulent kinetic energy 
+$type kT                store<flowPsi::real> ; //use kT for walters to 
+                                            //distinguish from k in 
+                                            //other k-w models.
+$type kT_f              store<flowPsi::real> ;
+$type kT_bc             store<flowPsi::real> ;
+$type delta_kT          store<flowPsi::real> ;
+
+// laminar kinetic energy
+$type kL                store<flowPsi::real> ;  
+$type kL_f              store<flowPsi::real> ;
+$type kL_bc             store<flowPsi::real> ;
+$type delta_kL          store<flowPsi::real> ;
+
+// inverse turbulent time-scale
+$type w_tsm             store<flowPsi::real> ; //use w_tsm for walters to 
+                                            //distinguish from w in 
+                                            //other k-w models.
+$type w_tsm_f           store<flowPsi::real> ;
+$type w_tsm_bc          store<flowPsi::real> ;
+$type delta_w_tsm       store<flowPsi::real> ;
+
+// other functions and terms
+//$type alphat          store<flowPsi::real> ;
+
+// convection, diffusion, and source terms
+$type kT_src           store<flowPsi::real> ;
+$type kL_src           store<flowPsi::real> ;
+$type w_tsm_src           store<flowPsi::real> ;
+
+// diagonal Jacobian term
+$type kT_srcJ          store<flowPsi::real> ;
+$type kL_srcJ          store<flowPsi::real> ;
+$type w_tsm_srcJ          store<flowPsi::real> ;
+

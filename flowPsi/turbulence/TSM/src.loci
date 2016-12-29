@@ -1,0 +1,623 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include <iostream>
+#include "TSM_param.h"
+$include "flowPsi.lh"
+$include "TSM.lh"
+
+namespace flowPsi {
+
+  const double EPSILON = 1e-20 ; 
+
+  //--------------------------------------------------------------------------
+  // Check turbulence model selected in vars file, if Walters selected, enable
+  // the TSM3eq constraint
+  $type TSM3eq constraint ;
+  $type turbulence_model param<std::string> ;
+  $rule default(turbulence_model) { $turbulence_model= "TSM"; }
+  
+  $rule constraint(TSM3eq<-turbulence_model) {
+    $TSM3eq = EMPTY ;
+    if($turbulence_model == "Walters" || $turbulence_model == "TSM") {
+      $TSM3eq = ~EMPTY ;
+    }
+  }
+
+  //--------------------------------------------------------------------------
+  // Setup default turbulence paramters (defined in TSM_param.h) such that
+  // users can redefine the parameters if needed
+  $type walters param<TSM3eq_param> ;
+  $rule default(walters),
+    comments("Parameters used in the definition of the Transition Sensitive 3 Eq turbulence Model (TSM)."){}
+
+  //--------------------------------------------------------------------------
+  // Main turbulence model implementation begins here, First we initialize
+  // variables for the source terms, face flux Jacobians and source Jacobians
+  // for each of the scalar transport equations. kT = 1, kL = 2, w_tsm = 3
+  // Setting up transport of kL, kT and w_tsm variables
+  $type scalarTransportP(X,Y) param<bool> ;
+  $rule pointwise(OUTPUT<-scalarTransportP(kL,TSM3eq)) {
+  }
+  $rule pointwise(OUTPUT<-scalarTransportP(kT,TSM3eq)) {
+  }
+  $rule pointwise(OUTPUT<-scalarTransportP(w_tsm,TSM3eq)) {
+  }
+  
+  //---------------------------------------------------------------------------
+
+  // Omega = sqrt (2*O_ij*O_ij) and O_ij = 0.5*(dU_i/dx_j-dU_j/dx_i)
+  // In turbulence.loci vortMag = this definition of Omega 
+
+  $type Omega store<real> ;
+  $rule pointwise(Omega<-vortMag) {
+  $Omega = $vortMag ; // 0.5*$vortMag ;
+  }
+
+  // Effective diffusivity term for turbulence dependent variables - alphaT.
+  // It is part of the diffusion coefficient of the kT and w_tsm equations.
+
+  // shear-sheltering damping function
+  $type fss store<real> ;
+  $rule pointwise(fss<-kT,Omega,mu,rho,walters) {
+    const real css = $walters.css ;
+    const real argfss = css*$mu*$Omega/($rho*$kT);
+//    $fss = 1.0 ; // Goes to 1.0 at fully turbulent
+    $fss = exp( -pow(argfss,2.0) ) ;
+  }
+  // turbulence length scale
+  $type lamt store<real> ;
+  $rule pointwise(lamt<-kT,w_tsm) {
+    $lamt = sqrt($kT)/$w_tsm  ;
+  }
+  // effective (wall-limited) turbulence length scale
+  $type lameff store<real> ;
+  $rule pointwise(lameff<-dist_noslip,lamt,walters) {
+    const real clam = $walters.clam ;
+    $lameff = min( clam*$dist_noslip, $lamt ) ;
+  }
+  // inviscid near-wall damping function
+  $type fw store<real> ;
+  $rule pointwise(fw<-lamt,lameff) {
+//  $fw = 1.0 ; Goes to 1.0 at fully turbulent. 
+  $fw = pow($lameff/$lamt,0.66666667) ; // Keith's UDF uses this definition.
+//  $fw = $lameff/$lamt ; 
+  }
+  // turbulence Reynolds number 
+  $type ReT store<real> ;
+  $rule pointwise(ReT<-kT,w_tsm,fw,rho,mu) {
+    $ReT = ($fw*$fw*$kT*$rho)/($mu*$w_tsm) ;
+  }
+  // viscous near-wall damping function 
+  $type fv store<real> ;
+  $rule pointwise(fv<-ReT,walters) {
+    const real anu = $walters.anu ;
+    $fv = 1.0 - exp( -sqrt($ReT)/anu ) ;
+  }
+  // effective small-scale turbulent kinetic energy 
+  $type kTs store<real> ;
+  $rule pointwise(kTs<-fss,fw,kT) {
+    $kTs = $fss*$fw*$kT ;
+  }
+  // effective diffusivity for turbulence dependent variables term 
+  $type alphaT store<real> ;
+  $rule pointwise(alphaT<-fv,kTs,lameff,walters) {
+    const real cmustd = $walters.cmustd ;
+    $alphaT = $fv*cmustd*sqrt($kTs)*$lameff ;
+  }
+
+  //---------------------------------------------------------------------------
+  // kT, kL, and w_tsm equation diffusion terms
+  // kT: del . (mu + rho*alphaT/sigmak)*del kT
+  // kL: del . (mu) * del kL
+  // w_tsm: del . (mu + rho*alphaT/sigmaw)*del w_tsm
+  //
+  // Note, we are computing fluxes at the face, we use _f to indicate the
+  // face values.  rho_f is the fluid density at the face, kT_f is the
+  // face interploated kT_f, area is the area and normal of face f
+
+  // Note, we need to interpolate alphaT from the cells to face, use a
+  // harmonic volume weighted average to define this.
+  
+  $type alphaT_f store<real> ;
+  $rule pointwise(alphaT_f<-(cr,cl)->(vol,alphaT)) {
+  real vrvl = 1.0/($cr->$vol+$cl->$vol) ;
+  $alphaT_f = ($cr->$vol*$cl->$alphaT+$cl->$vol*$cr->$alphaT)*vrvl ;
+  }
+  
+  // kT equation diffusion coefficient
+  $type kT_nu_f store<real> ;
+  // Integrated diffusion flux
+  $rule pointwise(kT_nu_f<-rho_f,mu_f,alphaT_f,walters) {
+    const real sigmak = $walters.sigmak ;
+    $kT_nu_f = ($mu_f+$rho_f*$alphaT_f/sigmak) ;
+  }
+
+  // kL equation diffusion coefficient
+  $type kL_nu_f store<real> ; 
+  $rule pointwise(kL_nu_f<-mu_f) {
+    $kL_nu_f = $mu_f ;
+  }
+
+  
+  // w_tsm equation diffusion coefficient
+  $type w_tsm_nu_f store<real> ; 
+  // Integrated diffusion flux
+  $rule pointwise(w_tsm_nu_f<-rho_f,mu_f,alphaT_f,walters) {
+    const real sigmaw = $walters.sigmaw ;
+    $w_tsm_nu_f = ($mu_f+$rho_f*$alphaT_f/sigmaw) ;
+  }
+  
+  //force zero-normal-gradient condition on wall
+  $rule pointwise(wallBC::w_tsm_nu_f),
+   constraint (viscousWall_BC) {
+    $w_tsm_nu_f = 0 ;
+  }
+
+  //force zero-normal-gradient condition on symmetry boundary
+  $rule pointwise(symmetryBC::w_tsm_nu_f),
+   constraint (symmetry_BC) {
+    $w_tsm_nu_f = 0 ;
+  }
+
+  //force zero-normal-gradient condition on symmetry boundary
+  $rule pointwise(symmetryBC::kT_nu_f),
+   constraint (symmetry_BC) {
+    $kT_nu_f = 0 ;
+  }
+  //force zero-normal-gradient condition on symmetry boundary
+  $rule pointwise(symmetryBC::kL_nu_f),
+   constraint (symmetry_BC) {
+    $kL_nu_f = 0 ;
+  }
+
+  //-------------------------------------------------------------------------
+  // kT Equation: Turbulent Destruction Term 1
+
+  // Compute Turbulent Destruction: -rho*w_tsm*kT*vol
+  $type kT_dest1 store<real> ;
+  $rule pointwise(kT_dest1<-rho,kT,w_tsm,vol) {
+    $kT_dest1 = $rho*$w_tsm*$kT ;
+  }
+  $rule apply(kT_src<-kT_dest1,vol)[Loci::Summation] {
+  join($kT_src, -$kT_dest1*$vol) ;
+ }
+  // Add in this destruction term's Jacobian?: -rho*w_tsm*vol
+  $type kT_dest1J store<real> ;
+  $rule pointwise(kT_dest1J<-rho,w_tsm,vol) {
+    $kT_dest1J = $rho*$w_tsm ;
+  }
+  $rule apply(kT_srcJ<-kT_dest1J,vol)[Loci::Summation] {
+  join($kT_srcJ, -$kT_dest1J*$vol) ;
+ }
+
+  // kT Equation: Turbulent Destruction Term 2
+
+// anisotropic (near-wall) dissipation term DT is mu*del[sqrt(kT)]*del[sqrt(kT)]*vol
+
+// From Ed - Building parametric sqrt for grads.
+ 
+  $type sqrt(X) store<real>;
+  $type X store<real>;
+  $rule pointwise(sqrt(X)<-X) {
+    $sqrt(X)= sqrt($X);
+  }
+  $type sqrt_f(X) store<real>;
+  $type X_f store<real>;
+  $rule pointwise(sqrt_f(X)<-X_f) {
+    $sqrt_f(X)= sqrt($X_f);
+  }
+
+ //Compute DT term 
+  $type DT store<real> ;
+  $rule pointwise(DT<-mu,kT,grads( sqrt(kT) )) {
+  $DT = $mu*dot($grads(sqrt(kT)),$grads(sqrt(kT))) ;
+  }
+
+  // Compute Turbulent Destruction
+  $type kT_dest2 store<real> ;
+  $rule pointwise(kT_dest2<-DT,vol) {
+    $kT_dest2 = $DT ;
+  }
+
+  $rule apply(kT_src<-kT_dest2,vol)[Loci::Summation] {
+  join($kT_src, -$kT_dest2*$vol) ;
+  }
+
+// No Jacobian for this destruction term.
+
+  //-------------------------------------------------------------------------
+  // kL Equation: Turbulent Destruction Term 1 (Suggested by Keith Walters)
+
+  // Compute Turbulent Destruction: -rho*w_tsm*kL*vol
+//mch  $type kL_dest1 store<real> ;
+//mch  $rule pointwise(kL_dest1<-rho,kL,w_tsm,vol) {
+//mch    $kL_dest1 = $rho*$w_tsm*$kL ;
+//mch  }
+//mch  $rule apply(kL_src<-kL_dest1,vol)[Loci::Summation] {
+//mch    $kL_src -= $kL_dest1*$vol ; // integrate over cell volume
+//mch  join($kL_src, -$kL_dest1*$vol) ; // integrate over cell volume
+//mch }
+  // Add in this destruction term's Jacobian?: -rho*w_tsm*vol
+//mch  $type kL_dest1J store<real> ;
+//mch  $rule pointwise(kL_dest1J<-rho,w_tsm,vol) {
+//mch    $kL_dest1J = $rho*$w_tsm ;
+//mch  }
+//mch  $rule apply(kL_srcJ<-kL_dest1J,vol)[Loci::Summation] {
+//mch    $kL_srcJ -= $kL_dest1J*$vol ; // integrate over cell volume
+//mch  join($kL_srcJ, -$kL_dest1J*$vol) ; // integrate over cell volume
+//mch }
+
+  // kL Equation: Turbulent Destruction Term 2
+
+ //Compute anisotropic (near-wall) dissipation term DL 
+  $type DL store<real> ;
+  $rule pointwise(DL<-mu,kL,grads( sqrt(kL) )) {
+  $DL = $mu*dot($grads(sqrt(kL)),$grads(sqrt(kL))) ;
+  }
+
+  // Compute Turbulent Destruction
+  $type kL_dest2 store<real> ;
+  $rule pointwise(kL_dest2<-DL,vol) {
+    $kL_dest2 = $DL ;
+  }
+
+  $rule apply(kL_src<-kL_dest2,vol)[Loci::Summation] {
+//mch  $kL_src -= $kL_dest2*$vol ; // integrate over cell volume
+  join($kL_src, -$kL_dest2*$vol) ; // integrate over cell volume
+  }
+
+// No Jacobian for this destruction term.
+
+  //-------------------------------------------------------------------------
+  // w_tsm Equation: Turbulent Destruction Terms
+
+  // Compute Turbulent Destruction: -rho*cw2*w_tsm*w_tsm*vol(*fw*fw? Keith's UDF)
+  $type w_tsm_dest store<real> ;
+  $rule pointwise(w_tsm_dest<-rho,w_tsm,fw,vol,walters) {
+    const real cw2 = $walters.cw2 ; 
+    $w_tsm_dest = $rho*cw2*$w_tsm*$w_tsm*$fw*$fw ;
+//    $w_tsm_dest = $rho*cw2*$w_tsm*$w_tsm ;
+  }
+  $rule apply(w_tsm_src<-w_tsm_dest,vol)[Loci::Summation] {
+  join($w_tsm_src, -$w_tsm_dest*$vol) ;
+ }
+  // Add in this destruction term's Jacobian?: -2*cw2*rho*w_tsm*vol(*fw*fw? Keith's UDF)
+  $type w_tsm_destJ store<real> ;
+  $rule pointwise(w_tsm_destJ<-rho,w_tsm,fw,vol,walters) {
+    const real cw2 = $walters.cw2 ; 
+    $w_tsm_destJ = 2.0*cw2*$rho*$w_tsm*$fw*$fw ;
+//    $w_tsm_destJ = 2.0*cw2*$rho*$w_tsm ;
+  }
+  $rule apply(w_tsm_srcJ<-w_tsm_destJ,vol)[Loci::Summation] {
+//mch    $w_tsm_srcJ -= $w_tsm_destJ*$vol ; // integrate over cell volume
+  join($w_tsm_srcJ, -$w_tsm_destJ*$vol) ; // integrate over cell volume
+ }
+
+  //-------------------------------------------------------------------------
+  // kT Equation: Turbulent Production Term
+
+  // Production of kT by mean strain rate: PkT = nuTs*S^2
+  // Most terms and functions previously built for alphaT.
+  
+  // TOTal fluctuation kinetic energy = kL-laminar + kT-turbulent
+  $type kTOT store<real> ;
+  $rule pointwise(kTOT<-kT,kL) {
+   $kTOT = $kT+$kL ;
+  }
+
+  // empirical intermittency damping function  
+  $type fint store<real> ;
+  $rule pointwise(fint<-kTOT,kT,walters) {
+    const real cint = $walters.cint ;
+//    $fint = 1.0 ; // Goes to 1.0 at fully turbulent 
+   $fint= min($kT/(cint*$kTOT),1.0) ;
+  }
+
+  // turbulent viscosity coefficient  
+  $type cmu store<real> ;
+  $rule pointwise(cmu<-strainRate,w_tsm,walters) {
+    const real ao = $walters.ao ;
+    const real as = $walters.as ;
+    $cmu = 1.0/(ao+as*($strainRate/($w_tsm+EPSILON))) ; //mch problem fix? if w_tsm = 0
+//mch    $cmu = 1.0/(ao+as*($strainRate/$w_tsm)) ; 
+  }
+
+  // small-scale turbulent viscosity contribution 
+  $type nuTs store<real> ;
+  $rule pointwise(nuTs<-fv,fint,cmu,kTs,lameff) {
+    $nuTs = $fv*$fint*$cmu*sqrt($kTs)*$lameff ;
+  }
+
+  // Production of kT by mean strain rate 
+  $type PkT store<real> ;
+  $rule pointwise(PkT<-nuTs,strainRate,rho) {
+    $PkT = $nuTs*$strainRate*$strainRate ;
+  }
+
+  // Kprod_clip is already provided as part of the SST turbulence model
+//  $type Kprod_clip param<real> ; //mch Do we need this?
+
+  // Compute TSM model kT turbulent production
+//  $type kT_prod store<real> ;
+//  $rule pointwise(kT_prod<-PkT,Kprod_clip,kT_dest1,kT_dest2,vol) {
+//    const real D = $kT_dest1+$kT_dest2 ; // Note there are two destruction terms for kT
+//    $kT_prod = min($PkT,$Kprod_clip*D) ;
+//  }
+
+//  $rule apply(kT_src<-kT_prod,vol)[Loci::Summation] {
+//mch    $kT_src += $kT_prod*$vol ; // integrate over cell colume
+//  join($kT_src, +$kT_prod*$vol) ; // integrate over cell volume
+//  }
+// Only use Kprod clip if Keith thinks its necessary
+  $type kT_prod store<real> ;
+  $rule pointwise(kT_prod<-PkT,rho,vol) {
+    $kT_prod = $rho*$PkT ;
+  }
+
+  $rule apply(kT_src<-kT_prod,vol)[Loci::Summation] {
+  join($kT_src, +$kT_prod*$vol) ; // integrate over cell volume
+  }
+
+  //-------------------------------------------------------------------------
+  // kL Equation: Turbulent Production Term
+
+  // Production of kL by mean strain: PkL = nuTl*S^2
+
+  // effective "large-scale" turbulent kinetic energy
+  // kTs is fss*fw*kT so at fully turbulent fss = fw = 1 and hence kTl = 0.0 
+  $type kTl store<real> ;
+  $rule pointwise(kTl<-kT,kTs) {
+    $kTl = $kT-$kTs ;
+   }
+  
+  // time-scale damping function
+  $type ftaul store<real> ;
+  $rule pointwise(ftaul<-kTl,Omega,lameff,walters) {
+    const real ctl = $walters.ctl ;
+//    const real denom = max(EPSILON, pow($lameff*$Omega,2)); //mch fix for "slug" flow start
+    const real denom = pow($lameff*$Omega,2.)+EPSILON; //mch and KW fix for "slug" flow start
+    const real argftaul = $kTl/denom ;
+    $ftaul = 1.0 - exp(-ctl*argftaul) ;
+  }
+
+  // momentum thickness Reynolds number 
+  $type ReO store<real> ;
+  $rule pointwise(ReO<-rho,mu,Omega,dist_noslip) {
+    $ReO = $rho*$Omega*pow($dist_noslip,2)/$mu ;
+  }
+
+  // Tollmien-Schlichting threshold function  
+  $type betaTS store<real> ;
+  $rule pointwise(betaTS<-ReO,walters) {
+    const real ctscr = $walters.ctscr ;
+    const real ats = $walters.ats ;
+    const real argbTS = max($ReO - ctscr,0.0) ;
+    $betaTS = 1.0 - exp( -pow(argbTS,2)/ats ) ;
+  }
+
+  // large-scale turbulent viscosity contribution  
+  $type nuTl store<real> ;
+  $rule pointwise(nuTl<-ReO,ftaul,Omega,rho,mu,lameff,kTl,betaTS,
+                        dist_noslip,strainRate,kL,walters) {
+    const real c11 = $walters.c11 ;
+    const real c12 = $walters.c12 ;
+//    const real Omeg = 0.5*$vortMag ;
+    const real par = $rho*$Omega*pow($lameff,2)/$mu ;
+    const real t1 = $ftaul*c11*par*sqrt($kTl)*$lameff ;
+    const real t2 = $betaTS*c12*$ReO*pow($dist_noslip,2)*$Omega ;
+//    const real denom = max (EPSILON, $strainRate) ; //mch fix for "slug" flow start
+    const real denom = $strainRate+EPSILON ; //mch and KW fix for "slug" flow start
+    $nuTl = min( t1+t2 , 0.5*($kL+$kTl)/denom ) ;
+  }
+
+  // Production of laminar kinetic energy (kL) by mean strain rate 
+  $type PkL store<real> ;
+  $rule pointwise(PkL<-nuTl,strainRate,rho) {
+    $PkL = $rho*$nuTl*$strainRate*$strainRate ;
+  }
+
+  // Kprod_clip is already provided as part of the SST turbulence model
+  // Declared in kT equation block ... $type Kprod_clip param<real> ;
+  // mch Do we need clipping? Is summing the two destructions terms ok?
+
+  // Compute TSM model kL turbulent production
+//  $type kL_prod store<real> ;
+//  $rule pointwise(kL_prod<-PkL,Kprod_clip,kL_dest1,kL_dest2,vol) {
+//    const real D = $kL_dest1+$kL_dest2 ; // Note there are two destruction terms for kL
+//    $kL_prod = min($PkL,$Kprod_clip*D) ;
+//  }
+
+//  $rule apply(kL_src<-kL_prod,vol)[Loci::Summation] {
+//mch    $kL_src += $kL_prod*$vol ; // integrate over cell volume
+//  join($kL_src, +$kL_prod*$vol) ; // integrate over cell volume
+//  }
+// Use Kprod clip if Keith thinks its necessary
+  $type kL_prod store<real> ;
+  $rule pointwise(kL_prod<-PkL,vol) {
+    $kL_prod = $PkL ;
+  }
+
+  $rule apply(kL_src<-kL_prod,vol)[Loci::Summation] {
+//mch    $kL_src += $kL_prod*$vol ; // integrate over cell volume
+  join($kL_src, +$kL_prod*$vol) ; // integrate over cell volume
+  }
+
+  //-------------------------------------------------------------------------
+  // w_tsm Equation: Turbulent Production Term
+
+  // Kprod_clip is already provided as part of the SST turbulence model
+  // Declared in kT equation block ... $type Kprod_clip param<real> ;
+
+  // Compute TSM model w_tsm turbulent production
+//  $type w_tsm_prod store<real> ;
+//  $rule pointwise(w_tsm_prod<-PkT,rho,Kprod_clip,w_tsm,kT,w_tsm_dest,vol,walters) {
+//    const real cw1 = $walters.cw1 ;
+//    const real argprod = $rho*cw1*$w_tsm*$PkT/$kT ;
+//    const real D = $w_tsm_dest ;
+//    $w_tsm_prod = min(argprod,$Kprod_clip*D) ;
+//  }
+
+//  $rule apply(w_tsm_src<-w_tsm_prod,vol)[Loci::Summation] {
+//mch    $w_tsm_src += $w_tsm_prod*$vol ; // integrate over cell colume
+//  join($w_tsm_src, +$w_tsm_prod*$vol) ; // integrate over cell volume
+//  }
+// Use Kprod clip if Keith thinks its necessary
+  $type w_tsm_prod store<real> ;
+  $rule pointwise(w_tsm_prod<-PkT,rho,w_tsm,kT,vol,walters) {
+    const real cw1 = $walters.cw1 ;
+    $w_tsm_prod = $rho*cw1*$w_tsm*$PkT/$kT ;
+  }
+
+  $rule apply(w_tsm_src<-w_tsm_prod,vol)[Loci::Summation] {
+//mch    $w_tsm_src += $w_tsm_prod*$vol ; // integrate over cell colume
+  join($w_tsm_src, +$w_tsm_prod*$vol) ; // integrate over cell volume
+  }
+
+  //-------------------------------------------------------------------------
+  // w_tsm Equation: This term is included "in order to decrease the length
+  // scale in the outer region of the turbulent boundary layer..." 
+ 
+  // boundary layer wake term damping function.
+  $type fomega store<real> ;
+  $rule pointwise(fomega<-lameff,lamt) {
+    $fomega = 1.0 - exp( -0.41 * pow($lameff/$lamt,4.0) ) ;
+  }
+
+  $type w_tsm_dls store<real> ;
+  $rule pointwise(w_tsm_dls<-rho,fomega,alphaT,fw,kT,dist_noslip,vol,walters) {
+    const real cw3 = $walters.cw3 ;
+    const real d3 = pow($dist_noslip,3.0) ;
+    $w_tsm_dls = $rho*cw3*$fomega*$alphaT*$fw*$fw*sqrt($kT)/d3 ;
+  }
+
+  $rule apply(w_tsm_src<-w_tsm_dls,vol)[Loci::Summation] {
+//mch    $w_tsm_src += $w_tsm_dls*$vol ; // integrate over cell volume
+  join($w_tsm_src, +$w_tsm_dls*$vol) ; // integrate over cell volume
+  }
+
+  // Laminar-to-Turbulent transition mechanism source terms: RBP and RNAT
+  // Source for kT, kL, and w_tsm equations. R stands for Redistribution. 
+
+  // Threshold Functions
+
+  $type betabp store<real> ;
+  $rule pointwise(betabp<-rho,mu,Omega,kT,walters,cbpcr) {
+    const real abp   = $walters.abp ;
+    const real denom = $Omega*$mu+EPSILON ; //mch and KW fix for "slug" flow start
+    const real phibp = max((($rho*$kT)/denom)-$cbpcr,0.0) ;
+    $betabp = 1.0 - exp( -phibp/abp ) ;
+   }
+
+  // model function incorporating freestream turbulence effects on
+  // natural transition 
+  $type fnatcr store<real> ;
+  $rule pointwise(fnatcr<-rho,mu,dist_noslip,kL,walters) {
+    const real cnc = $walters.cnc ;
+    $fnatcr = 1.0-exp(-cnc*( sqrt($kL)*$dist_noslip*$rho )/$mu) ;
+  }
+
+  // natural transition threshold function  
+  $type betanat store<real> ;
+  $rule pointwise(betanat<-fnatcr,ReO,walters) {
+    const real cnatcr = $walters.cnatcr ;
+    const real anat   = $walters.anat ;
+//    const real denom = max (EPSILON, $fnatcr) ; //mch fix for "slug" flow start
+    const real denom = $fnatcr+EPSILON ; //mch fix for KL=0.0 "slug" flow start
+    const real phinat = max( $ReO-cnatcr/denom,0.0) ;
+    $betanat = 1.0 - exp( -phinat/anat ) ;
+  }
+ 
+  // bypass transition production term  
+  $type Rbp store<real> ;
+  $rule pointwise(Rbp<-betabp,kL,w_tsm,fw,walters) {
+    const real cr = $walters.cr ;
+    $Rbp = cr*$betabp*$kL*$w_tsm/$fw ; 
+  }
+
+  // natural transition production term  
+  $type Rnat store<real> ;
+  $rule pointwise(Rnat<-betanat,kL,Omega,walters) {
+    const real crnat = $walters.crnat ;
+    $Rnat = crnat*$betanat*$kL*$Omega ; 
+  }
+
+// Add in these source terms to kT and w_tsm equations.
+// Subtract these source terms from the kL equation.
+
+// kT turbulent kinetic energy equation - adds in 
+  $type kT_rst store<real> ;
+  $rule pointwise(kT_rst<-rho,Rbp,Rnat) {
+    $kT_rst = $rho*($Rbp+$Rnat) ;
+  }
+
+  $rule apply(kT_src<-kT_rst,vol)[Loci::Summation] {
+    $kT_src += $kT_rst*$vol ; // integrate over cell volume
+  join($kT_src, +$kT_rst*$vol) ; // integrate over cell volume
+  }
+ 
+// kL laminar kinetic energy equation - subtracts out
+  $type kL_rst store<real> ;
+  $rule pointwise(kL_rst<-rho,Rbp,Rnat) {
+    $kL_rst = $rho*($Rbp+$Rnat) ;
+  }
+
+  $rule apply(kL_src<-kL_rst,vol)[Loci::Summation] {
+//    $kL_src -= $kL_rst*$vol ; // integrate over cell volume
+  join($kL_src, -$kL_rst*$vol) ; // integrate over cell volume
+  }
+
+// w_tsm scale-determing variable equation - adds in
+  $type w_tsm_rst store<real> ;
+  $rule pointwise(w_tsm_rst<-rho,Rbp,Rnat,fw,w_tsm,kT,walters) {
+    const real cwr = $walters.cwr ;
+    $w_tsm_rst = $rho*(cwr/$fw-1.0)*($w_tsm/$kT)*($Rbp+$Rnat) ;
+  }
+
+  $rule apply(w_tsm_src<-w_tsm_rst,vol)[Loci::Summation] {
+//    $w_tsm_src += $w_tsm_rst*$vol ; // integrate over cell volume
+  join($w_tsm_src, +$w_tsm_rst*$vol) ; // integrate over cell volume
+  }
+ 
+  //-------------------------------------------------------------------------
+  // Turbulent Viscosity
+
+  $type tmu_clip param<real> ;
+
+  $rule default(tmu_clip),
+    comments("Maximum turbulent viscosity limit for two equation turbulence models.") {
+    $tmu_clip = 1e5 ;
+  }
+
+  // Compute turbulent viscosity.  Overide default value.
+  // Turbulent viscosity from total eddy viscosity nu_TOT = nuTs + NuTl
+  // nuTs = small-scale and nuTl = large-scale 
+//mch  $rule pointwise(walters::tmu<-nuTs,nuTl,rho,tmu_clip) {
+//mch     $tmu = min($rho*($nuTs+$nuTl),$tmu_clip) ; 
+  $rule pointwise(walters::tmu<-nuTs,nuTl,rho) {
+     $tmu = $rho*($nuTs+$nuTl) ; 
+//mch  $rule pointwise(walters::tmu<-nuTs,rho) {
+//mch     $tmu = $rho*$nuTs ; 
+  }
+
+
+}

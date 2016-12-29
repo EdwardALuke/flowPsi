@@ -1,4 +1,5 @@
-all: SA KOmega DHRL
+all: SA KOmega DHRL TSM
+
 
 SA: FRC
 	$(MAKE) -C SA FLOWPSI_BASE="$(FLOWPSI_BASE)" all
@@ -12,15 +13,21 @@ DHRL: FRC
 	$(MAKE) -C DHRL FLOWPSI_BASE="$(FLOWPSI_BASE)" all
 	$(MAKE) -C DHRL FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
+TSM: FRC
+	$(MAKE) -C TSM FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+	$(MAKE) -C TSM FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+
 clean: FRC
 	$(MAKE) -C SA -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C KOmega -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C DHRL -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
+	$(MAKE) -C TSM -k FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 
 distclean: FRC
 	$(MAKE) -C SA -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C KOmega -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C DHRL -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
+	$(MAKE) -C TSM -k FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 
 FRC: 
 
