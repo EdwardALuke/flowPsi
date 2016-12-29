@@ -84,7 +84,7 @@ namespace flowPsi {
   
   $rule pointwise(temperature_i{n,it+1},gagePressure_i{n,it+1},u_i{n,it+1}<- 
 		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
-                  localPBias{n,it},
+                  localPBias{n,it},iblank{n,it},
 		  temperature{n},gagePressure{n},
 		  Pambient),
     inplace(temperature_i{n,it+1}|temperature{n,it}),
@@ -110,7 +110,7 @@ namespace flowPsi {
 
     double dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
     alpha = min(alpha,dplim/max(fabs(dp),1e-30)) ;
-
+    alpha = ($iblank{n,it}>1)?0.0:alpha ;
     $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;
     $gagePressure_i{n,it+1} = $gagePressure{n,it} + alpha*dp ;
     $u_i{n,it+1} = $u{n,it} + alpha*du ;
@@ -118,7 +118,7 @@ namespace flowPsi {
 
 
   $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
-		  temperature{n,it},gagePressure{n,it},u{n,it},
+		  temperature{n,it},gagePressure{n,it},u{n,it},iblank{n,it},
                   temperature{n},gagePressure{n},u{n},
                   localPBias_next{n,it},Pambient,Rtilde),
     inplace(temperature{n+1}|temperature{n,it}),
@@ -145,9 +145,9 @@ namespace flowPsi {
     const real w2 = srhon/srhonp ;
     
     vect3d unp1 = w1*$u{n,it}-w2*$u{n} ;
-    $gagePressure{n+1} = pgnp1 ;
-    $temperature{n+1} = Tnp1 ;
-    $u{n+1} = unp1 ;
+    $gagePressure{n+1} = ($iblank{n,it} > 1)?$gagePressure{n,it}:pgnp1 ;
+    $temperature{n+1} = ($iblank{n,it} > 1)?$temperature{n,it}:Tnp1 ;
+    $u{n+1} = ($iblank{n,it} > 1)?$u{n,it}:unp1 ;
   } 
 
   $rule default(newtonMaxIter) {
