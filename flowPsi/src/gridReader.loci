@@ -245,7 +245,48 @@ namespace flowPsi {
 
     Loci::createLowerUpper(facts) ;
 
-    param<std::string> gradStencil ;
+    // If we have cutting planes, make edge maps
+    if(facts.get_fact("clipSurfaces")!=0) {
+      Loci::createEdgesPar(facts) ;
+      variableOperatorList::listset *p = variableOperatorList::varlist ;
+      map<string,string> varassoc ;
+      while(p!=0) {
+	if(p->nodalValue != 0)
+	  varassoc[string(p->name)] = string(p->nodalValue) ;
+	p=p->next ;
+      }
+      std::set<string> isovars ;
+      param<options_list>  clipSurfaces ;
+      clipSurfaces.setRep(facts.get_fact("clipSurfaces")) ;
+      options_list::option_namelist l = (*clipSurfaces).getOptionNameList() ;
+      for(options_list::option_namelist::const_iterator li=l.begin();
+	  li!=l.end();++li) {
+	if((*clipSurfaces).getOptionValueType(*li) == Loci::FUNCTION) {
+	  string func ;
+	  Loci::options_list::arg_list value_list ;
+	  (*clipSurfaces).getOption(*li,func,value_list) ;
+	  if(func == "isosurface") {
+	    if(value_list.front().type_of() == Loci::NAME_ASSIGN) {
+	      string sn ;
+	      value_list.front().get_value(sn) ;
+	      isovars.insert(sn) ;
+	    }
+	  }
+	}
+      }
+      std::set<string>::const_iterator si;
+      for(si=isovars.begin();si!=isovars.end();++si) {
+	map<string,string>::const_iterator mi = varassoc.find(*si) ;
+	if(mi != varassoc.end()) {
+	  string name = string("isoSurface(") + mi->second + string(")") ;
+	  param<string> vp ;
+	  *vp = mi->first ;
+	  facts.create_fact(name,vp) ;
+	}
+      }
+    }
+
+param<std::string> gradStencil ;
     gradStencil = facts.get_fact("gradStencil") ;
     if(*gradStencil == "full" || facts.get_fact("use_cellStencil") !=0) 
       create_cell_stencil(facts) ;

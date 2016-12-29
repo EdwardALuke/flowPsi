@@ -1,0 +1,808 @@
+//#############################################################################
+//#
+//# Copyright 2016, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "readGrid.h"
+#include <vector> 
+#include <string>
+#include <sstream>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <set> 
+$include "flowPsi.lh"
+
+$type boundaryName(X) param<string>  ;
+namespace flowPsi {
+  using namespace Loci ;
+
+  using std::set ;
+  
+  // keep track of directories that have been created so we don't have
+  // to check if they exist after we created them
+  set<string> dirExists ;
+  void makeDirectory(string dir) {
+    if(dirExists.find(dir) == dirExists.end()) {
+      Loci::stopWatch s ;
+      s.start() ;
+      Loci::debugout << "making directory " << dir << endl ;
+      int fid = open(dir.c_str(),O_RDONLY) ;
+      if(fid < 0)
+	mkdir(dir.c_str(),0755) ;
+      else
+	close(fid) ;
+      dirExists.insert(dir) ;
+      Loci::debugout << "time to create directory " << dir << " is " << s.stop() << endl ;
+    }
+  }
+
+  class boundaryPlot_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "*" ; }
+    std::string variablesChecked() { return "plotFreq,plotVars" ; }
+    bool checkOptions(const options_list &bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s ;
+    }
+  } ;
+  register_BC<boundaryPlot_check> register_boundaryPlot_check ;
+
+  $type runIdent param<std::string> ;
+  $rule singleton(runIdent),constraint(UNIVERSE) {
+    int id = 0 ; 
+    $[Once] {
+      time_t ticks = time(0) ;
+      id = ticks & 0xffff ;
+      bool usedid = true ;
+      do {
+	char buf[512] ;
+	snprintf(buf,511,"output/runId.%d",id) ;
+	int fid = open(buf,O_RDONLY) ;
+	if(fid < 0) {
+	  usedid = false ;
+	  ofstream tmp(buf,ios::trunc) ;
+	  tmp << id << endl ;
+	} else {
+	  id++ ;
+	  close(fid) ;
+	}
+      } while(usedid) ;
+    }    
+      
+    MPI_Bcast(&id,1,MPI_INT,0,MPI_COMM_WORLD) ;
+    char buf[512] ;
+    snprintf(buf,511,"%d",id) ;
+    $runIdent = string(buf) ;
+  }
+
+  $type BCplotFreq store<int>  ;
+  
+  $rule pointwise(BCplotFreq<-BC_options),constraint(plotFreq_BCoption) {
+    double val = 0 ;
+    $BC_options.getOption("plotFreq",val) ;
+    $BCplotFreq = int(val+0.01) ;
+  }
+
+  $type plotFreqSurf_X param<int> ;
+  
+  $rule unit(plotFreqSurf_X),constraint(UNIVERSE),parametric(boundaryName(X)) {
+    $plotFreqSurf_X = -1 ;
+  }
+  
+  $rule apply(plotFreqSurf_X<-ref->BC_options)[Loci::Maximum],parametric(boundaryName(X)),
+  prelude {
+  } ;	  
+  
+  $rule apply(plotFreqSurf_X<-ref->BCplotFreq,boundaryName(X))[Loci::Maximum],
+    parametric(boundaryName(X)) {
+    join($plotFreqSurf_X,$ref->$BCplotFreq) ;
+  }
+
+  
+  $type firstPlotBC_X param<bool> ;
+
+  $rule singleton(firstPlotBC_X{n=0}),constraint(UNIVERSE),
+	   parametric(boundaryName(X)){
+    $firstPlotBC_X{n=0} = true ;
+  }
+  $rule singleton(firstPlotBC_X{n,it=0}<-firstPlotBC_X{n}),
+    constraint(implicit_scheme),
+    parametric(boundaryName(X)){
+    $firstPlotBC_X{n,it=0} = $firstPlotBC_X{n} ;
+  }
+  $type doPlotBC_X param<bool> ;
+  $rule singleton(firstPlotBC_X{n,it+1}<-firstPlotBC_X{n,it},doPlotBC_X{n,it}),
+    constraint(implicit_scheme),
+    parametric(boundaryName(X)){
+    $firstPlotBC_X{n,it+1} = $firstPlotBC_X{n,it} && !$doPlotBC_X{n,it} ;
+  }
+
+  $rule singleton(firstPlotBC_X{n+1}<-firstPlotBC_X{n,it}),conditional(newtonFinished{n,it}),
+    constraint(implicit_scheme),
+    parametric(boundaryName(X)){
+    $firstPlotBC_X{n+1} = $firstPlotBC_X{n,it} ;
+  }
+
+
+  $type fileNumber(X) store<int> ;
+
+  $rule pointwise(OUTPUT<-face2node->pos,modelName,boundaryName(X),plotFreqSurf_X,runIdent,ncycle,plot_postfix,firstPlotBC_X),
+    constraint(ref->plotFreq_BCoption,boundaryName(X)),
+    conditional(doPlotBC_X), parametric(boundaryName(X)),prelude {
+    
+    string dir = "output/" + *$modelName + "_SURF." + *$boundaryName(X) ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+    string basename = "topology" + *$runIdent+".info"  ;
+
+
+    string topolink = dir + "/topo_file." + *$plot_postfix ;
+    $[Once] {
+      ofstream file(topolink.c_str(),ios::trunc) ;
+      file << basename << endl ;
+      file.close() ;
+    }
+
+    if(*$firstPlotBC_X && *$plotFreqSurf_X >= 0) {
+      entitySet domain = entitySet(seq) ;
+      string filename = dir + "/" + basename ;
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      
+      Loci::writeBoundaryTopo(file_id,$face2node.Rep(),domain,
+			      *Loci::exec_current_fact_db) ;
+
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+
+  $rule singleton(doPlotBC_X{n,it}<-plotFreqSurf_X,ncycle{n},lastNewton{n,it}),
+    parametric( boundaryName(X) ) {
+    $doPlotBC_X{n,it} = ($plotFreqSurf_X > 0 && $lastNewton{n,it}  && 
+			 ((($ncycle{n}+1)%$plotFreqSurf_X) == 0)) ;
+  }
+    
+    
+  $type BCNodes_X store<int> ;
+  $rule pointwise(face2node->BCNodes_X),constraint(ref->plotFreq_BCoption,plotFreqSurf_X,boundaryName(X)),parametric(boundaryName(X)) {
+  }
+  $type BCName_X blackbox<string> ;
+  $rule blackbox(BCName_X<-boundaryName(X)),parametric(boundaryName(X)),
+    prelude {
+    *$BCName_X = *$boundaryName(X) ;
+  } ;
+
+  $rule pointwise(OUTPUT{n,it}<-pos{n,it},plot_postfix{n,it},modelName,BCName_X),
+    conditional(doPlotBC_X{n,it}),constraint(BCNodes_X),
+    parametric(boundaryName(X)),prelude {
+    string dir = "output/" + *$modelName + "_SURF." + *$BCName_X ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+    
+    string filename = dir + "/pos." + *$plot_postfix{n,it} ;
+    entitySet domain = entitySet(seq) ;
+    std::vector<vector3d<float> > vlist(domain.size()) ;
+    int cnt = 0 ;
+    FORALL(domain,ii) {
+      vlist[cnt]= $pos{n,it}[ii] ;
+      cnt++ ;
+    } ENDFORALL ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+  } ;
+
+
+  
+  $type plotSwitchNodes(X) store<int> ;
+  $rule pointwise(face2node->plotSwitchNodes(X)),constraint(ref->(plotVar_X)) {
+  }
+  
+  $type BCNodesSize_X param<int> ;
+  $rule unit(BCNodesSize_X),constraint(UNIVERSE),parametric(boundaryName(X)) {
+    $BCNodesSize_X = 0 ;
+  }
+  
+  $rule apply(BCNodesSize_X<-pos)[Loci::Summation],constraint(BCNodes_X),parametric(boundaryName(X)) {
+    join($BCNodesSize_X,1) ;
+  }
+  
+  $rule pointwise(OUTPUT<-modelName,ncycle,plot_postfix,boundaryName(X),cl->iblank),
+    constraint(boundaryName(X),ref->plotFreq_BCoption), conditional(doPlotBC_X),
+    parametric(boundaryName(X)), prelude {
+    string dir = "output/" + *$modelName + "_SURF." + *$boundaryName(X) ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+
+    string filename = dir + "/iblank." + *$plot_postfix ;
+    entitySet set(seq) ;
+    std::vector<unsigned char> vlist(set.size()) ;
+    int cnt = 0 ;
+    FORALL(set,ii) {
+      vlist[cnt]= $iblank[$cl[ii]] ;
+      cnt++ ;
+    } ENDFORALL ;
+
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+    
+  } ;
+
+  surface_boundary_scalar::surface_boundary_scalar(const char *vname,
+                                        const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("ref->plotVar_") + value_name ;
+    name_store(var_name,var) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("modelName",modelName) ;
+    conditional("doPlotBC_X") ;
+    name_store("boundaryName(X)",boundaryName) ;
+    name_store("ncycle",ncycle) ;
+    name_store("plot_postfix",plot_postfix) ;
+    input("ncycle,plot_postfix") ;
+    input("boundaryName(X)") ;
+    input(var_name) ;
+    input("modelName") ;
+    constraint("ci->vol") ;
+    constraint(constraint_name) ;
+    constraint("boundaryName(X)") ;
+    set_parametric_variable("boundaryName(X)") ;
+    output("OUTPUT") ;
+  }
+  void surface_boundary_scalar::compute(const sequence &seq) {
+    string dir = "output/" + *modelName + "_SURF." + *boundaryName ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+
+    string filename = dir + "/" + value_name + "_bsca." + *plot_postfix ;
+    entitySet set(seq) ;
+    std::vector<float> vlist(set.size()) ;
+    int cnt = 0 ;
+    FORALL(set,ii) {
+      vlist[cnt]= var[ii] ;
+      cnt++ ;
+    } ENDFORALL ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+  }	
+
+  surface_boundary_vector::surface_boundary_vector(const char *vname,
+                                        const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("ref->plotVar_") + value_name ;
+    name_store(var_name,var) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("modelName",modelName) ;
+    conditional("doPlotBC_X") ;
+    name_store("boundaryName(X)",boundaryName) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("ncycle",ncycle) ;
+    input("ncycle,plot_postfix") ;
+    input("boundaryName(X)") ;
+    input(var_name) ;
+    input("modelName") ;
+    constraint("ci->vol") ;
+    constraint(constraint_name) ;
+    constraint("boundaryName(X)") ;
+    set_parametric_variable("boundaryName(X)") ;
+    output("OUTPUT") ;
+  }
+  void surface_boundary_vector::compute(const sequence &seq) {
+    string dir = "output/" + *modelName + "_SURF." + *boundaryName ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+
+    string filename = dir + "/" + value_name + "_bvec." + *plot_postfix ;
+    entitySet set(seq) ;
+    std::vector<vector3d<float> > vlist(set.size()) ;
+    int cnt = 0 ;
+    FORALL(set,ii) {
+      vlist[cnt]= var[ii] ;
+      cnt++ ;
+    } ENDFORALL ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+  }	
+
+
+
+  void surface_write_scalar(string modelName, string varName,
+			    string iterName, string bcName,
+			    const_store<float> &val,
+			    entitySet outSet) {
+    string dir = "output/" + modelName + "_SURF." + bcName ;
+    string filename = dir + "/" + varName + "_sca." + iterName ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+    std::vector<float> vlist(outSet.size()) ;
+    int cnt = 0 ;
+    FORALL(outSet,ii) {
+      vlist[cnt]= val[ii] ;
+      cnt++ ;
+    } ENDFORALL ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+  }
+
+
+  scalar_surface_output::
+  scalar_surface_output(const char *vname, const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string var_name_time = var_name ;
+    string constraint_name = string("plotSwitchNodes(")+value_name + ")" ;
+    constraint(constraint_name) ;
+    constraint("BCNodes_X") ;
+    name_store("BCNodesSize_X",BCNodesSize_X) ;
+    input("BCNodesSize_X") ;
+    name_store(var_name_time,val) ;
+    name_store("modelName",modelName) ;
+    name_store("BCName_X",BCName_X) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("ncycle",ncycle) ;
+    name_store("OUTPUT",OUTPUT) ;
+    input(var_name_time) ;
+    input("modelName,BCName_X,ncycle,plot_postfix") ;
+    conditional("doPlotBC_X") ;
+    output("OUTPUT") ;
+    set_parametric_variable("boundaryName(X)") ;
+  }
+  
+  void scalar_surface_output::compute(const sequence &seq) {
+    Loci::entitySet outSet = Loci::entitySet(seq) ;
+    int lsz = outSet.size() ;
+    int gsz = 0 ;
+    MPI_Allreduce(&lsz,&gsz,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(gsz == *BCNodesSize_X) { // only output if all nodes tagged for writing
+      string ncyc = *plot_postfix ;
+      surface_write_scalar(*modelName, value_name, ncyc, *BCName_X, val, outSet) ;
+    }
+  }    
+
+
+
+  void surface_write_vector(string modelName, string varName,
+			    string iterName, string bcName,
+			    const_store<vector3d<float> > &val,
+			    entitySet outSet) {
+    string dir = "output/" + modelName + "_SURF." + bcName ;
+    string filename = dir + "/" + varName + "_vec." + iterName ;
+    $[Once] {
+      makeDirectory(dir) ;
+    }
+    std::vector<vector3d<float> > vlist(outSet.size()) ;
+    int cnt = 0 ;
+    FORALL(outSet,ii) {
+      vlist[cnt]= val[ii] ;
+      cnt++ ;
+    } ENDFORALL ;
+    hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					 H5P_DEFAULT, H5P_DEFAULT) ;
+    writeUnorderedVector(file_id,"data",vlist,MPI_COMM_WORLD) ;
+    Loci::hdf5CloseFile(file_id) ;
+  }
+
+  vector_surface_output::
+  vector_surface_output(const char *vname, const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string var_name_time = var_name ;
+    string constraint_name = string("plotSwitchNodes(")+value_name + ")" ;
+    constraint(constraint_name) ;
+    constraint("BCNodes_X") ;
+    name_store("BCNodesSize_X",BCNodesSize_X) ;
+    input("BCNodesSize_X") ;
+    name_store(var_name_time,val) ;
+    name_store("modelName",modelName) ;
+    name_store("BCName_X",BCName_X) ;
+    name_store("ncycle",ncycle) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    input(var_name_time) ;
+    input("modelName,BCName_X,ncycle,plot_postfix") ;
+    conditional("doPlotBC_X") ;
+    output("OUTPUT") ;
+    set_parametric_variable("boundaryName(X)") ;
+  }
+  
+  void vector_surface_output::compute(const sequence &seq) {
+    Loci::entitySet outSet = Loci::entitySet(seq) ;
+    int lsz = outSet.size() ;
+    int gsz = 0 ;
+    MPI_Allreduce(&lsz,&gsz,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(gsz == *BCNodesSize_X) { // only output if all nodes tagged for writing
+      string ncyc(*plot_postfix) ;
+      surface_write_vector(*modelName, value_name, ncyc, *BCName_X, val, outSet) ;
+    }
+  }    
+  
+
+  // Cutting plane stuff
+  $type clipSurfaces param<options_list> ;
+  $type clipFreq param<int> ;
+  $rule optional(clipSurfaces) {}
+  $rule optional(clipFreq) {}
+  
+
+  $type cutInfo blackbox<std::vector<cutplaneInfo> > ;
+  
+  $rule blackbox(cutInfo<-clipSurfaces),prelude {
+    std::vector<cutplaneInfo> planes ;
+    options_list::option_namelist l = (*$clipSurfaces).getOptionNameList() ;
+    size_t i = 0 ;
+    for(options_list::option_namelist::const_iterator li=l.begin();
+        li!=l.end();++li) {
+      if((*$clipSurfaces).getOptionValueType(*li) != Loci::FUNCTION) {
+        cerr << "expecting plane specifier on clipSurfaces input for plane:"
+             << *li 
+             << endl ;
+        Loci::Abort() ;
+      }
+      string func ;
+      Loci::options_list::arg_list value_list ;
+      (*$clipSurfaces).getOption(*li,func,value_list) ;
+      if(func == "plane") {
+	planes.push_back(cutplaneInfo()) ;
+	planes[i].name = *li ;
+	Loci::options_list args ;
+	args.Input(value_list) ;
+	vect3d n(0,0,1),pt(0,0,0) ;
+	if(args.optionExists("point")) {
+	  args.getOptionUnits("point","m",pt) ;
+	}
+	if(args.optionExists("normal")) {
+	  args.getOptionUnits("normal","m",n) ;
+	}
+	n *= 1./(norm(n)+1e-30) ;
+	vect3d nz = n ;
+	vect3d ny = vect3d(0,1,0) ;
+	if(fabs(n.y) > fabs(n.x) && fabs(n.y) > fabs(n.z))
+	  ny = vect3d(1,0,0) ;
+	
+	ny -= dot(ny,n)*n ;
+	ny *= 1./(norm(ny)+1e-30) ;
+	
+	vect3d nx = cross(ny,nz) ;
+	
+	planes[i].pt = pt ;
+	planes[i].nx = nx ;
+	planes[i].ny = ny ;
+	planes[i].nz = nz ;
+	i++ ;
+      } 
+    }
+    *$cutInfo = planes ;
+  } ;
+  $type cutplanes blackbox<std::list<pair<string,Loci::CutPlane> > >  ;
+
+  $type face2edge multiMap ;
+  $type edge2node MapVec<2> ;
+
+  $rule unit(cutplanes<-cutInfo), prelude {
+    *$cutplanes = std::list<pair<string,Loci::CutPlane> >() ;
+  } ;
+
+  $rule apply(cutplanes<-(upper,lower,boundary_map)->face2node->pos,
+              (upper,lower,boundary_map)->face2edge->edge2node->pos,
+              iblank,
+	      cutInfo)[Loci::NullOp],prelude {
+    using namespace Loci ;
+    entitySet dom = $upper.domain() & $lower.domain()  & $boundary_map.domain() ;
+    if(MPI_processes > 1) {
+      fact_db::distribute_infoP dist =
+        exec_current_fact_db->get_distribute_info() ;
+      Loci::constraint my_entities ;
+      my_entities = dist->my_entities ;
+      dom &= *my_entities ;
+    }
+    entitySet dom2 ;
+    FORALL(dom,ii) {
+      if($iblank[ii] < 2)
+        dom2 += ii ;
+    } ENDFORALL ;
+    dom = dom2 ;
+    int nplanes = $cutInfo->size() ;
+    entitySet posdom = $pos.domain() ;
+    for(int i=0;i<nplanes;++i) {
+      store<Loci::real_t> pval ;
+      pval.allocate(posdom) ;
+      vect3d nz = (*$cutInfo)[i].nz ;
+      vect3d pt = (*$cutInfo)[i].pt ;
+      FORALL(posdom,nd) {
+        vect3d npt = $pos[nd]-pt ;
+        pval[nd] = dot(npt,nz) ;
+        // test        pval[nd] = norm(npt)-0.45 ;
+      } ENDFORALL ;
+      (*$cutplanes).push_back(make_pair((*$cutInfo)[i].name,
+					getCutPlane($upper.Rep(),$lower.Rep(),
+						 $boundary_map.Rep(),
+						 $face2node.Rep(),
+						 $face2edge.Rep(),
+						 $edge2node.Rep(),
+						 pval.Rep(),
+						 dom))) ;
+    } 
+  } ;
+
+  $type isoSurface(X) param<string> ;
+  $type isoValues(X) blackbox<std::vector<std::pair<string,float> > > ;
+  $type X store<float> ;
+  $rule apply(cutplanes<-(upper,lower,boundary_map)->face2node->X,
+              (upper,lower,boundary_map)->face2edge->edge2node->X,
+              iblank,
+	      isoValues(X),isoSurface(X))[Loci::NullOp],
+    parametric(isoSurface(X)), prelude {
+    using namespace Loci ;
+    entitySet dom = $upper.domain() & $lower.domain()  & $boundary_map.domain() ;
+    if(MPI_processes > 1) {
+      fact_db::distribute_infoP dist =
+        exec_current_fact_db->get_distribute_info() ;
+      Loci::constraint my_entities ;
+      my_entities = dist->my_entities ;
+      dom &= *my_entities ;
+    }
+    entitySet dom2 ;
+    FORALL(dom,ii) {
+      if($iblank[ii] < 2)
+        dom2 += ii ;
+    } ENDFORALL ;
+    dom = dom2 ;
+    int nvalues = $isoValues(X)->size() ;
+    entitySet Xdom = $X.domain() ;
+    for(int i=0;i<nvalues;++i) {
+      store<Loci::real_t> Xval ;
+      Xval.allocate(Xdom) ;
+      double Xoff = (*$isoValues(X))[i].second ;
+      FORALL(Xdom,nd) {
+        Xval[nd] = $X[nd]-Xoff ;
+      } ENDFORALL ;
+      (*$cutplanes).push_back(make_pair((*$isoValues(X))[i].first,
+					getCutPlane($upper.Rep(),$lower.Rep(),
+						    $boundary_map.Rep(),
+						    $face2node.Rep(),
+						    $face2edge.Rep(),
+						    $edge2node.Rep(),
+						    Xval.Rep(),
+						    dom))) ;
+    } 
+  } ;
+
+  // Put Isosurface cut code here
+  // First we need to grab the list of values and plane names in this rule
+  $rule blackbox(isoValues(X)<-isoSurface(X),clipSurfaces),
+    parametric(isoSurface(X)),prelude {
+    std::vector<std::pair<string,float> > working ;
+    
+    options_list::option_namelist l = (*$clipSurfaces).getOptionNameList() ;
+
+    for(options_list::option_namelist::const_iterator li=l.begin();
+        li!=l.end();++li) {
+      if((*$clipSurfaces).getOptionValueType(*li) == Loci::FUNCTION) {
+	string func ;
+	Loci::options_list::arg_list value_list ;
+	(*$clipSurfaces).getOption(*li,func,value_list) ;
+	if(func == "isosurface") {
+	  string sname = *li ;
+	  
+	  if(value_list.front().type_of() == Loci::NAME_ASSIGN) {
+	    string sn ;
+	    value_list.front().get_value(sn) ;
+	    if((*$isoSurface(X)) == sn) { // This is for our isoSurface variable
+	      Loci::option_values::value_list_type assign_arg ;
+	      value_list.front().get_value(assign_arg) ;
+	      double sv ;
+	      assign_arg.front().get_value(sv) ;
+	      working.push_back(make_pair(sname,sv)) ;
+	    }
+	  } 
+	}
+      }
+    }
+    (*$isoValues(X)).swap(working) ;
+  } ;
+
+  $type doPlotCut param<bool> ;
+  $rule singleton(doPlotCut{n,it}<-clipFreq,ncycle{n},lastNewton{n,it}) {
+    $doPlotCut{n,it} = ($clipFreq > 0 && $lastNewton{n,it}  && 
+			((($ncycle{n}+1)%$clipFreq) == 0)) ;
+  }
+
+    
+  $rule pointwise(OUTPUT<-cutplanes,(upper,lower,boundary_map)->face2node->pos,
+                  (upper,lower,boundary_map)->face2edge->edge2node->pos,
+                  cutInfo,modelName,ncycle,plot_postfix),
+    conditional(doPlotCut),prelude {
+    using namespace Loci ;
+    std::list<pair<string,Loci::CutPlane> >::const_iterator li ;
+    for(li=(*$cutplanes).begin();li!=(*$cutplanes).end();++li) {
+      string cutname = li->first ;
+      string dir = "output/" + *$modelName + "_SURF." + cutname ;
+      $[Once] {
+	makeDirectory(dir) ;
+      }
+      string ncyc = *$plot_postfix ;
+      
+      string basename = "topology_"+ncyc + ".info"  ;
+      string topolink = dir + "/topo_file." + ncyc ;
+      $[Once] {
+	ofstream file(topolink.c_str(),ios::trunc) ;
+	file << basename << endl ;
+	file.close() ;
+      }
+
+      string filename = dir + "/" + basename ;
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      Loci::writeCutPlaneTopo(file_id,li->second,
+                              *Loci::exec_current_fact_db) ;
+      Loci::hdf5CloseFile(file_id) ;
+      
+      filename = dir+"/pos." + ncyc ;
+      file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      string data = "data" ;
+      Loci::writeCutPlaneNodalVal(file_id,data,$face2node.Rep(),
+                                  $edge2node.Rep(), $pos,
+                                  li->second,
+                                  *Loci::exec_current_fact_db) ;
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+  
+
+  //  (upper,lower,boundary_map)->face2node->pos,
+  //                  (upper,lower,boundary_map)->face2edge->edge2node->pos,
+  scalar_cutplane_output::
+  scalar_cutplane_output(const char *vname, const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("plotOutput_") + value_name ;
+    constraint(constraint_name) ;
+    constraint("(upper,lower,boundary_map)->face2node->pos") ;
+    name_store(var_name,c2n) ;
+    name_store("modelName",modelName) ;
+    name_store("ncycle",ncycle) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("upper",upper) ;
+    name_store("lower",lower) ;
+    name_store("boundary_map",boundary_map) ;
+    name_store("face2node",face2node) ;
+    name_store("face2edge",face2edge) ;
+    name_store("edge2node",edge2node) ;
+    name_store("cutplanes",cutplanes) ;
+    name_store("cutInfo",cutInfo) ;
+    input("cutplanes,cutInfo") ;
+    string input1 = "(upper,lower,boundary_map)->face2node->" + var_name ;
+    input(input1) ;
+    string input2 = "(upper,lower,boundary_map)->face2edge->edge2node->" + var_name ;
+    input(input2) ;
+    //    input(var_name) ;
+    input("modelName,ncycle,plot_postfix") ;
+    
+    conditional("doPlotCut") ;
+    output("OUTPUT") ;
+  }
+
+  void scalar_cutplane_output::compute(const sequence &seq) {
+    using namespace Loci ;
+    string ncyc = *plot_postfix ;
+    std::list<pair<string,Loci::CutPlane> >::const_iterator li ;
+    for(li=(*cutplanes).begin();li!=(*cutplanes).end();++li) {
+      string cutname = li->first ;
+      string dir = "output/" + *modelName + "_SURF." + cutname ;
+      $[Once] {
+	makeDirectory(dir) ;
+      }
+      
+      string filename = dir+"/"+value_name +"_sca." + ncyc ;
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      string data = "data" ;
+      Loci::writeCutPlaneNodalVal(file_id,data,face2node.Rep(),
+                                  edge2node.Rep(), c2n,
+                                  li->second,
+                                  *Loci::exec_current_fact_db) ;
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  }
+  
+  vector_cutplane_output::
+  vector_cutplane_output(const char *vname, const char *valname) {
+    var_name = string(vname) ;
+    value_name = string(valname) ;
+    string constraint_name = string("plotOutput_") + value_name ;
+    constraint(constraint_name) ;
+    constraint("(upper,lower,boundary_map)->face2node->pos") ;
+    name_store(var_name,c2n) ;
+    name_store("modelName",modelName) ;
+    name_store("ncycle",ncycle) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("OUTPUT",OUTPUT) ;
+    name_store("upper",upper) ;
+    name_store("lower",lower) ;
+    name_store("boundary_map",boundary_map) ;
+    name_store("face2node",face2node) ;
+    name_store("face2edge",face2edge) ;
+    name_store("edge2node",edge2node) ;
+    name_store("cutplanes",cutplanes) ;
+    name_store("cutInfo",cutInfo) ;
+    input("cutplanes,cutInfo") ;
+    string input1 = "(upper,lower,boundary_map)->face2node->" + var_name ;
+    input(input1) ;
+    string input2 = "(upper,lower,boundary_map)->face2edge->edge2node->" + var_name ;
+    input(input2) ;
+    //    input(var_name) ;
+    input("modelName,ncycle,plot_postfix") ;
+    
+    conditional("doPlotCut") ;
+    output("OUTPUT") ;
+  }
+
+  void vector_cutplane_output::compute(const sequence &seq) {
+    using namespace Loci ;
+    string ncyc = *plot_postfix ;
+    std::list<pair<string,Loci::CutPlane> >::const_iterator li ;
+    for(li=(*cutplanes).begin();li!=(*cutplanes).end();++li) {
+      string cutname = li->first ;
+      string dir = "output/" + *modelName + "_SURF." + cutname ;
+      $[Once] {
+	makeDirectory(dir) ;
+      }      
+      string filename = dir+"/"+value_name +"_vec." + ncyc ;
+      hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					   H5P_DEFAULT, H5P_DEFAULT) ;
+      string data = "data" ;
+      Loci::writeCutPlaneNodalVal(file_id,data,face2node.Rep(),
+                                  edge2node.Rep(), c2n,
+                                  li->second,
+                                  *Loci::exec_current_fact_db) ;
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  }
+  
+}
