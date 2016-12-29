@@ -152,7 +152,7 @@ name was provided.
   to define velocity.  If a turbulence model is loaded, then
   additional variables may be specified in the initial conditions to
   override default values (see the turbulence model section for the
-  more initial condtion information).
+  more initial condition information).
 
 \begin{table}[htbp]
 
@@ -355,15 +355,11 @@ Similar to restart modulo, except applies to plot files.
 \item {\tt plot\_output\_exclusive}
 
   Provides a comma delimited list of additional variables to output.
-  If this variable is present, then the default output variables
-  will not be written unless they are included in this list.  A list
-  of additional variables is given in table
-  \ref{tab:extract}. %%table \ref{tab:nodalextract}.  
-  Note that if you
-  want to output ``put'' files for restarting put {\tt put} in this
-  list and if you want to output species mixtures put {\tt mixture} in
-  this list.
-
+  If this variable is present, then the default output variables will
+  not be written unless they are included in this list.  A list of
+  additional variables is given in table \ref{tab:extract}. %%table
+  \ref{tab:nodalextract}.
+  
 \item {\tt stop\_iter}
 
   This variable defines the iteration at which the simulation is terminated.
@@ -397,7 +393,7 @@ maximumRunTime: 23.5 hour
   Gauss-Seidel solver which is selected by setting this variable to
   {\tt lsgs}.  This solver divides the matrix into lines and solves
   each line with a tri-diagonal solver.  The solver sweeps through
-  lines similar ot the symmetric Gauss-Seidel.  For the line solver,
+  lines similar to the symmetric Gauss-Seidel.  For the line solver,
   some under-relaxation is employed to stabilize the solver.  In general,
   this solver is very robust and useful for high Reynolds number or
   low speed problems.  The most robust solver is the one provided by
@@ -465,11 +461,11 @@ maximumRunTime: 23.5 hour
   {\em FlowPsi} solver the linear system solved is only an approximation.
   Usually after some amount of residual convergence it is more
   productive to proceed to the next Newton iteration in order to
-  achieve overall convergence of the PDE.  Overconverging the linear
+  achieve overall convergence of the PDE.  Over-converging the linear
   system solver can be non-productive as the linear system itself
   contains approximation errors.  Usually a factor of 10 reduction in
   the linear system residual is all that is needed for the Newton
-  iteratons to proceed productively, but some problems will benefit
+  iterations to proceed productively, but some problems will benefit
   from a more robust convergence of the approximate linearization.
   For difficult problems there may be some productivity to adjusting
   this parameter to a smaller value (while also increasing the {\tt
@@ -568,7 +564,14 @@ coriolis: <axis=[1,0,0], center=[0,0,0], speed=1000 rpm>
 \end{verbatim}
 \item {\tt componentMotion }
 
-This variable is used to describe the independent motion of each component in the volume grid.  Note: to use this, one needs to have created a grid that contains volume tags using the {\tt vogmerge} utility.  The variable contains a list of volume tags assigned to actions, where the actions may be {\tt stationary}, {\tt rotation}, or {\tt prescribed}.  For example, to describe a plane with a rotating propeller where the plane is undergoing prescribed motion in a stationary background mesh, one might use the following prescription:
+This variable is used to describe the independent motion of each
+component in the volume grid.  Note: to use this, one needs to have
+created a grid that contains volume tags using the {\tt vogmerge}
+utility.  The variable contains a list of volume tags assigned to
+actions, where the actions may be {\tt stationary}, {\tt rotation}, or
+{\tt prescribed}.  For example, to describe a plane with a rotating
+propeller where the plane is undergoing prescribed motion in a
+stationary background mesh, one might use the following prescription:
 \begin{verbatim}
 componentMotion: < prop = rotation(axis=[1,0,0],center=[0,0,0],speed=400rpm),
                    fuselage = prescribed,
@@ -664,7 +667,19 @@ cylinder(p1=[1,0,0],p2=[2,0,0],radius=.5)
   plane(p=[0,0,1.4],n=[0,0,1]),plane(p=[0,0,-1.4],n=[0,0,-1])
   ])
 \end{verbatim}
+\end{itemize}
 
+\item {\tt componentMRF }
+
+  The {\tt componentMRF} variable can be used to specify components
+  that are solved in a moving reference frame.  This is similar to the
+  {\tt coriolis} term except the velocities are solved in the global
+  reference frame.  This can allow simulations with a {\it frozen
+    rotor} simplification.  Note, this option is incompatible with
+  {\tt componentMotion}.  With this variable components can be
+  specified to be either in a rotating or stationary frame of
+  reference.  The input syntax is the same as for {\tt
+    componentMotion}.
 
 \end{enumerate}
 
@@ -708,10 +723,10 @@ The boundary conditions may be assigned as:
     This inflow boundary condition maintains constant entropy.  The
     user provides the total pressure and total temperature for the
     associated ``plenum'' conditions, and the inflow values that
-    preserve the total properties are computed.  A typical
-    multi-species input is {\tt isentropicInflow(p0=1atm, T0=300K)}.
-    {\bf Note: this boundary condition is only applicable to subsonic
-      inflow conditions.}
+    preserve the total properties are computed.  A typical input is
+    {\tt isentropicInflow(p0=1atm, T0=300K)}.  {\bf Note: this
+      boundary condition is only applicable to subsonic inflow
+      conditions.}
 
   \item {\tt fixedMass}
 
@@ -805,7 +820,7 @@ The boundary conditions may be assigned as:
   \item {\tt reflecting}
 
     This boundary condition implements a second order reflecting
-    boundary condtion where the interior solution is reflected through
+    boundary condition where the interior solution is reflected through
     the boundary normal to the exterior.  This boundary condition can
     be used to implement symmetry planes or impermeable boundary
     conditions, and it does not require any arguments.
@@ -870,7 +885,7 @@ The boundary conditions may be assigned as:
 The two boundary conditions are paired through sharing the name
 ``interface1''.  There are additional controls that can be provided in
 the vars file to control the behavior of the {\tt turboInterface}
-boundary conditon.  Note that the correct function of this boundary
+boundary condition.  Note that the correct function of this boundary
 condition requires that exactly two boundaries share the same name.
 Multiple boundaries can be paired and identified with independent
 names.  The names given to each pair are arbitrary and can be selected
@@ -894,7 +909,7 @@ setting is 500.
 This variable gives the type of search used to find cells for
 interpolation.  it can be set to either 'cartesian' or 'cylindrical'.
 If it is set to cylindrical, then it is assumed that the axis of the
-cylidrical coordinate system is the x axis.  The default is to use
+cylindrical coordinate system is the x axis.  The default is to use
 cartesian searching.  For turbomachinery applications cylindrical
 searching can provide more accurate interpolations for boundary layer
 regions near viscous walls.
@@ -1085,6 +1100,115 @@ and yaw to the right when viewed from the pilot's perspective).
 %%     BC_1=viscousWall(adiabatic,momentCenter=[0,0,0])
 %% \end{verbatim}
 
+\section{Relative Motion Problems using {\em FlowPsi}}
+
+{\em FlowPsi} can be used to simulate moving bodies using an unstructured
+over-set technique.  The over-set technique can be used with or without
+hole-cutting.  Usually for relative motion in turbo-machinery
+applications, hole cutting can be avoided through careful design of
+the mesh components.  The most important tool in developing
+simulations with relative motion is the interface boundary condition.
+This boundary condition is applied at the boundary faces that are at
+the edge of two grid regions.  Values are interpolated automatically
+from neighboring meshes at the interface boundary condition.
+Generally this boundary condition can be used for either overlapping
+meshes or meshes that just slide along a common surface (but are not
+point matched).
+
+In order to move components independently, one must first create a grid
+that contains volume tags that identify the meshes associated with
+each component.  Each component mesh is generated
+separately, and then all of the meshes are merged using the {\tt
+  vogmerge} utility.  During the merging step, one provides
+volume tags associated with each component grid.  For example, to merge the
+rotor and stator components into a single grid from two grids called
+'rotor.vog' and 'stator.vog', one would execute the following command:
+\begin{verbatim}
+vogmerge -g rotor.vog -tag Rotor -g stator.vog -tag Stator -o pump.vog
+\end{verbatim}
+This command combines the two grids for the rotor and stator into a
+single grid called 'pump.vog'.  The cells of the pump grid that come from
+{\tt rotor.vog} are tagged with ``Rotor'', and the cells of the pump grid
+that come from {\tt stator.vog} are tagged with ``Stator''. 
+
+Once a grid with the appropriate embedded volume tags and interface
+boundary surfaces are defined, it is possible to move each component
+independently using the {\tt componentMotion} variable in the {\tt vars}
+file.  If this variable is defined, then the motion of each component will be specified by the user (note that if no componentMotion variable exists, then one can still use the overset boundary conditions, but all of the mesh components will remain stationary.).  There are several options for component motion:
+\begin{enumerate}
+\item {\tt stationary} 
+
+Use this option to indicate that a given component does not move in
+the simulation.
+\item {\tt rotation}
+
+This option is used to define the fixed rotation rate of the component.
+The arguments to this option are {\tt axis},
+which specifies the axis of rotation, {\tt center}, which specifies a
+point on the rotation axis, and {\tt speed}, the rotation rate in
+revolutions per minute (rpm).
+
+\item {\tt prescribed}
+
+This option is used to specify that the component motion is
+given by a user defined data file.  This selection has no
+arguments.  The file name is derived from the component tag name,
+and the naming convention is {\tt motion\_TAG.vog}, where {\tt TAG} is
+the tag name given to the component in the {\tt
+  vogmerge} step.  The file starts with an integer number that specifies
+the number of data entries in the file.
+The data entries in the prescribed motion file (one entry per line) then
+consist of time in seconds, followed by the three coordinate
+positions of the center of mass in meters, followed by the four
+components of a quaternion that describes rotations about the center
+of mass.  Interpolation between the given data is accomplished using a cubic
+spline.  In order to specify derivative discontinuities in the data,
+repeat a data entry twice.
+
+\end{enumerate}
+
+\subsection{Specifying motion in a relative frame}
+
+In some cases, one will specify the motion of a component relative to
+another component's reference frame.  For example, one may describe the
+rotation of the propellers of an airplane relative to the airplane's
+coordinates.  If the airplane follows a prescribed motion, it is
+naturally expected that the propellers will follow the same prescribed
+motion.  In order to specify that the above motion is described in a
+relative frame, one uses {\tt componentHierarchy} to define the
+parent child relationship between objects.  If there is no motion
+prescribed in a frame relative to another, then this option is not
+needed.  Details on the usage of {\tt componentHierarchy} are given in
+Section \ref{prob_description_file}.
+
+\subsection{Hole Cutting}
+
+When motion can be prescribed such that it occurs along sliding,
+non-matched surfaces or along overlapping interface boundary
+conditions that do not intersect other boundary faces, then hole
+cutting can be avoided.  This reduces the number of cells needed and
+improves run times.  However, it is impossible to describe more
+general motion, such as two bodies that come in close proximity,
+without hole cutting.  To employ hole cutting, a grid is first created
+around an object that will be moving in the domain.  Usually the outer
+envelope of this grid (where the interface BC is applied) will be a
+simple geometric shape such as a sphere, cylinder, or body of
+revolution.  Hole cutting is enabled by adding a definition for {\tt
+  componentGeometry} to the {\tt .vars} file. (Note: adding {\tt
+  componentGeometry} to the {\tt .vars} file enables the hole cutting
+feature.).  In the component geometry input, the geometry of the outer
+envelope of given mesh components will be specified.  At least one of
+the mesh components will not be given any geometry description as this
+mesh will serve as the background mesh.
+
+When employing hole cutting, one does not need to be concerned
+with the overlap of the outer interface boundary of a component since
+the hole cutting will automatically cut cells according to the
+distance of the cell to surfaces from other tagged regions.  Thus
+when the interface surface overlaps geometry from another grid, the
+grids will be cut along the surface of equal distance between the two
+component surfaces.
+
 
 \section{{\em FlowPsi} Pre- and Post-processing Utilities}
 
@@ -1103,7 +1227,7 @@ nodes and cells in the mesh from the given {\tt ugrid} file.
 Generally this option would only be used if it is important for the
 grid conversion to preserve the original node ordering.  Additionally,
 you may input the units of the ugrid mesh (default is meters) with the option {\tt -in}
-for inches, {\tt -ft} for feet, {\tt -cm} for centimeters, or {\tt -mm} for milimeters.  If another
+for inches, {\tt -ft} for feet, {\tt -cm} for centimeters, or {\tt -mm} for millimeters.  If another
 unit is needed, you may use the {\tt -Lref} option. For example, if the
 input grid named {\tt "wingsection.b8.ugrid"} is
 non-dimensionalized with respect to a reference length
@@ -1121,7 +1245,7 @@ The converter has a {\tt -o} option to disable optimizations that
 would change the numbering of nodes and cells in the mesh from the
 given XDR mesh file.  Additionally, you may input the units of the XDR
 mesh with the option {\tt -in} for inches, {\tt -ft} for feet, {\tt
-  -cm} for centimeters, or {\tt -mm} for milimeters.  With no option,
+  -cm} for centimeters, or {\tt -mm} for millimeters.  With no option,
 {\tt xdr2vog} will assume the input is in meters.  The {\tt -Lref}
 option can be used as with {\tt ugrid2vog} to specify other unit
 systems.  
@@ -1141,7 +1265,10 @@ the preceding {\tt -g} options.  If many geometric transforms are
 specified, then they are applied in the given order.  Finally, for
 each grid, one may apply a volume tag using the {\tt -tag} option.
 This is used when creating grids for simulations using relative
-motion.  For example, to perform a simulation on turbo-machinery that included a rotor and stator section, one would generate two grids, one for each component, and then merge them using the following vogmerge command:
+motion.  For example, to perform a simulation on turbo-machinery that
+included a rotor and stator section, one would generate two grids, one
+for each component, and then merge them using the following vogmerge
+command:
 \begin{verbatim}
 vogmerge -g rotor.vog -tag rotor -g stator.vog -tag stator -o turbo.vog
 \end{verbatim}
@@ -1184,11 +1311,13 @@ The {\tt cobalt2vog} grid converter will convert an ASCII unformatted {\it Cobal
 
 \subsubsection{\tt plot3d2vog}
 
-The {\tt plot3d2vog} grid converter will convert multi-block plot3d files into an VOG file format compatible with {\em FlowPsi}. 
+The {\tt plot3d2vog} grid converter will convert multi-block plot3d
+files into an VOG file format compatible with {\em FlowPsi}.
 
 \subsubsection{\tt fluent2vog}
 
-The {\tt fluent2vog} grid converter will convert fluent {\tt .msh} files to the VOG file format for use with {\em FlowPsi}.
+The {\tt fluent2vog} grid converter will convert fluent {\tt .msh}
+files to the VOG file format for use with {\em FlowPsi}.
 
 \subsubsection{\tt ccm2vog}
 
@@ -1197,9 +1326,9 @@ The {\tt ccm2vog} grid converter will convert Star CCM+ grids to the VOG file fo
 
 \subsubsection{\tt vogcheck}
 
-The {\tt vogcheck} utility is a grid quality assesment tool for {\em FlowPsi}.
+The {\tt vogcheck} utility is a grid quality assessment tool for {\em FlowPsi}.
 This program can be run in parallel for larger grids using mpirun.
-The program outputs an overall assesment of the grid quality in the
+The program outputs an overall assessment of the grid quality in the
 range of {\tt UNUSABLE}, {\tt marginal}, {\tt poor}, {\tt good}, and {\tt
   excellent}.  A grid that is identified as {\tt UNUSABLE} will
 probably not be useful for {\em FlowPsi} simulations.  Grids marked as {\tt
@@ -1404,26 +1533,25 @@ written out for these surfaces.
 \subsection{Mean and Variance Output}
 
 For hybrid RANS/LES or DES simulations, it is useful to compute mean
-and variances of output variables.  There are two methods provided
-to allow users to extract this type of information from a
-simulation: offline and online.  The offline approach is implemented
-as part of the {\tt extract} utility with the {\tt -mean} option.  The
-extract utility can read in a sequence of output scalars, vectors, or
-mixtures that were written out by {\em FlowPsi} and compute mean and
-variance values which are then written back out to the output
-directory.  The {\tt extract} utility can then be used to visualize
-the resulting mean and  variance values.  To
-extract these values, use the argument {\tt -mean} followed by {\tt
-  -end} with the ending iteration and {\tt -inc} with the iteration
-increment.  Extract starts with the usual given extract iteration number and
-averages consecutive plot files at the provided increment until the
-ending iteration is reached.  The mean values are then written to the
-output directory as the variable with {\tt Mean} appended for the mean
-and {\tt Var} for the variance.  For vector valued variables, the
-covariance is also output as {\tt Cuv}, {\tt Cuw}, and {\tt Cvw} for the
-covariance of the {\it x-y}, {\it x-z}, and {\it y-z} components,
-respectively.  These variables can then be extracted in the usual way
-for visualization.
+and variances of output variables.  There are two methods provided to
+allow users to extract this type of information from a simulation:
+offline and online.  The offline approach is implemented as part of
+the {\tt extract} utility with the {\tt -mean} option.  The extract
+utility can read in a sequence of output scalars or vectors that were
+written out by {\em FlowPsi} and compute mean and variance values
+which are then written back out to the output directory.  The {\tt
+  extract} utility can then be used to visualize the resulting mean
+and variance values.  To extract these values, use the argument {\tt
+  -mean} followed by {\tt -end} with the ending iteration and {\tt
+  -inc} with the iteration increment.  Extract starts with the usual
+given extract iteration number and averages consecutive plot files at
+the provided increment until the ending iteration is reached.  The
+mean values are then written to the output directory as the variable
+with {\tt Mean} appended for the mean and {\tt Var} for the variance.
+For vector valued variables, the covariance is also output as {\tt
+  Cuv}, {\tt Cuw}, and {\tt Cvw} for the covariance of the {\it x-y},
+{\it x-z}, and {\it y-z} components, respectively.  These variables
+can then be extracted in the usual way for visualization.
 
 The online method for mean and variances is enabled by adding the
 following line to the top of your {\tt .vars} file (before the first brace, \{ ):
