@@ -4,14 +4,14 @@ include revision.conf
 
 FLOWPSI_BASE = $(shell pwd)
 
-default: flowpsi tools turbulence particle guide onlineStats
+default: flowpsi tools turbulence particle guide addOns
 
 all: default
 
 install: all
 	FLOWPSI_INSTALL_DIR=$(FLOWPSI_INSTALL_DIR) FLOWPSI_INSTALL_PATH=$(FLOWPSI_INSTALL_PATH) bash Install.bash
 
-.PHONEY: FRC flowpsi tools test turbulence particle guide onlineStats install
+.PHONEY: FRC flowpsi tools test turbulence particle guide addOns install
 
 setup: FRC
 	mkdir -p lib
@@ -27,11 +27,11 @@ flowpsi: FRC
 turbulence: setup
 	$(MAKE) -C turbulence FLOWPSI_BASE="$(FLOWPSI_BASE)" all
 
+addOns: setup
+	$(MAKE) -C addOns FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+
 particle: setup
 	$(MAKE) -C particle FLOWPSI_BASE="$(FLOWPSI_BASE)" install
-
-onlineStats: setup
-	$(MAKE) -C onlineStats FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 tools: FRC
 	$(MAKE) -C tools FLOWPSI_BASE="$(FLOWPSI_BASE)"  all
@@ -53,8 +53,8 @@ clean: FRC
 	$(MAKE) -C src -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C tools -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C turbulence -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
+	$(MAKE) -C addOns -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
-	$(MAKE) -C onlineStats -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 
 distclean: FRC
@@ -62,7 +62,7 @@ distclean: FRC
 	$(MAKE) -C src -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C tools -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C turbulence -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
+	$(MAKE) -C addOns -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
-	$(MAKE) -C onlineStats -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	rm -fr lib bin output debug *~ include/*~
