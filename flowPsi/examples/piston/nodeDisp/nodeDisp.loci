@@ -1,0 +1,35 @@
+/*-*- C++ -*-*/
+#include <Loci.h>
+#include "flowTypes.h"
+$include "FVM.lh"
+$include "flowPsi.lh"
+
+using flowPsi::real;
+using flowPsi::vect3d;
+
+//------------------------------------------------------------------
+$type stime                             param<real>;
+//------------------------------------------------------------------
+
+$type pistonSpeed param<real> ;
+$rule default(pistonSpeed) {
+  $pistonSpeed=100 ; 
+}
+
+//------------------------------------------------------------------
+$type nodeDisp_b                        store<vect3d>;
+$type nodeDispUpdate_b                        store<vect3d>;
+//------------------------------------------------------------------
+$rule pointwise( nodeDisp_b{n} <- stime{n}, pos,pistonSpeed ),
+  constraint( movingBoundaryNodes{n}) {
+  double speed = $pistonSpeed ;
+  double dx = -min(0.5,$stime{n}*speed) ;
+  $nodeDisp_b{n} = vect3d(dx,0,0) ;
+}
+
+$rule pointwise( nodeDispUpdate_b{n,it} <- stime{n,it}, pos,pistonSpeed),
+  constraint( movingBoundaryNodes{n,it} ) {
+  double speed = $pistonSpeed ;
+  double dx = -min(0.5,$stime{n,it}*speed) ;
+  $nodeDispUpdate_b{n,it} = vect3d(dx,0,0) ;
+}
