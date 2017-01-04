@@ -1,0 +1,577 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <readGrid.h>
+#include <string>
+#include <set>
+#include <map>
+
+$include "flowPsi.lh"
+$include "mms.lh"
+using namespace flowPsi ;
+using std::string ;
+using std::set ;
+using std::map ;
+using std::ofstream ;
+using std::ios ;
+using std::endl ;
+using std::cerr ;
+
+$type flowOperator param<Loci::exprP> ;
+$type operatorDefs param<Loci::exprP> ;
+
+$type SAOperator param<Loci::exprP> ;
+$type tkeEqnOperator param<Loci::exprP> ;
+$type omegaEqnOperator param<Loci::exprP> ;
+
+$type wallDistanceFunction param<Loci::exprP> ;
+$type SSTBlendingF1Function param<Loci::exprP> ;
+$type SSTBlendingF2Function param<Loci::exprP> ;
+
+
+$rule optional(wallDistanceFunction) {}
+$rule optional(SSTBlendingF1Function) {}
+$rule optional(SSTBlendingF2Function) {}
+
+$rule optional(flowOperator) {}
+
+$rule optional(operatorDefs) {}
+
+$rule optional(SAOperator) {}
+
+$rule optional(tkeEqnOperator) {}
+
+$rule optional(omegaEqnOperator) {}
+
+
+namespace Loci {
+  void getVarNames(exprP e, set<string> &namelist) ;
+}
+
+$type stime_mms param<real> ;
+
+$rule singleton(stime_mms{n}<-stime{n},dtmax{n}) {
+  $stime_mms{n} = $stime{n}+$dtmax{n} ;
+}
+
+// Determine if the prescribed function is time dependent.
+$type MMSTimeDependent Constraint ;
+$type MMSSteadyState Constraint ;
+$rule constraint(MMSTimeDependent,MMSSteadyState<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create(string("(rho,u,v,w,p,T)")) ;
+  Loci::exprP p = Loci::substitutionEngine(vars,$operatorDefs) ;
+  std::set<string> namelist ;
+  Loci::getVarNames(p,namelist) ;
+  $MMSTimeDependent = EMPTY ;
+  $MMSSteadyState = EMPTY ;
+  if(namelist.find(string("t")) != namelist.end())
+    $MMSTimeDependent = $*operatorDefs.domain() ;
+  else
+    $MMSSteadyState  = $*operatorDefs.domain() ;
+}
+
+$type location store<vect3d> ;
+
+$type MMS_rhoFunc param<Loci::exprP> ;
+$type MMS_velFunc param<Loci::exprP> ;
+$type MMS_pFunc param<Loci::exprP> ;
+
+$rule singleton(MMS_rhoFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("rho") ;
+  $MMS_rhoFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+  
+$rule pointwise(mmsRho(location)<-location,MMS_rhoFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $mmsRho(location) = ($MMS_rhoFunc)->evaluate(varmap) ;
+}
+
+$rule pointwise(mmsRho(location)<-location,stime_mms,MMS_rhoFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $mmsRho(location) = ($MMS_rhoFunc)->evaluate(varmap) ;
+}
+
+$rule singleton(MMS_velFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("(u,v,w)") ;
+  $MMS_velFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+
+$rule pointwise(mmsVelocity(location)<-location,MMS_velFunc),
+  constraint(MMSSteadyState,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($MMS_velFunc)->expr_list.begin() ;
+  $mmsVelocity(location).x = (*li)->evaluate(varmap) ;
+  li++ ;
+  $mmsVelocity(location).y = (*li)->evaluate(varmap) ;
+  li++ ;
+  $mmsVelocity(location).z = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(mmsVelocity(location)<-location,stime_mms,MMS_velFunc),
+  constraint(MMSTimeDependent,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($MMS_velFunc)->expr_list.begin() ;
+  $mmsVelocity(location).x = (*li)->evaluate(varmap) ;
+  li++ ;
+  $mmsVelocity(location).y = (*li)->evaluate(varmap) ;
+  li++ ;
+  $mmsVelocity(location).z = (*li)->evaluate(varmap) ;
+}
+
+$rule singleton(MMS_pFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("p") ;
+  $MMS_pFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+
+$rule pointwise(mmsPressure(location)<-location,MMS_pFunc),
+  constraint(MMSSteadyState,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $mmsPressure(location) = ($MMS_pFunc)->evaluate(varmap) ;
+}
+
+
+$rule pointwise(mmsPressure(location)<-location,stime_mms,MMS_pFunc),
+  constraint(MMSTimeDependent,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $mmsPressure(location) = ($MMS_pFunc)->evaluate(varmap) ;
+}
+
+
+$type meanFlowSrcFunc param<Loci::exprP> ;
+
+$rule singleton(meanFlowSrcFunc<-flowOperator,operatorDefs) {
+    
+  Loci::exprP sub = Loci::substitutionEngine($flowOperator,$operatorDefs) ;
+  sub = sub->simplify() ; // Simplify expression before evaluating 
+  // derivative expressions
+  sub = sub->symbolic_eval() ; // evaluate symbolic operators (derivatives)
+  sub = sub->simplify() ; // simplify result
+  $meanFlowSrcFunc = sub ;
+  $[Once] {
+    ofstream ofile("flowOperator.dat",ios::out) ;
+    
+    ofstream defsfile("funcDefs.dat",ios::out) ;
+    ofstream flowfile("flowSourceDefs.dat",ios::out) ;
+    ofile << "Flow Operator:" << endl ;
+
+    Loci::expression::exprList::const_iterator li ;
+    if($flowOperator->op != Loci::OP_COMMA) {
+      cerr << "flowOperator should be a comma separated list!"<< endl ;
+      Loci::Abort() ;
+    }
+    li = ($flowOperator)->expr_list.begin() ;
+    ofile << "(" << endl ;
+    if(li != ($flowOperator)->expr_list.end()) {// print first item
+      ofile << *li ;
+    }
+    
+    for(++li;li != ($flowOperator)->expr_list.end();++li) {//print rest of list
+      ofile << "," << endl << *li ;
+    }
+    ofile << endl << ")" << endl ;
+      
+    
+    defsfile << "Operator definitions:" << endl ;
+
+    if($operatorDefs->op != Loci::OP_COMMA) {
+      cerr << "operatorDefs should be a comma separated list!"<< endl ;
+      Loci::Abort() ;
+    }
+    
+    li = ($operatorDefs)->expr_list.begin() ;
+    defsfile << "(" << endl ;
+    if(li != ($operatorDefs)->expr_list.end()) { // print first item
+      defsfile << *li ;
+    }
+    for(++li;li != ($operatorDefs)->expr_list.end();++li) {// print rest of list
+      defsfile << "," << endl << *li ;
+    }
+    defsfile << endl << ")" << endl ;
+
+    flowfile << "mean flow source terms (derived and simplified)" << endl ;
+
+    if(sub->op != Loci::OP_COMMA) {
+      cerr << "flow source terms should be a comma separated list!, this shouldn't happen!"<< endl ;
+      Loci::Abort() ;
+    }
+    li = (sub)->expr_list.begin() ;
+    flowfile << "(" << endl ;
+    if(li != (sub)->expr_list.end()) { // print first item
+      flowfile << *li ;
+    }
+    for(++li;li != (sub)->expr_list.end();++li) { // print rest of list
+      flowfile << ","<< endl << *li ;
+    }
+    flowfile << endl << ")" << endl ;
+  }    
+}
+
+$rule pointwise(mms::dist_noslip<-cellcenter,wallDistanceFunction) {
+  map<string,double> varmap ;
+  varmap["x"] = $cellcenter.x ;
+  varmap["y"] = $cellcenter.y ;
+  varmap["z"] = $cellcenter.z ;
+  $dist_noslip = ($wallDistanceFunction)->evaluate(varmap) ;
+}
+// SST blending functions
+$type bF1               store<flowPsi::real> ;
+$type bF2               store<flowPsi::real> ;
+
+$rule pointwise(mms::sst::bF2<-cellcenter,SSTBlendingF2Function) {
+  map<string,double> varmap ;
+  varmap["x"] = $cellcenter.x ;
+  varmap["y"] = $cellcenter.y ;
+  varmap["z"] = $cellcenter.z ;
+  $bF2 = ($SSTBlendingF2Function)->evaluate(varmap) ;
+}
+$rule pointwise(mms::sst::bF1<-cellcenter,SSTBlendingF1Function) {
+  map<string,double> varmap ;
+  varmap["x"] = $cellcenter.x ;
+  varmap["y"] = $cellcenter.y ;
+  varmap["z"] = $cellcenter.z ;
+  $bF1 = ($SSTBlendingF1Function)->evaluate(varmap) ;
+}
+  
+$rule pointwise(massGeneralSrc(location)<-location,meanFlowSrcFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  
+  $massGeneralSrc(location) = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(massGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  
+  $massGeneralSrc(location) = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(momentumGeneralSrc(location)<-location,meanFlowSrcFunc),
+  constraint(MMSSteadyState,location) {
+  // Momemtum source term  in  Kg/(m^2 sec^2)
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  li++ ;
+  $momentumGeneralSrc(location).x = (*li)->evaluate(varmap) ;
+  li++ ;
+  $momentumGeneralSrc(location).y = (*li)->evaluate(varmap) ;
+  li++ ;
+  $momentumGeneralSrc(location).z = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(momentumGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc),
+  constraint(MMSTimeDependent,location) {
+  // Momemtum source term  in  Kg/(m^2 sec^2)
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  
+  li++ ;
+
+  $momentumGeneralSrc(location).x = (*li)->evaluate(varmap) ;
+  li++ ;
+  $momentumGeneralSrc(location).y = (*li)->evaluate(varmap) ;
+  li++ ;
+  $momentumGeneralSrc(location).z = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(energyGeneralSrc(location)<-location,meanFlowSrcFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  
+  for(int i=0;i<4;++i) {
+    li++ ;
+  }
+
+  // energy source term in Kg J/(m^3 sec)
+  $energyGeneralSrc(location) = (*li)->evaluate(varmap) ;
+}
+
+$rule pointwise(energyGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  Loci::expression::exprList::const_iterator li ;
+  li = ($meanFlowSrcFunc)->expr_list.begin() ;
+  
+  for(int i=0;i<4;++i) {
+    li++ ;
+  }
+
+  // energy source term in Kg J/(m^3 sec)
+  $energyGeneralSrc(location) = (*li)->evaluate(varmap) ;
+}
+
+$type MMS_tkeFunc param<Loci::exprP> ;
+$type MMS_omegaFunc param<Loci::exprP> ;
+
+$rule singleton(MMS_tkeFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("tke") ;
+  $MMS_tkeFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+
+$rule singleton(MMS_omegaFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("omega") ;
+  $MMS_omegaFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+
+$rule pointwise(mms_k(location)<-location,MMS_tkeFunc),
+  constraint(MMSSteadyState,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $mms_k(location) = ($MMS_tkeFunc)->evaluate(varmap) ;
+}
+
+
+$rule pointwise(mms_k(location)<-location,stime_mms,MMS_tkeFunc),
+  constraint(MMSTimeDependent,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $mms_k(location) = ($MMS_tkeFunc)->evaluate(varmap) ;
+}
+
+$rule pointwise(mms_w(location)<-location,MMS_omegaFunc),
+  constraint(MMSSteadyState,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $mms_w(location) = ($MMS_omegaFunc)->evaluate(varmap) ;
+}
+
+
+$rule pointwise(mms_w(location)<-location,stime_mms,MMS_omegaFunc),
+  constraint(MMSTimeDependent,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $mms_w(location) = ($MMS_omegaFunc)->evaluate(varmap) ;
+}
+
+
+$type tkeSrcFunc param<Loci::exprP> ;
+
+$rule singleton(tkeSrcFunc<-tkeEqnOperator,operatorDefs) {
+  Loci::exprP sub = Loci::substitutionEngine($tkeEqnOperator,$operatorDefs) ;
+  sub = sub->simplify() ; // Simplify expression before evaluating 
+  // derivative expressions
+  sub = sub->symbolic_eval() ; // evaluate symbolic operators (derivatives)
+  sub = sub->simplify() ; // simplify result
+  $tkeSrcFunc = sub ;
+  $[Once] {
+    ofstream ofile("tkeOperator.dat",ios::out) ;
+    ofile << "tke Model Operator:" << endl ;
+    ofile << $tkeEqnOperator << endl << endl ;
+    ofile << "tke Source Term:" << endl ;
+    ofile << sub << endl << endl ;
+  }
+}
+
+$rule pointwise(rkGeneralSrc(location)<-location,tkeSrcFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $rkGeneralSrc(location) = ($tkeSrcFunc)->evaluate(varmap) ;
+}
+
+$rule pointwise(rkGeneralSrc(location)<-location,stime_mms,tkeSrcFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $rkGeneralSrc(location) = ($tkeSrcFunc)->evaluate(varmap) ;
+}
+
+$type omegaSrcFunc param<Loci::exprP> ;
+
+$rule singleton(omegaSrcFunc<-omegaEqnOperator,operatorDefs) {
+  Loci::exprP sub = Loci::substitutionEngine($omegaEqnOperator,$operatorDefs) ;
+  sub = sub->simplify() ; // Simplify expression before evaluating 
+  // derivative expressions
+  sub = sub->symbolic_eval() ; // evaluate symbolic operators (derivatives)
+  sub = sub->simplify() ; // simplify result
+  $omegaSrcFunc = sub ;
+  $[Once] {
+    ofstream ofile("omegaOperator.dat",ios::out) ;
+    ofile << "omega Model Operator:" << endl ;
+    ofile << $omegaEqnOperator << endl << endl ;
+    ofile << "omega Source Term:" << endl ;
+    ofile << sub << endl << endl ;
+  }
+}
+
+$rule pointwise(rwGeneralSrc(location)<-location,omegaSrcFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $rwGeneralSrc(location) = ($omegaSrcFunc)->evaluate(varmap) ;
+}
+
+$rule pointwise(rwGeneralSrc(location)<-location,stime_mms,omegaSrcFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $rwGeneralSrc(location) = ($omegaSrcFunc)->evaluate(varmap) ;
+}
+
+$type MMS_nu_tFunc param<Loci::exprP> ;
+
+$rule singleton(MMS_nu_tFunc<-operatorDefs) {
+  Loci::exprP vars = Loci::expression::create("nu_t") ;
+  $MMS_nu_tFunc = Loci::substitutionEngine(vars,$operatorDefs) ;
+}
+
+$rule pointwise(mms_nu_t(location)<-location,MMS_nu_tFunc),
+  constraint(MMSSteadyState,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $mms_nu_t(location) = ($MMS_nu_tFunc)->evaluate(varmap) ;
+}
+
+
+$rule pointwise(mms_nu_t(location)<-location,stime_mms,MMS_nu_tFunc),
+  constraint(MMSTimeDependent,location)
+{
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $mms_nu_t(location) = ($MMS_nu_tFunc)->evaluate(varmap) ;
+}
+
+
+$type SASrcFunc param<Loci::exprP> ;
+
+$rule singleton(SASrcFunc<-SAOperator,operatorDefs) {
+  Loci::exprP sub = Loci::substitutionEngine($SAOperator,$operatorDefs) ;
+  sub = sub->simplify() ; // Simplify expression before evaluating 
+  // derivative expressions
+  sub = sub->symbolic_eval() ; // evaluate symbolic operators (derivatives)
+  sub = sub->simplify() ; // simplify result
+  $SASrcFunc = sub ;
+  $[Once] {
+    ofstream ofile("SAOperator.dat",ios::out) ;
+    ofile << "SA Model Operator:" << endl ;
+    ofile << $SAOperator << endl << endl ;
+    ofile << "SA Source Term:" << endl ;
+    ofile << sub << endl << endl ;
+  }
+}
+
+$rule pointwise(SAGeneralSrc(location)<-location,SASrcFunc),
+  constraint(MMSSteadyState,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  $SAGeneralSrc(location) = ($SASrcFunc)->evaluate(varmap) ;
+}
+
+$rule pointwise(SAGeneralSrc(location)<-location,stime_mms,SASrcFunc),
+  constraint(MMSTimeDependent,location) {
+  map<string,double> varmap ;
+  varmap["x"] = $location.x ;
+  varmap["y"] = $location.y ;
+  varmap["z"] = $location.z ;
+  varmap["t"] = $stime_mms ;
+  $SAGeneralSrc(location) = ($SASrcFunc)->evaluate(varmap) ;
+}
+
