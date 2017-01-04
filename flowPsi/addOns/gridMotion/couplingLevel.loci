@@ -1,0 +1,47 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <iostream>
+using std::endl;
+using std::ostream;
+using std::cout ;
+#include <string>
+using std::string;
+#include <Loci.h>
+
+$include "FVM.lh"
+$include "gridMover.lh"
+
+$type meshCouplingMode param<string> ;
+$rule default(meshCouplingMode) {
+  $meshCouplingMode = "delayed" ;
+}
+
+$type GM_timeLaggedCouplingMode Constraint ;
+$type GM_nonLinearCouplingMode      Constraint ;
+
+$rule constraint(GM_timeLaggedCouplingMode,GM_nonLinearCouplingMode<-meshCouplingMode) {
+  $GM_timeLaggedCouplingMode = ~EMPTY ;
+  $GM_nonLinearCouplingMode = EMPTY ;
+  if($meshCouplingMode == "nonLinear") {
+    $GM_timeLaggedCouplingMode = EMPTY ;
+    $GM_nonLinearCouplingMode = ~EMPTY ;
+  }
+}

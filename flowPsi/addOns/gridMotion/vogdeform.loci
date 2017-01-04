@@ -1,0 +1,2420 @@
+//#############################################################################
+//#
+//# Copyright 2016, ATA Engineering
+//# Developed by Azariah Cornish, ATA Engineering
+//#
+//# This file is part of the Loci Framework.
+//#
+//# The Loci Framework is free software: you can redistribute it and/or modify
+//# it under the terms of the Lesser GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The Loci Framework is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# Lesser GNU General Public License for more details.
+//#
+//# You should have received a copy of the Lesser GNU General Public License
+//# along with the Loci Framework.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <string>
+#include <iostream>
+#include <fstream>
+#include <sstream>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <vector>
+#include "FVMAdapt/sciTypes.h"
+#include "interpolate.h"
+$include "FVM.lh"
+
+using std::string ;
+using std::endl ;
+using std::cerr ;
+using std::cout ;
+using std::ostringstream ;
+using std::vector ;
+using Loci::real_t;
+
+#ifdef KD_TREE_COORDINATE_IS_VECTOR
+  typedef vector3d<double> coord3df ;
+#else
+  typedef Loci::kdTree::coordinate3d<double> coord3df ;
+#endif
+
+namespace Loci {
+  void create_ci_map(fact_db &facts) ;
+ entitySet dist_collect_entitySet(entitySet inSet, const vector<entitySet> &ptn) ;
+}
+
+void find_mind_deform(fact_db &facts);
+
+
+int main(int ac, char *av[]) {
+  Loci::Init(&ac, &av) ;
+  // default query 
+  string query = "solution" ;
+  // if output directory doesn't exist, create one
+  struct stat statbuf ;
+  if(Loci::MPI_rank == 0) {
+    if(stat("output",&statbuf))
+      mkdir("output",0755) ;
+    else
+      if(!S_ISDIR(statbuf.st_mode)) {
+        cerr << "file 'output' should be a directory!, rename 'output' and start again."
+             << endl ;
+        Loci::Abort() ;
+      }
+
+    cout << "Loci version: " << Loci::version() << endl ;
+  }
+
+  rule_db rdb ;
+  if(Loci::MPI_rank == 0)
+	  cerr << "creating rule database" << endl ;
+  rdb.add_rules(global_rule_list) ;
+  Loci::load_module("fvm",rdb) ;
+
+  bool use_exact = false ;
+
+  while(ac>=2 && av[1][0] == '-') {
+    // If user specifies an alternate query, extract it from the
+    // command line.
+    if(ac >= 3 && !strcmp(av[1],"-q")) {
+      query = av[2] ;
+      ac -= 2 ;
+      av += 2 ;
+    } else if(ac >= 2 && !strcmp(av[1],"-v")) {
+      if(Loci::MPI_rank == 0){
+	cout << "Loci version: " << Loci::version() << endl ;
+      	cout << "vogdeform version 1.1.0" << endl ;
+      }
+      if(ac == 2) {
+        Loci::Finalize() ;
+        exit(0) ;
+      }
+      ac-- ;
+      av++ ;
+    } else if(ac >= 2 && !strcmp(av[1],"--help")) {
+      if(Loci::MPI_rank == 0){
+      	cout << "vogdeform\n" 
+	     << "Usage: vogdeform <casename>\n" 
+	     << "------------------------------\n" 
+	     << "For more info, see README_vogdeform.txt" << endl ;
+      }
+      Loci::Finalize() ;
+      exit(0) ;
+    } else {
+      if(Loci::MPI_rank == 0)
+        cerr << "argument " << av[1] << " is not understood." << endl ;
+      ac-- ;
+      av++ ;
+    }
+  }
+
+
+  if(ac > 1) {
+    string tmp = av[1] ;
+    
+    string basename;
+    bool has_dot = false ;
+    for(size_t i=0;i<tmp.size();++i) 
+      if(tmp[i] == '.') {
+        has_dot = true ;
+        break ;
+      } else
+        basename += tmp[i] ;
+
+    string filename = string(av[1]) ;
+    if(!has_dot)
+      filename += ".vog" ;
+
+    string varsFile = basename + ".vars" ;
+
+
+    fact_db facts ;
+    facts.read_vars(varsFile,rdb) ;
+
+    param<std::string> modelName ;
+    
+    *modelName = basename ;
+    facts.create_fact("modelName",modelName) ;
+    if(Loci::MPI_rank == 0)
+      cout << "Reading: '" << filename <<"' ..." <<  endl  ;
+    if(!Loci::setupFVMGrid(facts,filename)) {
+      if(Loci::MPI_rank == 0) {
+        cerr << "Reading grid file '" << filename <<"' failed in grid reader!"
+             << endl ;
+      }
+      Loci::Abort() ;
+    }
+
+    if(Loci::MPI_rank == 0) {
+      cout << "finished reading grid." << endl ;
+    }
+
+    Loci::setupBoundaryConditions(facts) ;
+//    Loci::create_ci_map(facts) ;
+    Loci::createLowerUpper(facts) ;
+    find_mind_deform(facts);
+
+    if(use_exact)  {
+      param<std::string> centroid ;
+      *centroid = "exact" ;
+      facts.create_fact("centroid",centroid) ;
+    }
+
+    if(!Loci::makeQuery(rdb,facts,query)) {
+      cerr << "query for '" << query << "' failed. " << endl ;
+      Loci::Abort() ;
+    }
+    
+  }
+  Loci::Finalize() ;
+}
+
+
+void find_mind_deform(fact_db &facts) {
+    using namespace Loci ;
+    using std::map ;
+    storeRepP sp = facts.get_variable("moving_BCoption") ;
+    entitySet defsurfs ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    sp = facts.get_variable("fixed_BCoption") ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    sp = facts.get_variable("constrainedMotion_BCoption") ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    defsurfs = all_collect_entitySet(defsurfs) ;
+    if(defsurfs == EMPTY)
+      return ;
+    sp = facts.get_variable("ref") ;
+    if(sp == 0) 
+      return ;
+    MapRepP mp = MapRepP(sp->getRep()) ;
+    entitySet bfaces = mp->preimage(defsurfs).first ;
+
+    sp = facts.get_variable("face2node") ;
+    
+    mp = MapRepP(sp->getRep()) ;
+    entitySet nodeSet = mp->image(bfaces) ;
+
+    store<vect3d> pos ;
+
+    pos = facts.get_variable("pos") ;
+    entitySet dom = pos.domain() ;
+    vector<entitySet> posptn = all_collect_vectors(dom,MPI_COMM_WORLD) ;
+    entitySet surfNodes = dist_collect_entitySet(nodeSet,posptn) ;
+    
+    // Now get volume tags
+    variableSet vars = facts.get_extensional_facts() ;
+    map<string,entitySet> volMap ;
+    for(variableSet::const_iterator vi=vars.begin();vi!=vars.end();++vi) {
+      if(variable(*vi).get_arg_list().size() > 0 &&
+         variable(*vi).get_info().name == "volumeTag") {
+        param<string> vname(facts.get_variable(*vi)) ;
+        ostringstream vn ;
+        vn << *vi ;
+        string name = vn.str() ;
+        volMap[name] = vname.domain() ;
+      }
+    }
+
+    // If no volume tags (Weird), then make default tag.
+    if(volMap.begin() == volMap.end()) {
+      volMap[string("Main")] = ~EMPTY ;
+    }
+    vector<entitySet> volSets ;
+    map<string,entitySet>::const_iterator mi ;
+    for(mi=volMap.begin();mi!=volMap.end();++mi) {
+      // This could be a scalability problem!!!!
+      volSets.push_back(all_collect_entitySet(mi->second)) ;
+    }
+
+    // Now get face associations with volumes
+    vector<entitySet> facesets ;
+    int sz = volSets.size() ;
+    Map cl,cr ;
+    cl = facts.get_variable("cl") ;
+    cr = facts.get_variable("cr") ;
+    entitySet domf = cl.domain()+cr.domain() ;
+    for(int i=0;i<sz;++i) {
+      entitySet faces = (cr.preimage(volSets[i]).first +
+                         cl.preimage(volSets[i]).first) ;
+      
+      facesets.push_back(all_collect_entitySet(faces)) ;
+    }
+
+    // Now get node associations with volumes
+
+    vector<entitySet> nodesets ;
+    for(int i=0;i<sz;++i) {
+      entitySet nodes = mp->image(facesets[i]) ;
+      nodesets.push_back(all_collect_entitySet(nodes)) ;
+    }
+    
+
+    Map min_node2surf_loc ;
+    min_node2surf_loc.allocate(pos.domain()) ;
+
+    entitySet excludeSet ;
+    
+    for(int i=0;i<sz;++i) {
+      entitySet nodeSet = nodesets[i] & pos.domain() ;
+      entitySet nodeSetsurf = nodesets[i] & surfNodes ;
+      if(!GLOBAL_OR(nodeSetsurf.size()!=0)) {
+        excludeSet += nodeSet ;
+        continue ;
+      }
+      vector<Loci::kdTree::coord3d> bcnodes_pts(nodeSetsurf.size()) ;
+      vector<int> bcnodes_ids(nodeSetsurf.size()) ;
+
+      int cnt = 0 ;
+      FORALL(nodeSetsurf,nd) {
+        bcnodes_pts[cnt][0] = pos[nd].x ;
+        bcnodes_pts[cnt][1] = pos[nd].y ;
+        bcnodes_pts[cnt][2] = pos[nd].z ;
+        bcnodes_ids[cnt] = nd ;
+        cnt++ ;
+      } ENDFORALL ;
+
+
+      
+      
+      vector<Loci::kdTree::coord3d> node_pts(nodeSet.size()) ;
+      vector<int> closest(nodeSet.size(),-1) ;
+      cnt = 0 ;
+      FORALL(nodeSet,nd) {
+        node_pts[cnt][0] = pos[nd].x ;
+        node_pts[cnt][1] = pos[nd].y ;
+        node_pts[cnt][2] = pos[nd].z ;
+        cnt++ ;
+      } ENDFORALL ;
+      
+      Loci::parallelNearestNeighbors(bcnodes_pts,bcnodes_ids,node_pts,closest,
+                                     MPI_COMM_WORLD) ;
+
+      cnt = 0 ;
+      FORALL(nodeSet,nd) {
+        min_node2surf_loc[nd] = closest[cnt] ;
+        cnt++ ;
+      } ENDFORALL ;
+    }
+
+    Map min_node2surf ;
+
+    if(excludeSet == EMPTY) {
+      min_node2surf.setRep(min_node2surf_loc.Rep()) ;
+    } else {
+      entitySet dom = pos.domain()-excludeSet ;
+      min_node2surf.allocate(dom) ;
+      FORALL(dom,nd) {
+        min_node2surf[nd] = min_node2surf_loc[nd] ;
+      } ENDFORALL ;
+    }
+
+    facts.create_fact("defnode2surf",min_node2surf) ;
+}  
+
+$type newton_iter 				param<int>;
+$type newton_finished 				param<bool>;
+$type stop_iter 				param<int>;
+$type timestep_finished 			param<bool>;
+$type report 					param<bool> ;
+
+$type topo 					param<int> ;
+$type minVol 					param<double> ;
+$type maxTwist 					param<double> ;
+$type maxShearTwist 				param<double> ;
+$type modelName 				param<string> ;
+$type convexCell 				param<int> ;
+$type cellVolRatio 				store<double> ;
+$type ratio 					store<double> ;
+$type volRatio 					param<double> ;
+$type volumeChangeRatio 			store<double> ;
+$type faceAngle 				store<double> ;
+$type cellFaceAngle 				store<double> ;
+$type maxCellAngle 				param<double> ;
+$type faceTwisted 				store<double> ;
+$type cellTwist 				store<double> ;
+$type faceShearTwist 				store<double> ;
+$type cellShearTwist 				store<double> ;
+$type topocheck 				param<int> ;
+// Test of new type of parametric rules
+$type volTag_X 					store<double> ;
+$type volumeTag(X) 				param<string> ;
+
+$type volumeComponent_X 			param<double> ;
+$type topo 					param<int> ;
+$type nonconvex 				store<double>  ;
+$type alpha_cell 				store<double> ;
+$type do_output 				param<bool> ;
+$type outputDeformedGrid			param<int> ;
+
+// Deformation Rules
+$type deformationScaleFactor			param<double>;
+$type lengthScaleFactor				param<double>;
+$type defScale					param<double>;
+$type deformNodes                          	store<bool>;
+$type deformFaces                       	store<bool>;
+$type deformFile	                       	param<string>;
+$type nodeDisp_mapped				store<vect3d>;
+$type nodeDisp_b	                       	store<vect3d>;
+$type nodeDispUpdate_b	                       	store<vect3d>;
+$type pos0		                       	store<vect3d>;
+$type numDeformNodes                   		param<size_t>;
+$type searchRadius				param<double>;
+
+
+$rule default(searchRadius){
+	$searchRadius = 1e30;
+}
+
+$rule default(lengthScaleFactor){
+	$lengthScaleFactor = 1.0;
+}
+
+$rule default(deformationScaleFactor){
+	$deformationScaleFactor = 1.0;
+}
+
+$rule default(outputDeformedGrid){
+	$outputDeformedGrid = 0;
+}
+
+$rule singleton(defScale{n} <- $n{n}, deformationScaleFactor{n}, stop_iter{n}) {
+	//if($deformationScaleFactor{n} < 0)
+	//	$defScale{n} = abs($deformationScaleFactor{n});
+//	else 
+		$defScale{n} = $deformationScaleFactor{n} * ($$n{n}+1) / $stop_iter{n};
+//	cout << "defScale{" << $$n{n} << "} = " << $defScale{n} << endl;
+}
+
+$rule pointwise( face2node->deformNodes <- face2node->pos ),
+		constraint( ref->deform_BCoption ),
+		prelude {
+};
+
+$rule pointwise( deformFaces <- face2node->pos ),
+		constraint( ref->deform_BCoption ),
+		prelude {
+};
+
+$rule unit( numDeformNodes ),
+		constraint( UNIVERSE ) {
+	$numDeformNodes = 0;
+}
+
+$rule apply( numDeformNodes <- deformNodes )[Loci::Summation],
+		constraint( deformNodes ) {
+	$numDeformNodes++;
+}
+
+$rule default(deformFile) {
+	$deformFile = "";
+} 
+
+void readLociDeformFile_rank0 (const string& filename, vector<coord3df> & coords, vector<vect3d> &disp){
+	if(Loci::MPI_rank != 0)
+		return;
+	std::ifstream bf(filename.c_str(),std::ios::in) ;
+	if(bf.fail()) {
+		cerr << "open failed on '" << filename <<"'"<< endl ;
+		Loci::Abort() ;
+	}
+
+	Loci::parse::kill_white_space(bf) ;
+
+	int np ;
+	bf >> np ; // read in number of points on the inflow boundary.
+	Loci::parse::kill_white_space(bf) ;
+	coords.assign(np,vect3d(0.,0.,0.));
+	disp.assign(np,vect3d(0.,0.,0.));
+	for(int i=0;i<np;++i) {
+		bf >> coords[i] >> disp[i];
+		Loci::parse::kill_white_space(bf) ;
+	}
+
+}
+
+//====================================================================
+// Parallel Utility Routines
+//====================================================================
+
+template<class T> void gatherVector(std::vector<T> &p0v,
+		std::vector<T> &v,
+		MPI_Comm comm) {
+	int rank = 0 ;
+	MPI_Comm_rank(comm,&rank) ;
+	int procs = 1 ;
+	MPI_Comm_size(comm,&procs) ;
+
+	// Gather sizes
+	int local_size = v.size() ;
+	std::vector<int> recv_sizes(procs) ;
+	MPI_Gather(&local_size,1,MPI_INT,
+			&recv_sizes[0],1,MPI_INT,0,comm) ;
+
+	// Allocate receive array
+	int tot_size = recv_sizes[0] ;
+	for(int i=1;i<procs;++i) {
+		tot_size += recv_sizes[i] ;
+	}
+	if(tot_size != int(p0v.size())) {
+		std::vector<T> tmp(tot_size) ;
+		p0v.swap(tmp) ;
+	}
+
+	// Compute sizes in bytes
+	const int bsz = sizeof(T) ;
+	for(int i=0;i<procs;++i)
+		recv_sizes[i] *= bsz ;
+
+	// Bookkeeping for gatherv call
+	std::vector<int> displs(procs) ;
+	displs[0] = 0 ;
+	for(int i=1;i<procs;++i)
+		displs[i] = displs[i-1]+recv_sizes[i-1] ;
+
+	// Gather data
+	MPI_Gatherv(&v[0],local_size*bsz,MPI_BYTE,
+			&p0v[0],&recv_sizes[0],&displs[0],MPI_BYTE,
+			0, comm) ;
+}
+// Reverse of gather vector.  Assumes vectors are preallocated with
+// sizes each processor will receive.
+template<class T> void scatterVector(std::vector<T> &p0v,
+		std::vector<T> &v,
+		MPI_Comm comm) {
+	int rank = 0 ;
+	MPI_Comm_rank(comm,&rank) ;
+	int procs = 1 ;
+	MPI_Comm_size(comm,&procs) ;
+
+	// Gather sizes
+	int local_size = v.size() ;
+	std::vector<int> send_sizes(procs) ;
+	MPI_Gather(&local_size,1,MPI_INT,
+			&send_sizes[0],1,MPI_INT,0,comm) ;
+
+	// Allocate receive array
+	int tot_size = send_sizes[0] ;
+	for(int i=1;i<procs;++i) {
+		tot_size += send_sizes[i] ;
+	}
+	if(tot_size != int(p0v.size())) {
+		std::cerr << "incompatible sizes of vectors in scatterVector: Total receive vector sizes " << tot_size << ", Send vector size: " << p0v.size() << "\n" ;
+		Loci::Abort() ;
+	}
+
+	// Compute sizes in bytes
+	const int bsz = sizeof(T) ;
+	for(int i=0;i<procs;++i)
+		send_sizes[i] *= bsz ;
+
+	// Bookkeeping for gatherv call
+	std::vector<int> displs(procs) ;
+	displs[0] = 0 ;
+	for(int i=1;i<procs;++i)
+		displs[i] = displs[i-1]+send_sizes[i-1] ;
+
+	// Scatter data
+	MPI_Scatterv(&p0v[0],&send_sizes[0],&displs[0],MPI_BYTE,
+			&v[0],local_size*bsz,MPI_BYTE,
+			0, comm) ;
+}
+
+#include <stdexcept>
+using std::runtime_error;
+
+#ifdef USE_ATA_MAP
+
+$type deformPreprocessing blackbox<int>;
+$type nodeCollection blackbox<int>;
+$type faceCollection blackbox<int>;
+$type numDeformFaces param<size_t>;
+$type numDeformQuadFaces param<size_t>;
+$type numDeformTriFaces param<size_t>;
+$type debugLevel param<int>;
+
+$rule default (debugLevel){
+	$debugLevel= 1;
+}
+
+#include "petscvec.h"
+#include "ATAmapper.h"
+#include "cosimulationEngine.h"
+#include "tcout.h"
+#include "num2str.h"
+#include "ws_delim_reader.h"
+#include "wetted_surface.h"
+#include <sstream>
+using fsi::ATAmapper;
+
+ATAmapper* mapper=NULL;
+wetted_surface cfd_data, file_data;
+
+$rule unit( nodeCollection <- numDeformNodes, debugLevel),
+	option(disable_threading),constraint( UNIVERSE ),
+				prelude { 
+
+	tcout.setDebugLevel(*$debugLevel,false);
+	tcout.disp(0) << "Debug Level: " << *$debugLevel << endl;
+	if(*$numDeformNodes > 2147483647){
+		p0cout << "Error: Number of nodes on wetted surface (" << *$numDeformNodes << ") exceeds 32-bit indexing capability (2,147,483,647)." << endl;
+		Loci::Abort();
+	}
+
+	if(Loci::MPI_rank == 0) {
+
+		if ( cfd_data.node_ids.empty() ) {
+			cout << "Allocating memory for node IDs.\n";
+			cfd_data.node_ids.resize(*$numDeformNodes);
+
+		}
+
+		if ( cfd_data.node_coords.empty() ) {
+			cout << "Allocating memory for node coordinates.\n";
+			cfd_data.node_coords.resize(*$numDeformNodes,vector<double>(3));
+
+		}
+
+		if ( cfd_data.disp.empty() ) {
+			cout << "Allocating memory for node displacements.\n";
+			cfd_data.disp.resize(*$numDeformNodes,vector<double>(3));
+		}
+
+	}  // end if MPI_rank == 0 
+};  // end prelude and rule
+
+//--------------------------------------------------------------------
+// Copy the nodal positions and labels into an array that can be
+// communicated to the cosimulation engine.
+//--------------------------------------------------------------------
+$rule apply( nodeCollection <- pos, fileNumber(pos), lengthScaleFactor,
+		numDeformNodes)[Loci::NullOp],
+	option(disable_threading), constraint( deformNodes ), prelude {
+
+	p0cout << "Copying " << *$numDeformNodes << " node positions.\n";
+
+	// Gather data
+	const int nnodes = *$numDeformNodes  ;
+	Loci::entitySet dom = entitySet(seq) ;
+	// Copy data into local buffer
+	int ndom = dom.size() ;
+	vector<size_t> fnum_loc(ndom) ;
+	vector<vect3d> pos_loc(ndom) ;
+	int cnt = 0 ;
+	FORALL(dom,ii) {
+		fnum_loc[cnt] = $fileNumber(pos)[ii] ;
+		pos_loc[cnt] = $pos[ii] ;
+		cnt++ ;
+	} ENDFORALL ;
+	// Gather data to global buffer
+
+	p0cout << "Gathering node data.\n";
+
+	vector<size_t> fnum_glob ;
+	vector<vect3d> pos_glob ;
+	gatherVector(fnum_glob,fnum_loc,MPI_COMM_WORLD) ;
+	gatherVector(pos_glob,pos_loc,MPI_COMM_WORLD) ;
+	// sanity check
+	if(Loci::MPI_rank == 0) {
+		if(int(fnum_glob.size()) != nnodes ||
+				int(pos_glob.size()) != nnodes) {
+			cout << "problem in gathering node information: Expected " << nnodes << " nodes, recieved data on " << int(fnum_glob.size()) << " ids and " << int(pos_glob.size()) << " positions.\n" ;
+			Loci::Abort() ;
+		}
+	}
+
+	cfd_data.node_map.clear();
+
+	// Copy gathered data into cosim buffer
+	if(Loci::MPI_rank == 0) {
+		double scaleFac = 1.0 / *$lengthScaleFactor ;
+		cout << "Scale (multiply) coordinates of wetted surface by " << scaleFac << '\n';
+		cout << "Creating node map from " << nnodes << " nodes\n";
+		for(int i=0;i<nnodes;++i) {
+			tcout.disp(2) << "Loci Node " << fnum_glob[i] << " -> CFD Node " << i+1 << '\n';
+			cfd_data.node_map.insert(cfd_data.node_map.end(),pair<size_t,int>(fnum_glob[i],i+1));
+			cfd_data.node_ids[i]=fnum_glob[i];
+			cfd_data.node_coords[i][0]=pos_glob[i].x * scaleFac;
+			cfd_data.node_coords[i][1]=pos_glob[i].y * scaleFac;
+			cfd_data.node_coords[i][2]=pos_glob[i].z * scaleFac;
+		}
+	}
+};  // end prelude and rule 
+
+$rule unit( numDeformFaces ),
+		constraint( UNIVERSE ) {
+	$numDeformFaces = 0;
+}
+
+$rule apply( numDeformFaces <- face2node )[Loci::Summation],
+		constraint( deformFaces ) {
+	$numDeformFaces++;
+}
+
+$rule unit( numDeformTriFaces ),
+		constraint( UNIVERSE ) {
+	$numDeformTriFaces = 0;
+}
+
+$rule apply( numDeformTriFaces <- face2node )[Loci::Summation],
+		constraint( deformFaces ) {
+	if ($face2node.size() == 3) {
+		$numDeformTriFaces++;
+	}
+}
+
+$rule unit( numDeformQuadFaces ),
+		constraint( UNIVERSE ) {
+	$numDeformQuadFaces = 0;
+}
+
+$rule apply( numDeformQuadFaces <- face2node )[Loci::Summation],
+		constraint( deformFaces ) {
+	if ($face2node.size() == 4) {
+		$numDeformQuadFaces++;
+	}
+}
+
+//--------------------------------------------------------------------
+// Allocate face data in the CosimulationEngine state object.
+//--------------------------------------------------------------------
+$rule unit( faceCollection <- numDeformFaces, numDeformTriFaces, numDeformQuadFaces),
+				option(disable_threading), constraint( UNIVERSE ), prelude { 
+	if((*$numDeformTriFaces +  *$numDeformTriFaces) > 2147483647){
+		p0cout << "Error: Number of faces on wetted surface (" << *$numDeformTriFaces +  *$numDeformQuadFaces << ") exceeds 32-bit indexing capability (2,147,483,647)." << endl;
+		Loci::Abort();
+	}
+	if(Loci::MPI_rank == 0) {
+		cout << "Resizing wetted surface to " << *$numDeformTriFaces +  *$numDeformQuadFaces << "\n";
+		cout << " Quad Faces: " << *$numDeformQuadFaces  << "\n";
+		cout << " Tria Faces: " << *$numDeformTriFaces << "\n";
+		cout << "Allocating face connectivity array\n";
+		cfd_data.face_conn.resize(*$numDeformTriFaces +  *$numDeformQuadFaces);
+		cfd_data.isParabolic.resize(*$numDeformTriFaces +  *$numDeformQuadFaces);
+		//		cout << "Successfully allocated face connectivity array\n";
+	}
+};  // end prelude and rule
+
+$rule apply( faceCollection <-  face2node->fileNumber(pos),
+		fileNumber(face2node), nodeCollection )[Loci::NullOp],
+		option(disable_threading),constraint( deformFaces ), prelude {
+	Loci::entitySet dom = entitySet(seq) ;
+	int ntri = 0 ;
+	int nqua = 0 ;
+	int ngen = 0 ; // TODO: Add support for arbitrary-sized faces
+	FORALL(dom, ii) {
+		if ($face2node[ii].size() == 3)
+			ntri++ ;
+		else if ($face2node[ii].size() == 4)
+			nqua++ ;
+		else
+			ngen++ ;
+	} ENDFORALL ;
+
+	int tri_sum,qua_sum,gen_sum ;
+	MPI_Allreduce(&ntri,&tri_sum,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+	MPI_Allreduce(&nqua,&qua_sum,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+	MPI_Allreduce(&ngen,&gen_sum,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+	vector<Loci::Array<size_t,4> > tri_glob ;
+	vector<Loci::Array<size_t,5> > qua_glob ;
+	if(tri_sum != 0) {
+		vector<Loci::Array<size_t,4> > tri_loc(ntri) ;
+		int cnt = 0 ;
+		FORALL(dom, ii) {
+			if ($face2node[ii].size() == 3)  {
+				tri_loc[cnt][3] = $fileNumber(face2node)[ii];
+				tri_loc[cnt][0] = $fileNumber(pos)[$face2node[ii][0]];
+				tri_loc[cnt][1] = $fileNumber(pos)[$face2node[ii][1]];
+				tri_loc[cnt][2] = $fileNumber(pos)[$face2node[ii][2]];
+				cnt++ ;
+			}
+		} ENDFORALL ;
+
+		gatherVector(tri_glob,tri_loc,MPI_COMM_WORLD) ;
+	}
+	if(qua_sum != 0) {
+		vector<Loci::Array<size_t,5> > qua_loc(nqua) ;
+
+		int cnt = 0 ;
+		FORALL(dom, ii) {
+			if ($face2node[ii].size() == 4)  {
+				qua_loc[cnt][4] = $fileNumber(face2node)[ii];
+				qua_loc[cnt][0] = $fileNumber(pos)[$face2node[ii][0]];
+				qua_loc[cnt][1] = $fileNumber(pos)[$face2node[ii][1]];
+				qua_loc[cnt][2] = $fileNumber(pos)[$face2node[ii][2]];
+				qua_loc[cnt][3] = $fileNumber(pos)[$face2node[ii][3]];
+				cnt++ ;
+			}
+		} ENDFORALL ;
+
+		gatherVector(qua_glob,qua_loc,MPI_COMM_WORLD) ;
+	}
+	if(Loci::MPI_rank == 0) {
+
+		try{
+			cout << "Copying face connectivity...\n";
+			for(unsigned int i=0;i< tri_glob.size();++i) {
+				cfd_data.face_conn[i].resize(3);
+				cfd_data.isParabolic[i]=false;
+				if(cfd_data.node_map.count(tri_glob[i][0])==0)
+					throw runtime_error("Node " + num2str(tri_glob[i][0]) + " on Tri face " + num2str(i+1) + " does not exist.");
+				cfd_data.face_conn[i][0] = cfd_data.node_map[tri_glob[i][0]];
+				if(cfd_data.node_map.count(tri_glob[i][1])==0)
+					throw runtime_error("Node " + num2str(tri_glob[i][1]) + " on Tri face " + num2str(i+1) + " does not exist.");
+				cfd_data.face_conn[i][1] = cfd_data.node_map[tri_glob[i][1]];
+				if(cfd_data.node_map.count(tri_glob[i][2])==0)
+					throw runtime_error("Node " + num2str(tri_glob[i][2]) + " on Tri face " + num2str(i+1) + " does not exist.");
+				cfd_data.face_conn[i][2] = cfd_data.node_map[tri_glob[i][2]];
+				tcout.disp(2) << "Tri Face " << i << ": [" <<  tri_glob[i][0] <<  "," <<  tri_glob[i][1] <<  "," <<  tri_glob[i][2] <<
+						"]->[" <<  cfd_data.face_conn[i][0] <<  "," <<  cfd_data.face_conn[i][1] <<  "," <<
+						cfd_data.face_conn[i][2] <<  "]" << endl;
+			}
+			for(unsigned int i=0,f=tri_glob.size();i<qua_glob.size();++i,++f) {
+				cfd_data.face_conn[f].resize(4);
+				cfd_data.isParabolic[f]=false;
+				if(cfd_data.node_map.count(qua_glob[i][0])==0)
+					throw runtime_error("Node " + num2str(qua_glob[i][0]) + " on Quad face " + num2str(i) + " does not exist.");
+				cfd_data.face_conn[f][0] = cfd_data.node_map[qua_glob[i][0]];
+				if(cfd_data.node_map.count(qua_glob[i][1])==0)
+					throw runtime_error("Node " + num2str(qua_glob[i][1]) + " on Quad face " + num2str(i) + " does not exist.");
+				cfd_data.face_conn[f][1] = cfd_data.node_map[qua_glob[i][1]];
+				if(cfd_data.node_map.count(qua_glob[i][2])==0)
+					throw runtime_error("Node " + num2str(qua_glob[i][2]) + " on Quad face " + num2str(i) + " does not exist.");
+				cfd_data.face_conn[f][2] = cfd_data.node_map[qua_glob[i][2]];
+				if(cfd_data.node_map.count(qua_glob[i][3])==0)
+					throw runtime_error("Node " + num2str(qua_glob[i][3]) + " on Quad face " + num2str(i) + " does not exist.");
+				cfd_data.face_conn[f][3] = cfd_data.node_map[qua_glob[i][3]];
+				tcout.disp(2) << "Quad Face " << i << ": [" <<  qua_glob[i][0] <<  "," <<  qua_glob[i][1] <<
+						"," <<  qua_glob[i][2] <<  "," <<  qua_glob[i][3] <<
+						"]->[" <<  cfd_data.face_conn[f][0] <<  "," <<  cfd_data.face_conn[f][1] <<
+						"," <<  cfd_data.face_conn[f][2] << "," << cfd_data.face_conn[f][3] <<  "]" << endl;
+			}
+		} catch (const runtime_error& err){
+			tcout.disp(0) << "Error while copying face connectivity: " << err.what() << endl;
+			Loci::Abort();
+		}
+	}
+};
+
+$rule blackbox (deformPreprocessing <- nodeCollection, faceCollection), 
+constraint(UNIVERSE) {
+// Do nothing
+}
+
+// Read from a wetted surface .fsi formatted stream
+void readATADeformFile_rank0(const std::string& filename, wetted_surface& data)
+{
+	if(Loci::MPI_rank != 0)
+		return;
+	std::ifstream ins(filename.data(),std::ios::binary);
+	if(ins.is_open())
+	{
+		readASCII_deform(ins,data);
+		ins.close();
+	} else {
+		throw runtime_error("Error opening " + filename );
+	}
+}
+
+
+$rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScaleFactor,
+	deformPreprocessing, deformationScaleFactor),
+	constraint(deformNodes),
+	option(disable_threading), prelude { 
+	// Do mapping on processor zero since we're just doing it a single time
+	vector<vect3d> cfd_disp_glob, cfd_disp_loc;
+	Loci::entitySet dom = entitySet(seq) ;
+	cfd_disp_loc.resize(dom.size(),vect3d(0.,0.,0.));
+	if(!$deformFile->empty() && Loci::MPI_rank == 0){
+		// Load file
+		cout << "Reading " << *$deformFile << "..." << endl;
+		try {
+			readATADeformFile_rank0(*$deformFile,file_data);
+		} catch (const runtime_error& err ){
+			cout << "Error reading deform file.\n" << err.what() << endl;
+			Loci::Abort();
+		}
+		cout << "Reading complete." << endl;
+
+		if(cfd_data.node_ids.empty()){
+			cout << "CFD Node list is empty" << endl;
+			Loci::Abort();
+		}
+		if(cfd_data.face_conn.empty()){
+			cout << "CFD Face list is empty" << endl;
+			Loci::Abort();
+		}
+		if(file_data.node_ids.empty()){
+			cout << "File Node list is empty" << endl;
+			Loci::Abort();
+		}
+		if(file_data.face_conn.empty()){
+			cout << "File Face list is empty" << endl;
+			Loci::Abort();
+		}
+		try {
+		// Create Mapper
+		mapper = new ATAmapper(file_data, cfd_data, MPI_COMM_SELF);
+		// Store file displacements in PETSc vector
+		Vec file_disp=NULL, cfd_disp=NULL;
+		VecCreateSeq(MPI_COMM_SELF,file_data.disp.size()*6,&file_disp);
+		VecCreateSeq(MPI_COMM_SELF,cfd_data.disp.size()*3,&cfd_disp);
+		int tempindex=0;
+		for(unsigned int i=0;i<file_data.node_ids.size();++i)
+		{
+			tempindex=i*6+0;
+			VecSetValues(file_disp,1,&tempindex,&file_data.disp[i][0],INSERT_VALUES);
+			tempindex=i*6+1;
+			VecSetValues(file_disp,1,&tempindex,&file_data.disp[i][1],INSERT_VALUES);
+			tempindex=i*6+2;
+			VecSetValues(file_disp,1,&tempindex,&file_data.disp[i][2],INSERT_VALUES);
+		}
+
+		mapper->fem2cfd_disp(file_disp,cfd_disp);
+
+		cfd_disp_glob.resize(cfd_data.node_ids.size(),vect3d(0.,0.,0.));
+		for(unsigned int i=0;i<cfd_data.node_ids.size();++i)
+		{
+			tempindex=i*3+0;
+			VecGetValues(cfd_disp,1,&tempindex,&cfd_disp_glob[i].x);
+			tempindex=i*3+1;
+			VecGetValues(cfd_disp,1,&tempindex,&cfd_disp_glob[i].y);
+			tempindex=i*3+2;
+			VecGetValues(cfd_disp,1,&tempindex,&cfd_disp_glob[i].z);
+//				Loci::debugout << "    cfd_coord [" << cfd_coords[i] << "], cfd_disp [" << cfd_disp[i] << "]\n";
+		}
+
+		// Map file displacements to CFD mesh
+		// Retrieve CFD displacements from PETSc vector
+		// Output undeformed FEM surface, deformed FEM surface, Undeformed CFD surface, Fully Deformed CFD surface.
+		vector<int> file_face_ids, cfd_face_ids;
+		vector<vector<double> > cfd_def_coords, file_def_coords;
+		file_face_ids.resize(file_data.face_conn.size());
+		cfd_face_ids.resize(cfd_data.face_conn.size());
+		for(unsigned int i=0;i<file_face_ids.size();++i){
+			file_face_ids[i]=i+1;
+		}
+		for(unsigned int i=0;i<cfd_face_ids.size();++i){
+			cfd_face_ids[i]=i+1;
+		}
+
+		file_def_coords=file_data.node_coords;
+		file_data.inode_ids.resize(file_data.node_ids.size());
+		cfd_def_coords=cfd_data.node_coords;
+		cfd_data.inode_ids.resize(cfd_data.node_ids.size());
+		for(unsigned int i=0;i<file_def_coords.size();++i){
+			file_data.inode_ids[i]=i+1; // Output numbering from 1 to match error messages
+			file_def_coords[i][0] += *$deformationScaleFactor * file_data.disp[i][0];
+			file_def_coords[i][1] += *$deformationScaleFactor * file_data.disp[i][1];
+			file_def_coords[i][2] += *$deformationScaleFactor * file_data.disp[i][2];
+		}
+		for(unsigned int i=0;i<cfd_def_coords.size();++i){
+			cfd_data.inode_ids[i]=i+1; // Output numbering from 1 to match error messages
+			cfd_def_coords[i][0] += *$deformationScaleFactor * cfd_disp_glob[i].x;
+			cfd_def_coords[i][1] += *$deformationScaleFactor * cfd_disp_glob[i].y;
+			cfd_def_coords[i][2] += *$deformationScaleFactor * cfd_disp_glob[i].z;
+		}
+		fsi::writeNasSurface("output/file_surf_undeformed.nas",file_data.inode_ids, file_data.node_coords, file_face_ids, file_data.face_conn, file_data.isParabolic, 1, 1, false);
+		fsi::writeNasSurface("output/file_surf_deformed.nas",file_data.inode_ids, file_def_coords, file_face_ids, file_data.face_conn, file_data.isParabolic, 2, 2, false);
+		fsi::writeNasSurface("output/cfd_surf_undeformed.nas",cfd_data.inode_ids, cfd_data.node_coords, cfd_face_ids, cfd_data.face_conn, cfd_data.isParabolic, 3, 3, false);
+		fsi::writeNasSurface("output/cfd_surf_deformed.nas",cfd_data.inode_ids, cfd_def_coords, cfd_face_ids, cfd_data.face_conn, cfd_data.isParabolic, 4, 4, false);
+		fsi::writeNasSurface("output/cfd_surf_proj.nas",cfd_data.inode_ids, mapper->getCFDProjSurf().node_coords, cfd_face_ids, cfd_data.face_conn, cfd_data.isParabolic, 5, 5, false);
+		VecDestroy(&file_disp);
+		VecDestroy(&cfd_disp);
+		} catch (const runtime_error& err ){
+			cout << "Error creating map.\n" << err.what() << endl;
+			Loci::Abort();
+		}
+	}
+	if(!$deformFile->empty()) {
+		scatterVector(cfd_disp_glob,cfd_disp_loc,MPI_COMM_WORLD) ;
+		int cnt=0;
+		FORALL(dom, ii) {
+			$nodeDisp_mapped[ii] = cfd_disp_loc[cnt]* (*$lengthScaleFactor);
+			cnt++ ;
+		} ENDFORALL;
+	}
+
+}{
+	if($deformFile.empty()){
+		$nodeDisp_mapped.x = 0;
+		$nodeDisp_mapped.y = 0;
+		$nodeDisp_mapped.z = 0;
+	}
+};
+#else
+
+$rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScaleFactor, searchRadius), 
+	constraint(deformNodes),
+	option(disable_threading), prelude {
+
+	if(!$deformFile->empty()){
+		vector<vect3d> cfd_coords, cfd_disp, cfd_coords_loc, cfd_disp_loc;
+
+		Loci::entitySet dom = entitySet(seq) ;
+		// Copy data into local buffer
+		int cnt = 0 ;
+		cfd_coords_loc.resize(dom.size());
+		cfd_disp_loc.resize(dom.size());
+		FORALL(dom,ii) {
+			cfd_coords_loc[cnt] = $pos[ii] ;
+			cnt++ ;
+		} ENDFORALL ;
+
+		if(Loci::MPI_rank == 0)
+			cout << "Gathering Node Data" << std::endl;
+		// Gather coordinates of CHEM nodes onto processor zero for mapping
+		gatherVector(cfd_coords,cfd_coords_loc,MPI_COMM_WORLD) ;
+
+		if(Loci::MPI_rank == 0) {
+			if(cfd_coords.size() != *$numDeformNodes) {
+				cout << "problem in gathering node information: Expected " << *$numDeformNodes 
+					<< " nodes, recieved data on " << int(cfd_coords.size())  << " positions.\n" ;
+			Loci::Abort() ;
+			}
+		}
+
+		
+		// Read boundary data to be mapped from file
+		vector<vect3d> file_disp;
+		vector<coord3df> file_coords;
+		readLociDeformFile_rank0(*$deformFile,file_coords, file_disp);
+		if(Loci::MPI_rank == 0) { // Do mapping on processor zero, distribute data out
+		        vector<int> file_coordsID (file_coords.size()) ;
+		        for(unsigned int i=0;i<file_coords.size();++i) {
+		          file_coordsID[i] = i ;
+		        }
+			
+			store<vect3d> loc;
+			entitySet locdom = interval(0,file_coords.size()-1) ;
+			loc.allocate(locdom) ;
+			
+		        for(unsigned int i=0;i<file_coords.size();++i) {
+			  file_coords[i] *= *$lengthScaleFactor;
+		          loc[i] = file_coords[i] ;
+		        }
+
+		        Loci::kdTree::KDTree<double> kd(file_coords,file_coordsID) ;
+			cfd_disp.resize(*$numDeformNodes,vect3d(0.,0.,0.));
+			for(unsigned int i=0;i<cfd_disp.size();++i){
+          			vector<int> neighbors  = get_stencil(kd,cfd_coords[i],*$searchRadius) ;
+		                vector<double> w ;
+		 		stencil_weights(w,neighbors,loc,cfd_coords[i]) ;
+//				Loci::debugout << "Node " << i << "\n";
+//				Loci::debugout << "    Neighbors size " << neighbors.size() << "\n";
+				for(unsigned int j=0;j<neighbors.size();++j) {
+//					Loci::debugout << "    Neighbor " << j << ", file line " << neighbors[j] << ", weight " << w[j] << ", file coord, [" << file_coords[neighbors[j]] << ", file disp [" << *$lengthScaleFactor *file_disp[neighbors[j]] << "]\n";
+					cfd_disp[i] += *$lengthScaleFactor * w[j]*file_disp[neighbors[j]];
+				}
+
+				
+//				Loci::debugout << "    cfd_coord [" << cfd_coords[i] << "], cfd_disp [" << cfd_disp[i] << "]\n";
+			}
+		}
+		scatterVector(cfd_disp,cfd_disp_loc,MPI_COMM_WORLD) ;
+		cnt=0;
+		FORALL(dom, ii) {
+			$nodeDisp_mapped[ii] = cfd_disp_loc[cnt];
+			cnt++ ;
+		} ENDFORALL;
+
+	} 
+} {
+	if($deformFile.empty()){
+		$nodeDisp_mapped.x = 0;
+		$nodeDisp_mapped.y = 0;
+		$nodeDisp_mapped.z = 0;
+	}
+};
+#endif
+
+$type plot_postfix param<string>;
+
+$rule singleton(plot_postfix{n}<-$n{n}) {
+  $plot_postfix{n} = "" ;
+  int cycle = $$n{n} ;
+  ostringstream oss ;
+  oss << cycle ;
+  $plot_postfix{n} = oss.str() ;
+}
+
+$rule singleton(plot_postfix{n,it}<-$n{n},$it{n,it}) {
+  $plot_postfix{n,it} = "" ;
+  int cycle = $$n{n} ;
+  ostringstream oss ;
+  oss << cycle ;
+  $plot_postfix{n,it} = oss.str() ;
+}
+
+$rule pointwise (OUTPUT{n} <- nodeDisp_mapped, pos0{n}), 
+	constraint(deformNodes) {
+ // Do nothing
+}
+
+$rule pointwise (nodeDisp_b{n} <- pos0{n}, defScale{n}, nodeDisp_mapped ),
+		constraint(deformNodes) {
+//	$nodeDisp_b{n}.x = $defScale{n}*0;
+//	$nodeDisp_b{n}.y = $defScale{n}*-20.0*($pos0{n}.x)*($pos0{n}.y);
+//	$nodeDisp_b{n}.z = $defScale{n}*0;
+	$nodeDisp_b{n} = $defScale{n}*$nodeDisp_mapped;
+}
+
+$rule pointwise(nodeDispUpdate_b{n,it=0}<-nodeDisp_b{n}),
+	//inplace(nodeDispUpdate_b{n,it=0}| nodeDisp_b{n}),
+		constraint(deformNodes){
+	$nodeDispUpdate_b{n,it=0} = $nodeDisp_b{n};
+}
+
+$rule pointwise(nodeDispUpdate_b{n,it+1}<-nodeDispUpdate_b{n,it}),
+//	inplace(nodeDispUpdate_b{n,it+1}| nodeDispUpdate_b{n,it}),
+		constraint(deformNodes){
+	$nodeDispUpdate_b{n,it+1} = $nodeDispUpdate_b{n,it};
+}
+
+$rule pointwise(OUTPUT{n,it} <- nodeDispUpdate_b{n,it}){
+// Do nothing
+}
+  $type gridThickness param<real_t> ;
+  $type minVolume param<double> ;
+
+#define STRONG_CHECK
+  $rule pointwise(vogDeform::vol<-minVolume, cellcenter,(upper,lower,boundary_map)->(area,facecenter)),constraint(cartesianCoordinateModel,geom_cells) {
+    real_t sum = 0.0 ;
+    vector3d<real_t> dv ;
+    for(const Entity* nf=$upper.begin();nf!=$upper.end();++nf) {
+      dv = nf->$facecenter - $cellcenter ;
+      sum = sum + nf->$area.sada*(dot(dv,nf->$area.n)) ;
+#ifdef STRONG_CHECK
+      if(dot(dv,nf->$area.n) < 0)
+        Loci::debugout << "warning, non-convex cell" << _e_ << endl ;
+#endif
+    }
+    for(const Entity* nf=$lower.begin();nf!=$lower.end();++nf) {
+      dv = nf->$facecenter - $cellcenter ;
+      sum = sum - nf->$area.sada*(dot(dv,nf->$area.n)) ;
+#ifdef STRONG_CHECK
+      if(dot(dv,nf->$area.n) > 0)
+        Loci::debugout << "warning, non-convex cell " << _e_ << endl ;
+#endif
+    }
+    for(const Entity* nf=$boundary_map.begin();nf!=$boundary_map.end();++nf) {
+      dv = nf->$facecenter - $cellcenter ;
+      sum = sum + nf->$area.sada*(dot(dv,nf->$area.n)) ;
+#ifdef STRONG_CHECK
+      if(dot(dv,nf->$area.n) < 0)
+        Loci::debugout << "warning, non-convex cell " << _e_ << endl ;
+#endif
+    }
+    $vol = sum/3.0 ;
+    if(sum <= 0.0) {
+      cerr << "MPI_rank = " << Loci::MPI_rank << ":  Zero or negative volume in grid cell id :" << _e_ << endl ;
+      cerr << "For more information see debug file." << endl ;
+      for(const Entity* nf=$upper.begin();nf!=$upper.end();++nf) {
+	Loci::debugout << "upper facecenter [" << *nf << " ] =  "
+                       << nf->$facecenter << endl ;
+	Loci::debugout << "upper area [" << *nf << " ] =  "
+                       << nf->$area << endl ;
+      }
+      for(const Entity * nf=$lower.begin();nf!=$lower.end();++nf) {
+	Loci::debugout << "lower facecenter [" << *nf << " ] =  "
+                       << nf->$facecenter << endl ;
+	Loci::debugout << "lower area [" << *nf << " ] =  "
+                       << nf->$area << endl ;
+      }
+      for(const Entity* nf=$boundary_map.begin();nf!=$boundary_map.end();++nf) {
+	Loci::debugout << "BM facecenter [" << *nf << " ] =  "
+                       << nf->$facecenter << endl ;
+	Loci::debugout << "BM area [" << *nf << " ] =  "
+                       << nf->$area << endl ;
+      }
+      Loci::debugout << " cellcenter [" << _e_ << " ] =  "
+                     << $cellcenter << endl ;
+      Loci::debugout << " volume[ " << _e_ << " ] = "
+                     << $vol << endl ;
+      
+  //    $vol = max($minVolume,$vol) ;
+ //     if($allowNegativeVolume == 0 && $vol < 1e-40) 
+//	exit(-1) ;
+    }
+  }
+
+  $rule pointwise(vogDeform::vol<-
+                  (upper,lower,boundary_map)->area,
+                  (upper,lower,boundary_map)->face2node->pos,gridThickness
+                  ),constraint(geom_cells,axisymmetricCoordinateModel) {
+#ifdef EXACT
+    // Compute volume using analytical solid revolution
+    // Use long double since viscous grids could cause catastrophic cancelation
+    // in this routine.
+    // Also using kahan summation to reduce errors
+    long double vol_sum = 0 ;
+    long double vol_c = 0 ;
+    for(const Entity *id=$upper.begin();id!=$upper.end();++id) {
+      int fsz = id->$face2node.size() ;
+      long double r1=0,r2=0,x1=0,x2=0 ;
+      for(int i=1;i<fsz;++i) {
+        vector3d<real_t> p1 = id->$face2node[i-1]->$pos ;
+        vector3d<real_t> p2 = id->$face2node[i]->$pos ;
+        if(fabs(p1.z-p2.z) < 1e-9) { // in xy plane
+          r1 = p1.y ;
+          r2 = p2.y ;
+          x1 = p1.x ;
+          x2 = p2.x ;
+          break ;
+        }
+      }
+      long double sgn = (id->$area.n.y)>=0?1.:-1. ; // is volume inside or out?
+      long double dx = x2-x1 ;
+      long double dr = r2-r1 ;
+      long double vpart = fabs(dx*(3.L*r1*r1+3.L*r1*dr+dr*dr))*sgn ;
+      long double y = vpart - vol_c ;
+      long double t = vol_sum + y ;
+      vol_c = (t - vol_sum) - y ;
+      vol_sum = t ;
+    }
+    for(const Entity *id=$lower.begin();id!=$lower.end();++id) {
+      int fsz = id->$face2node.size() ;
+      long double r1=0,r2=0,x1=0,x2=0 ;
+      for(int i=1;i<fsz;++i) {
+        vector3d<real_t> p1 = id->$face2node[i-1]->$pos ;
+        vector3d<real_t> p2 = id->$face2node[i]->$pos ;
+        if(fabs(p1.z-p2.z) < 1e-9) { // in xy plane
+          r1 = p1.y ;
+          r2 = p2.y ;
+          x1 = p1.x ;
+          x2 = p2.x ;
+          break ;
+        }
+      }
+      long double sgn = (id->$area.n.y)>=0?1.:-1. ;
+      long double dx = x2-x1 ;
+      long double dr = r2-r1 ;
+      long double vpart = -fabs(dx*(3.L*r1*r1+3.L*r1*dr+dr*dr))*sgn ;
+      long double y = vpart - vol_c ;
+      long double t = vol_sum + y ;
+      vol_c = (t - vol_sum) - y ;
+      vol_sum = t ;
+    }
+    for(const Entity *id=$boundary_map.begin();id!=$boundary_map.end();++id) {
+      if(id->$area.sada != 0) {
+        int fsz = id->$face2node.size() ;
+        long double r1=0,r2=0,x1=0,x2=0 ;
+        for(int i=1;i<fsz;++i) {
+          vector3d<real_t> p1 = id->$face2node[i-1]->$pos ;
+          vector3d<real_t> p2 = id->$face2node[i]->$pos ;
+          if(fabs(p1.z-p2.z) < 1e-9) { // in xy plane
+            r1 = p1.y ;
+            r2 = p2.y ;
+            x1 = p1.x ;
+            x2 = p2.x ;
+            break ;
+          }
+        }
+        long double sgn = (id->$area.n.y)>=0?1.:-1. ;
+        long double dx = x2-x1 ;
+        long double dr = r2-r1 ;
+        long double vpart = fabs(dx*(3.L*r1*r1+3.L*r1*dr+dr*dr))*sgn ;
+        long double y = vpart - vol_c ;
+        long double t = vol_sum + y ;
+        vol_c = (t - vol_sum) - y ;
+        vol_sum = t ;
+      }
+    }
+
+    if(vol_sum <=0) {
+      cerr << "negative volume in grid" << endl ;
+//      Loci::Abort() ;
+    }
+    $vol = (M_PI/3.)*vol_sum ;
+#else
+    if($boundary_map.size() == 0)  {
+      cerr << "Grid not extruded one cell!  Not a valid grid for axisymmetric computations" << endl ;
+      Loci::Abort() ;
+    }
+
+    double volume = 0 ;
+    for(const Entity *id=$boundary_map.begin();id!=$boundary_map.end();++id) {
+      if(id->$area.n.z > .99) {
+        int fsz = id->$face2node.size() ;
+        double len  = norm(id->$face2node[0]->$pos-id->$face2node[fsz-1]->$pos) ;
+        double len_sum = len ;
+        vector3d<real_t> center = len*(id->$face2node[0]->$pos +
+                                       id->$face2node[fsz-1]->$pos) ;
+        for(int i=1;i<fsz;++i) {
+          double len  = norm(id->$face2node[i-1]->$pos-
+                             id->$face2node[i]->$pos) ;
+          len_sum += len ;
+          center +=  len*(id->$face2node[i-1]->$pos +
+                          id->$face2node[i]->$pos) ;
+        }
+        center *= 1./(len_sum*2.) ;
+
+        vector3d<real_t> d1 = (id->$face2node[fsz-1]->$pos - center) ;
+        vector3d<real_t> d2 = (id->$face2node[0]->$pos - center) ;
+        volume += cross(d1,d2).z*(id->$area.n.z)*
+          (center.y+ id->$face2node[fsz-1]->$pos.y+ id->$face2node[0]->$pos.y) ;
+        for(int i=1;i<fsz;++i) {
+        
+          vector3d<real_t> d1 = (id->$face2node[i-1]->$pos - center) ;
+          vector3d<real_t> d2 = (id->$face2node[i]->$pos - center) ;
+          volume += cross(d1,d2).z*(id->$area.n.z)*
+            (center.y+id->$face2node[i-1]->$pos.y+ id->$face2node[i]->$pos.y) ;
+        }
+        volume *= M_PI/3.0 ;
+      }
+    }
+    if(volume <= 0.0) {
+      cerr << "negative or zero volume in axisymmetric mesh!" << endl ;
+      cerr << "volume = " << volume << endl ;
+//      Loci::Abort() ;
+    }
+    $vol = volume ;
+#endif
+  }
+
+$type plot_freq param<int>;
+
+// Output Rules
+$rule singleton(do_output{n} <- stop_iter{n}, $n{n}, plot_freq{n}) {
+	if($plot_freq{n}){
+		$do_output{n} = ($$n{n} > 0) && (($$n{n} % $plot_freq{n})==0);
+//		$do_output{n} = ($$n{n} > 0) && (($$n{n} % $plot_freq{n})==0);
+	} else {
+		$do_output{n} = ($stop_iter{n} == $$n{n}) || ($$n{n} == 0);		
+//		$do_output{n} = ($stop_iter{n} == $$n{n});
+	}
+}
+
+$rule singleton(do_output{n,it} <- stop_iter{n,it}, $n{n}, $it{n,it}, plot_freq{n,it}, newton_iter{n,it}) {
+	if($plot_freq{n,it}){
+		$do_output{n,it} = (($$n{n} % $plot_freq{n,it})==0) && ($$it{n,it} == ($newton_iter{n,it}-1));
+//		$do_output{n,it} = ($$n{n} > 0) && (($$n{n} % $plot_freq{n,it})==0) && ($$it{n,it} == ($newton_iter{n,it}-1));
+	} else {
+		$do_output{n,it} = (($stop_iter{n,it} == $$n{n}) || ($$n{n} == 0))&& ($$it{n,it} == ($newton_iter{n,it}-1));
+//		$do_output{n,it} = ($stop_iter{n,it} == $$n{n}) && ($$it{n,it} == ($newton_iter{n,it}-1));
+	}
+}
+
+$rule default(plot_freq){
+	$plot_freq = 0;
+}
+
+$rule default(newton_iter){
+	$newton_iter = 1;
+}
+
+$rule default(stop_iter) {
+	$stop_iter = 1;
+}
+
+$rule singleton(newton_finished{n,it} <- newton_iter{n,it}, $it{n,it}), constraint(UNIVERSE) {
+	$newton_finished{n,it} = ($$it{n,it} == $newton_iter{n,it});
+}
+
+$rule singleton(timestep_finished{n} <- stop_iter{n}, $n{n}), constraint(UNIVERSE) {
+	$timestep_finished{n} = ($$n{n} == ($stop_iter{n}+1));
+}
+
+//$type pos store<vect3d>;
+$type solution param<int>;
+
+$rule singleton(report{n=0}<-stop_iter) {
+//    std::cout << "Build Timestep" << std::endl;
+    $report{n=0} = 1 ;
+}
+
+$rule singleton(report{n,it=0}<-report{n}) {
+//    std::cout << "Build Newton" << std::endl;
+    $report{n,it=0} = $report{n} ;
+}
+
+$rule singleton(report{n,it+1}<-report{n,it}) {
+//    std::cout << "Advance Newton" << std::endl;
+    $report{n,it+1} = $report{n,it} ;
+}
+
+$rule singleton(report{n+1}<-report{n,it}),
+	conditional(newton_finished{n,it}) {
+//    std::cout << "Newton Finished" << std::endl;
+    $report{n+1} = $report{n,it} ;
+}
+
+/*
+$rule singleton(solution<-report{n}, volRatio{n},maxCellAngle{n},minVol{n},maxTwist{n},maxShearTwist{n},
+	topo{n},modelName{n},convexCell{n},topocheck{n}),
+	conditional(timestep_finished{n}) {
+    std::cout << "Timestep Finished" << std::endl;
+    $solution = $report{n} ;
+}*/
+
+$rule pointwise(pos{n=0} <- pos) {
+	$pos{n=0} = $pos;
+}
+
+$rule pointwise(pos{n+1} <- pos{n,it}),
+	conditional(newton_finished{n,it}) {
+	$pos{n+1} = $pos{n,it};
+}
+
+bool pair_sizet_comparator (const pair<size_t, size_t>& l, const pair<size_t, size_t>& r)
+{
+	return l.first < r.first;
+}
+
+$rule pointwise(OUTPUT{n}<-pos{n},modelName{n},$n{n},outputDeformedGrid{n}, 
+		plot_postfix{n}, fileNumber(pos)), 
+	conditional(do_output{n}),  
+	option(disable_threading), 
+prelude { 
+	if(*$outputDeformedGrid{n}){ 
+	// Gather deformed positions to processor zero
+		vector<vect3d> cfd_coords,cfd_coords_loc;
+		vector<size_t> cfd_ids, cfd_ids_loc;
+		Loci::entitySet dom = entitySet(seq) ;
+		// Copy data into local buffer
+		int cnt = 0 ;
+		cfd_coords_loc.resize(dom.size());
+		cfd_ids_loc.resize(dom.size());
+		FORALL(dom,ii) {
+			cfd_coords_loc[cnt] = $pos{n}[ii] ;
+			cfd_ids_loc[cnt] = $fileNumber(pos)[ii];
+			cnt++ ;
+		} ENDFORALL ;
+
+		if(Loci::MPI_rank == 0)
+			cout << "Gathering Deformed Positions" << std::endl;
+		// Gather coordinates of CHEM nodes onto processor zero for mapping
+		gatherVector(cfd_coords,cfd_coords_loc,MPI_COMM_WORLD) ; 
+		gatherVector(cfd_ids,cfd_ids_loc,MPI_COMM_WORLD) ;
+		try{ 
+		  if(Loci::MPI_rank == 0) { 
+			cout << "Copying .vog file" << std::endl;
+			std::string input_filename=*$modelName{n} + ".vog";
+			std::string output_filename=*$modelName{n} + "_" + *$plot_postfix{n} + ".vog";
+			// Copy vog file to new one
+			std::ifstream src(input_filename.data(), std::ios::binary);
+			std::ofstream dest(output_filename.data(), std::ios::binary);
+
+			dest << src.rdbuf();
+
+			src.close();
+			dest.close();
+
+			// Sort positions into file order
+
+			cout << "Updating positions" << std::endl;
+			
+			std::vector< std::pair<size_t,size_t> > sortedCFDnodeIndex;
+			sortedCFDnodeIndex.resize(cfd_ids.size());
+			for(size_t i = 0; i < cfd_ids.size(); ++i){
+				sortedCFDnodeIndex[i].first = cfd_ids[i]; // Chem node ID
+				sortedCFDnodeIndex[i].second = i; // Index in unsorted vector
+			}
+
+			sort(sortedCFDnodeIndex.begin(),sortedCFDnodeIndex.end(),pair_sizet_comparator);
+			vector<vect3d> cfd_coords_sorted;
+			cfd_coords_sorted.resize(cfd_ids.size());
+			for(size_t i = 0; i < cfd_ids.size(); ++i){
+				cfd_coords_sorted[i] = cfd_coords[sortedCFDnodeIndex[i].second]; // Chem node ID
+			}
+			// Open new file and pull out position dataset
+			cout << "Updating positions" << std::endl;
+			hid_t file;
+			file=H5Fopen(output_filename.data(), H5F_ACC_RDWR, H5P_DEFAULT); // Open file 
+
+			if ( file < 0 ) { 
+				throw runtime_error("Error opening file " + output_filename); 
+			}
+		
+#ifdef H5_USE_16_API
+			hid_t fid = H5Gopen(file,"file_info") ;
+#else
+			hid_t fid = H5Gopen(file,"file_info",H5P_DEFAULT) ;
+#endif
+			hid_t id_a = H5Aopen_name(fid,"numNodes") ;
+			unsigned long numNodes = 0;
+			H5Aread(id_a,H5T_NATIVE_ULONG,&numNodes) ;
+			H5Aclose(id_a) ;
+			H5Gclose(fid) ;
+  
+			hsize_t  count = numNodes ;
+
+#ifdef H5_INTERFACE_1_6_4
+			hsize_t start = 0 ;
+#else
+			hssize_t start = 0 ;
+#endif 
+
+#ifdef H5_USE_16_API
+			hid_t node_g = H5Gopen(file,"node_info") ;
+			hid_t dataset = H5Dopen(node_g,"positions") ;
+#else
+			hid_t node_g = H5Gopen(file,"node_info",H5P_DEFAULT) ;
+			hid_t dataset = H5Dopen(node_g,"positions",H5P_DEFAULT) ;
+#endif
+			hid_t dspace = H5Dget_space(dataset) ;
+  
+			hsize_t stride = 1 ;
+			H5Sselect_hyperslab(dspace,H5S_SELECT_SET,&start,&stride,&count,NULL) ;
+			int rank = 1 ;
+			hsize_t dimension = count ;
+			hid_t memspace = H5Screate_simple(rank,&dimension,NULL) ;
+				typedef Loci::data_schema_traits<vect3d > traits_type ;
+			Loci::DatatypeP dp = traits_type::get_type() ;
+			hid_t datatype = dp->get_hdf5_type() ;
+			hid_t err = H5Dwrite(dataset,datatype,memspace,dspace,H5P_DEFAULT,
+				      &cfd_coords_sorted[0]) ;
+			if(err < 0) {
+			  throw runtime_error("Error writing positions");
+			}
+			H5Sclose(dspace) ;
+			H5Dclose(dataset) ;
+			H5Gclose(node_g) ;
+  			H5Fclose(file) ;
+		  } 
+		} catch (const runtime_error& err) {
+			cout << "Error while creating deformed grid: " << err.what() << endl;
+			Loci::Abort();
+		}
+
+	}
+};
+
+$rule singleton(OUTPUT{n} <-report{n},volRatio{n},maxCellAngle{n},minVol{n},maxTwist{n},maxShearTwist{n},
+	topo{n},modelName{n},convexCell{n},topocheck{n}, $n{n}, stop_iter), conditional(do_output{n}) {
+ $[Once] {
+    cout << "====================================================================" << endl;
+    cout << "Summary for iteration " << $$n{n} << " / " << $stop_iter << endl;
+    cout << "====================================================================" << endl;
+    if($minVol{n} <= 0) {
+      cerr << "Negative or zero volume cell!  The grid quality is too poor to use." << endl ;
+    }
+    cout << "A volume ratio less than 10 is ideal:" << endl;
+    cout << "======Maximum cell volume ratio = " << $volRatio{n} << endl ;
+    cout << "======Minimum cell volume " << $minVol{n} << endl ;
+    cout << endl ;
+    cout << "The angle between the face normal and cell centroids provides an indication "
+         << endl
+         << "of mesh isotropy.  The lower this number the better the mesh quality.  Values"
+         << endl
+         << "below 100 are desirable.  Values above 150 indicate very poor mesh quality."
+         << endl ;
+
+    cout << "======Maximum cell to face angle = " << $maxCellAngle{n} << endl ;
+    cout << endl ;
+
+    cout << "For non-triangular faces it is possible for the face to be non-planar, "
+         << endl
+         << "i.e. twisted.  The twist metric measure the  non-planar component of the face"
+         << endl 
+         << "geometry.  In other words a value of 0.1 indicates that the face geometry"
+         << endl
+         << "deviates from the planar description by 10 percent.  "
+         << endl
+         << "A value below 0.1 is desirable:" << endl ;
+    cout << "======Maximum Twist = " << $maxTwist{n} << endl ;
+    cout << "======Maximum ShearTwist = " << $maxShearTwist{n} << endl ;
+    cout << endl ;
+
+    int quality = 3 ;
+    if($volRatio{n} > 10 || $maxCellAngle{n} > 90 ||
+       $maxTwist{n} > 0.1 || $maxShearTwist{n} > 0.1) 
+      quality = 2 ;
+    if($volRatio{n} > 50 || $maxCellAngle{n} > 150 ||
+       $maxTwist{n} > 0.2 || $maxShearTwist{n} > 0.2)
+      quality = 1 ;
+    if($volRatio{n} > 100 || $maxCellAngle{n} > 170 ||
+       $maxTwist{n} > 0.45 || $maxShearTwist{n} > 0.45)
+      quality = 0 ;
+    if($volRatio{n} > 1000 || $maxCellAngle{n} > 179 ||
+       $maxTwist{n} > 0.8 || $maxShearTwist{n} > 0.8 || $minVol{n} < 0 || $convexCell{n} > 0 )
+      quality = -1 ;
+
+    if($topocheck{n} > 0) {
+      cout << "WARNING: " << $topocheck{n} << " cells have invalid topology" << endl ;
+      quality = -1 ;
+    }
+    
+    string quality_report = "undetermined" ;
+    switch(quality) {
+    case 3:
+      quality_report = "excellent" ;
+      break ;
+    case 2:
+      quality_report = "good" ;
+      break ;
+    case 1:
+      quality_report = "poor" ;
+      break ;
+    case 0:
+      quality_report = "marginal utility" ;
+      break ;
+    case -1:
+      quality_report = "UNUSABLE" ;
+    }
+    
+    cout << "Overall Grid Quality Assesment: " << quality_report << endl ;
+    cout << endl ;
+    switch(quality) {
+    case 3:
+      cout << "-- This grid has optimal quality." << endl ;
+      break ;
+    case 2:
+      cout << "-- This grid has satisfactory quality and will provide useful results." << endl ;
+      break ;
+    case 1:
+      cout << "-- This grid is usable.  A better result will probably be obtained with a grid" << endl
+           << "   that has better quality." << endl ;
+      break ;
+    case 0:
+      cout<< "-- The solver may have difficulty obtaining solutions on this grid.  It is"<< endl
+          << "   recommended that you identify the cause of poor mesh quality and regenerate" << endl
+          << "   the mesh to improve quality.  The marginal classification is due to:" << endl ;
+      if($volRatio{n} > 100)
+	cout << "     * a volRatio that exceeds 100" << endl ;
+      if($maxCellAngle{n} > 170)
+	cout << "     * a maxCellAngle that exceeds 170 degrees" << endl ;
+      if($maxTwist{n} > 0.45)
+	cout << "     * a maxTwist that exceeds 45 percent" << endl ;
+      if($maxShearTwist{n} > 0.45)
+	cout << "     * a maxShearTwist that exceeds 45 percent" << endl ;
+      break ;
+    case -1:
+      cout<< "-- This grid cannot be used as the solver will most likely fail to converge. "<< endl ;
+      break ;
+    }
+    
+    string report_file = $modelName{n} + ".quality" ;
+    std::ofstream file(report_file.c_str(),std::ios::out) ;
+    file << "<minVol> "  << $minVol{n} << " </minVol>" << endl ;
+    file << "<volRatio> " << $volRatio{n} << " </volRatio>" <<  endl ;
+    file << "<maxCellAngle> " << $maxCellAngle{n} << " </maxCellAngle>" << endl ;
+    file << "<maxTwist> " << $maxTwist{n} << " </maxTwist>" <<endl ;
+    file << "<maxShearTwist> " << $maxShearTwist{n} << "</maxShearTwist> "
+         <<endl ;
+    file << "<quality> " << quality << "</quality> " << endl ;
+    file << "<qualityReport> " << quality_report << "</qualityReport> "
+         <<endl ;
+  }
+}
+
+
+$rule singleton(solution<-report{n}), conditional(timestep_finished{n}) {
+// Do nothing
+#ifdef USE_ATA_MAP
+	delete mapper;
+#endif
+}
+
+
+$rule unit(topo{n}), conditional(do_output{n}), constraint(UNIVERSE) {
+  $topo{n} = 0 ;
+}
+
+
+class output_grid_topology : public apply_rule<param<int>, Loci::Maximum<int> > {
+  param<int> topo ;
+  const_multiMap upper,lower,boundary_map,face2node ;
+  const_store<vector3d<double> > pos ;
+  const_Map ref ;
+  const_store<string> boundary_names ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+public:
+  output_grid_topology() {
+    name_store("topo{n}",topo) ;
+    name_store("upper{n}",upper) ;
+    name_store("lower{n}",lower) ;
+    name_store("boundary_map{n}",boundary_map) ;
+    name_store("face2node{n}",face2node) ;
+    name_store("ref{n}",ref) ;
+    name_store("boundary_names{n}",boundary_names) ;
+    name_store("plot_postfix{n}",plot_postfix) ;
+    name_store("modelName{n}",modelName) ;
+    name_store("pos{n}",pos) ;
+    input("plot_postfix{n}") ;
+    input("modelName{n}") ;
+    input("(upper{n},lower{n},boundary_map{n})->face2node{n}->pos{n}") ;
+    input("boundary_map{n}->ref{n}->boundary_names{n}") ;
+    output("topo{n}") ;
+    disable_threading() ;
+  }
+    
+  void compute(const sequence &seq) ;
+} ;
+
+
+
+void output_grid_topology::compute(const sequence &seq) {
+  if(Loci::is_leading_execution()) {
+    Loci::debugout<< "calling write grid topology" << endl ;
+  }
+  string basename = *modelName+".topo" ;
+  string filename = "output/"+basename;
+  $[Once] {
+  	std::cout << "Writing grid topology to " << filename << std::endl;    
+	string topolink = string("output/topo_file.") + *plot_postfix + string("_") + *modelName ;
+    	std::ofstream file(topolink.c_str(),std::ios::trunc) ;
+    	file << basename << endl ;
+
+  }
+  Loci::parallelWriteGridTopology(filename.c_str(),
+                                  upper.Rep(),lower.Rep(),boundary_map.Rep(),
+                                  face2node.Rep(),
+                                  ref.Rep(),
+                                  boundary_names.Rep(),
+                                  pos.Rep(),
+                                  entitySet(seq)) ;
+}
+
+
+register_rule<output_grid_topology> register_output_grid_topology ;
+
+void dump_pos(const sequence &seq,const_store<vector3d<double> > &pos,
+              const_param<string> &plot_postfix, const_param<string> &modelName) {
+  ostringstream oss ;
+//  int cycle = 0 ;
+    
+  oss << "output/grid_pos." << *plot_postfix << "_" << *modelName ;
+  string filename = oss.str() ;
+
+  $[Once] {
+    Loci::debugout << "writing file " << filename << endl ;
+  }
+
+  hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+				       H5P_DEFAULT, H5P_DEFAULT) ;
+
+  if(file_id < 0) {
+    cerr << "unable to open file " << filename << endl ;
+    Loci::Abort() ;
+  }
+  Loci::writeContainer(file_id,"pos",pos.Rep()) ;
+
+  Loci::hdf5CloseFile(file_id) ;
+}
+
+class output_grid_positions: public apply_rule<param<int>, Loci::Maximum<int> > {
+  const_store<vector3d<double> > pos ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<int> topo ;
+public:
+  output_grid_positions() {
+    name_store("pos",pos) ;
+    name_store("plot_postfix",plot_postfix) ;
+    name_store("modelName",modelName) ;
+    name_store("topo",topo) ;
+      
+    constraint("pos") ;
+    input("pos") ;
+    input("plot_postfix") ;
+    input("modelName") ;
+    output("topo") ;
+  }
+  void compute(const sequence &seq) {
+    dump_pos(seq,pos,plot_postfix,modelName) ;
+  }
+} ;
+register_rule<output_grid_positions> register_output_grid_positions ;
+
+
+$type accessedNodes store<bool> ;
+$rule pointwise(face2node->accessedNodes<-area) {
+  int fsz = $face2node.size() ;
+  for(int i=0;i<fsz;++i)
+    $face2node[i]->$accessedNodes = true ;
+}
+
+$type numAccessedNodes param<int> ;
+$type numNodes param<int> ;
+
+$rule unit(numAccessedNodes),constraint(UNIVERSE) {
+  $numAccessedNodes = 0 ;
+}
+$rule apply(numAccessedNodes<-pos)[Loci::Summation],constraint(accessedNodes) {
+  int cnt = 1 ;
+  join($numAccessedNodes,cnt) ;
+}
+
+$rule unit(numNodes),constraint(UNIVERSE) {
+  $numNodes = 0 ;
+}
+
+$rule apply(numNodes<-pos)[Loci::Summation] {
+  int cnt = 1 ;
+  join($numNodes,cnt) ;
+}
+
+$rule apply(topo<-numNodes,numAccessedNodes)[Loci::Maximum], prelude {
+  if(*$numNodes != *$numAccessedNodes) {
+    $[Once]{
+      cerr << "Warning: "
+           << *$numNodes-*$numAccessedNodes
+           << " unreferenced nodes in grid." << endl ;
+    }
+  }
+} ;
+$type volume store<double> ;
+
+$rule pointwise(volume<-cellcenter,(upper,lower,boundary_map)->(area,facecenter)) {
+  double sum = 0.0 ;
+  vector3d<double> dv ;
+  for(const Entity* nf=$upper.begin();nf!=$upper.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    sum = sum + nf->$area.sada*(dot(dv,nf->$area.n)) ;
+  }
+  for(const Entity* nf=$lower.begin();nf!=$lower.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    sum = sum - nf->$area.sada*(dot(dv,nf->$area.n)) ;
+  }
+  for(const Entity* nf=$boundary_map.begin();nf!=$boundary_map.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    sum = sum + nf->$area.sada*(dot(dv,nf->$area.n)) ;
+  }
+  $volume = sum/3.0 ;
+}
+
+$rule unit(cellVolRatio),constraint(volume) {
+  $cellVolRatio = 1 ;
+}
+
+$rule pointwise(ratio<-(cl,cr)->volume) {
+  const double mxvol = max($cl->$volume,$cr->$volume) ;
+  const double mnvol = max(min($cl->$volume,$cr->$volume),1e-30) ;
+  $ratio = mxvol/mnvol ;
+}
+
+$rule apply(cl->cellVolRatio<-ratio)[Loci::Maximum] {
+  join($cl->$cellVolRatio,$ratio) ;
+}
+$rule apply(cr->cellVolRatio<-ratio) [Loci::Maximum] {
+  join($cr->$cellVolRatio,$ratio) ;
+}
+
+
+
+$rule unit(volRatio),constraint(volume) {
+  $volRatio = 0 ;
+}
+
+$rule apply(volRatio<-cellVolRatio)[Loci::Maximum] {
+  join($volRatio,$cellVolRatio) ;
+}
+
+
+
+$rule pointwise(faceAngle<-cl->cellcenter,cr->cellcenter,facecenter) {
+  // maximum angle between line segment connecting cellcenters and line
+  // segments that connect cell centers to face centers.
+  vector3d<double> v1 = $cr->$cellcenter-$cl->$cellcenter ;
+  vector3d<double> v2 = $facecenter-$cl->$cellcenter ;
+  vector3d<double> v3 = $cr->$cellcenter-$facecenter ;
+  double nv1 = norm(v1) ;
+  double nv2 = norm(v2) ;
+  double nv3 = norm(v3) ;
+  double rad2deg = 360./(2.*3.1415927) ;
+  $faceAngle = rad2deg*acos(min(dot(v1,v2)/(nv1*nv2),dot(v1,v3)/(nv1*nv3))) ;
+}
+
+$rule pointwise(faceAngle<-ci->cellcenter,facecenter,area) {
+  vector3d<double> v1 = $ci->$cellcenter-$facecenter ;
+  vector3d<double> v2 = $area.n*dot(v1,$area.n) ;
+  double rad2deg = 360./(2.*3.1415927) ;
+  $faceAngle = rad2deg*acos(fabs(dot(v1,v2))/(norm(v1)*norm(v2))) ;
+}
+
+
+$rule unit(cellFaceAngle),constraint(volume) {
+  $cellFaceAngle = 0 ;
+}
+$rule apply(cl->cellFaceAngle<-faceAngle)[Loci::Maximum] {
+  join($cl->$cellFaceAngle,$faceAngle) ;
+}
+$rule apply(cr->cellFaceAngle<-faceAngle)[Loci::Maximum] {
+  join($cr->$cellFaceAngle,$faceAngle) ;
+}
+
+$rule unit(maxCellAngle), constraint(volume) {
+  $maxCellAngle = 0 ;
+}
+$rule apply(maxCellAngle<-cellFaceAngle)[Loci::Maximum] {
+  join($maxCellAngle,$cellFaceAngle) ;
+}
+
+
+$rule pointwise(faceTwisted{n}<-facecenter{n},face2node{n}->pos{n},area{n}) {
+  int sz = $face2node{n}.size() ;
+  double maxlen = 0 ;
+  double maxdel = 0 ;
+  const vector3d<double> n = $area{n}.n ;
+  for(int i=0;i<sz;++i) {
+    const vector3d<double> dv = $facecenter{n}-$face2node{n}[i]->$pos{n} ;
+    maxlen = max(dot(dv,dv),maxlen) ;
+    maxdel = max(dot(dv,n),maxdel) ;
+    
+  }
+  $faceTwisted{n} = maxdel/sqrt(maxlen) ;
+}
+
+
+$rule unit(cellTwist),constraint(volume) {
+  $cellTwist = 0 ;
+}
+$rule apply(cl->cellTwist<-faceTwisted)[Loci::Maximum] {
+  join($cl->$cellTwist,$faceTwisted) ;
+}
+$rule apply(cr->cellTwist<-faceTwisted)[Loci::Maximum] {
+  join($cr->$cellTwist,$faceTwisted) ;
+}
+
+$rule pointwise(faceShearTwist<-cl->(cellcenter,volume),cr->(cellcenter,volume),facecenter,face2node->pos,area) {
+  int sz = $face2node.size() ;
+  double maxdel = 0 ;
+  const vector3d<double> n = $area.n ;
+  for(int i=0;i<sz;++i) {
+    const vector3d<double> dv = $facecenter-$face2node[i]->$pos ;
+    maxdel = max(dot(dv,n),maxdel) ;
+  }
+  vector3d<double> vl = $facecenter-$cl->$cellcenter ;
+  vector3d<double> vr = $cr->$cellcenter-$facecenter ;
+  double dl = dot(vl,n) ;
+  double dr = dot(vr,n) ;
+  //  double tl = norm(vl-dl*n) ;
+  //  double tr = norm(vr-dr*n) ;
+
+  // Twist factor ratio of out of plane delta to cell thickness
+  double thickness = ($cl->$volume+$cr->$volume)/$area.sada ;
+  double twist_factor = maxdel/thickness ;
+  // shear factor measures how much displacement from a normal projection
+  // of the surface to the surface charactersitic distance
+  double shear_factor = sqrt((dot(vl-dl*n,vl-dl*n)+dot(vr-dr*n,vr-dr*n))/
+                             $area.sada) ;
+  // anisotropy factor, ratio of thickness to unit sphere radius
+  double aniso_factor = thickness/pow($cl->$volume+$cr->$volume,1./3.);
+  $faceShearTwist = twist_factor*shear_factor*aniso_factor ;
+    
+}
+
+
+
+$rule unit(cellShearTwist),constraint(volume) {
+  $cellShearTwist = 0 ;
+}
+$rule apply(cl->cellShearTwist<-faceShearTwist)[Loci::Maximum] {
+  join($cl->$cellShearTwist,$faceShearTwist) ;
+}
+$rule apply(cr->cellShearTwist<-faceShearTwist)[Loci::Maximum] {
+  join($cr->$cellShearTwist,$faceShearTwist) ;
+}
+
+
+inline bool edgeCompare(const Array<int,3> &e1, const Array<int,3> &e2) {
+  return (e1[0] < e2[0] || (e1[0]==e2[0] && e1[1]<e2[1])) ;
+}
+
+$rule unit(topocheck),constraint(geom_cells) {
+  $topocheck = 0 ;
+}
+
+$rule apply(topocheck<-(upper,lower,boundary_map)->face2node->pos)[Loci::Summation] {
+  int topok = 0 ;
+  vector<Array<int,3> > edges ;
+  int usz = $upper.size() ;
+  for(int i=0;i<usz;++i) {
+    int fsz = $upper[i]->$face2node.size() ;
+    for(int j=0;j<fsz;++j) {
+      int jm = (j==0)? fsz-1:j-1 ;
+      int e1 = $upper[i]->$face2node[jm] ;
+      int e2 = $upper[i]->$face2node[j] ;
+      Array<int,3> tmp ;
+      tmp[0] = min(e1,e2) ;
+      tmp[1] = max(e1,e2) ;
+      tmp[2] = (tmp[0]==e1)?1:0 ;
+      edges.push_back(tmp) ;
+    }
+  }
+  
+  int lsz = $lower.size() ;
+  for(int i=0;i<lsz;++i) {
+    int fsz = $lower[i]->$face2node.size() ;
+    for(int j=0;j<fsz;++j) {
+      int jm = (j==0)? fsz-1:j-1 ;
+      int e1 = $lower[i]->$face2node[jm] ;
+      int e2 = $lower[i]->$face2node[j] ;
+      Array<int,3> tmp ;
+      tmp[0] = min(e1,e2) ;
+      tmp[1] = max(e1,e2) ;
+      tmp[2] = (tmp[0]==e1)?0:1 ;
+      edges.push_back(tmp) ;
+    }
+  }
+  
+  int bsz = $boundary_map.size() ;
+  for(int i=0;i<bsz;++i) {
+    int fsz = $boundary_map[i]->$face2node.size() ;
+    for(int j=0;j<fsz;++j) {
+      int jm = (j==0)? fsz-1:j-1 ;
+      int e1 = $boundary_map[i]->$face2node[jm] ;
+      int e2 = $boundary_map[i]->$face2node[j] ;
+      Array<int,3> tmp ;
+      tmp[0] = min(e1,e2) ;
+      tmp[1] = max(e1,e2) ;
+      tmp[2] = tmp[0]==e1?1:0 ;
+      edges.push_back(tmp) ;
+    }
+  }
+  int esz = edges.size() ;
+  if((esz & 0x1) == 1) {
+    topok = 1 ;
+  }
+  sort(edges.begin(),edges.end(),edgeCompare) ;
+  int edge_missed = 0 ;
+  for(int i=0;i<esz;i+=2) {
+    if(edges[i][0] != edges[i+1][0] ||
+       edges[i][1] != edges[i+1][1] ||
+       (edges[i][2]+edges[i+1][2]) != 1) {
+      topok=1 ;
+      edge_missed++ ;
+    }
+  }
+  join($topocheck,topok) ;
+}
+
+class scalar_node_output : public apply_rule<param<int>, Loci::Maximum<int> > {
+  std::string var_name ;
+  std::string value_name ;
+  Loci::const_store<float> c2n ;  
+  Loci::const_param<std::string> plot_postfix ;
+  Loci::const_param<std::string> modelName ;
+  Loci::param<int> topo ;
+public:
+  scalar_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const Loci::sequence &seq) ;
+} ;
+
+void dump_scalar(const sequence &seq,const_store<float> &c2n,
+                 const_param<string> &plot_postfix, 
+		 const_param<string> &modelName,
+                 string type,
+                 string sname) {
+    
+  ostringstream oss ;
+    
+  oss << "output/" << sname << "_" << type << "." << *plot_postfix
+      << "_" << *modelName ;
+  string filename = oss.str() ;
+
+  $[Once] {
+    Loci::debugout << "writing file " << filename << endl ;
+  }
+  
+  hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                       H5P_DEFAULT, H5P_DEFAULT) ;
+
+  Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+  Loci::hdf5CloseFile(file_id) ;
+
+}
+  
+scalar_node_output::scalar_node_output(const char *vname,
+                                       const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name; 
+  name_store(var_name_time, c2n) ;
+  name_store("plot_postfix",plot_postfix) ;
+  name_store("modelName",modelName) ;
+  name_store("topo",topo) ;
+    
+  constraint("pos") ;
+  input("plot_postfix") ;
+  input("modelName") ;
+  input(var_name_time);
+  output("topo") ;
+  disable_threading() ;
+}
+void scalar_node_output::compute(const sequence &seq) {
+  dump_scalar(seq,c2n, plot_postfix, modelName,"sca",value_name) ;
+}
+
+$rule unit(minVol),constraint(geom_cells) {
+  $minVol = 1e33 ;
+}
+$rule apply(minVol<-volume)[Loci::Minimum] {
+  join($minVol,$volume) ;
+}
+
+$rule unit(maxTwist),constraint(geom_cells) {
+  $maxTwist = 0 ;
+}
+$rule apply(maxTwist<-cellTwist)[Loci::Maximum] {
+  join($maxTwist,$cellTwist) ;
+}
+
+$rule unit(maxShearTwist),constraint(geom_cells) {
+  $maxShearTwist = 0 ;
+}
+$rule apply(maxShearTwist<-cellShearTwist)[Loci::Maximum] {
+  join($maxShearTwist,$cellShearTwist) ;
+}
+
+
+$rule unit(volumeComponent_X),constraint(volumeTag(X)),
+  parametric(volumeTag(X)) {
+  $volumeComponent_X = 0 ;
+}
+$rule apply(volumeComponent_X{n}<-volume{n})[Loci::Summation],constraint(volumeTag(X)),
+  parametric(volumeTag(X)) {
+  join($volumeComponent_X{n},$volume{n}) ;
+}
+
+
+$rule apply(topo<-volumeTag(X),volumeComponent_X)[Loci::Maximum],
+  parametric(volumeTag(X)),option(disable_threading), prelude {
+
+  $[Once] {
+    cout << "Volume of component " << *$volumeTag(X) << " is " << *$volumeComponent_X << endl ;
+  }
+} ;
+
+
+
+$rule unit(convexCell),constraint(UNIVERSE) {
+  $convexCell = 0 ;
+}
+
+$rule apply(convexCell<-cellcenter,(upper,lower,boundary_map)->(area,facecenter))[Loci::Summation] {
+  bool convex = false ;
+  vector3d<double> dv ;
+  for(const Entity* nf=$upper.begin();nf!=$upper.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) < 0)
+      convex = true ;
+  }
+  for(const Entity* nf=$lower.begin();nf!=$lower.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) > 0)
+      convex = true ;
+  }
+  for(const Entity* nf=$boundary_map.begin();nf!=$boundary_map.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) < 0)
+      convex = true ;
+  }
+  if(convex)
+    $convexCell++ ;
+}
+
+$rule apply(topo<-convexCell)[Loci::Maximum],
+  option(disable_threading), prelude {
+
+  $[Once] {
+    if(*$convexCell > 0) {
+      cerr << "WARNING: there are " << *$convexCell << " non-convex cells in the mesh." << endl ;
+    } else {
+      cout << "All cells in this mesh pass the convexity check!" << endl ;
+    }
+  }
+} ;
+
+
+$rule pointwise(nonconvex<-cellcenter,(upper,lower,boundary_map)->(area,facecenter)) {
+  bool convex = true ;
+  vector3d<double> dv ;
+  for(const Entity* nf=$upper.begin();nf!=$upper.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) < 0)
+      convex = false ;
+  }
+  for(const Entity* nf=$lower.begin();nf!=$lower.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) > 0)
+      convex = false;
+  }
+  for(const Entity* nf=$boundary_map.begin();nf!=$boundary_map.end();++nf) {
+    dv = nf->$facecenter - $cellcenter ;
+    if(dot(dv,nf->$area.n) < 0)
+      convex = false ;
+  }
+  $nonconvex = 0 ;
+  if(!convex)
+    $nonconvex = 1 ;
+}
+
+//#define TEST
+#ifdef TEST
+$type nodeError store<float> ;
+$rule pointwise(nodeError<-pos) {
+  double E1 = fabs(norm($pos)-1.) ;
+  double E2 = fabs(norm($pos-vector3d<double>(1.0,0,0))-1.) ;
+  double E3 = fabs(norm($pos-vector3d<double>(-1.5,0,0))-1.) ;
+  $nodeError = min(min(E1,E2),E3) ;
+}
+
+OUTPUT_SCALAR("nodeError",nodeError) ;
+#endif
+
+$type faceGeometryInconsistent param<int> ;
+
+$rule unit(faceGeometryInconsistent),constraint(UNIVERSE) {
+  $faceGeometryInconsistent = 0 ;
+}
+
+$rule apply(faceGeometryInconsistent<-(cl,cr)->cellcenter,area)[Loci::Summation]{
+  if(dot($cr->$cellcenter-$cl->$cellcenter,$area.n)<0)
+    $faceGeometryInconsistent++ ;
+}
+
+$rule apply(faceGeometryInconsistent<-ci->cellcenter,facecenter,area)[Loci::Summation] {
+  if(dot($facecenter-$ci->$cellcenter,$area.n) < 0)
+    $faceGeometryInconsistent++ ;
+}
+
+$rule apply(topo<-faceGeometryInconsistent)[Loci::Maximum],
+  option(disable_threading), prelude {
+
+  $[Once] {
+    if(*$faceGeometryInconsistent > 0) {
+      cerr << "WARNING: there are " << *$faceGeometryInconsistent << " faces with inconsistent geometry!" << endl ;
+    }
+  }
+} ;
+
+using namespace Loci ;
+class dump_boundary_geom : public apply_rule<param<int>, Loci::Maximum<int> > {
+  const_store<Area> area ;
+  const_store<vector3d<double> > facecenter ;
+  const_param<string> plot_postfix ;
+  const_param<string> modelName ;
+  param<int> topo ;
+public:
+  dump_boundary_geom() ;
+  virtual void compute(const sequence &seq) ;
+} ;
+  
+dump_boundary_geom::dump_boundary_geom() {
+  name_store("area",area) ;
+  name_store("facecenter",facecenter) ;
+  name_store("topo",topo) ;
+  name_store("plot_postfix",plot_postfix) ;
+  name_store("modelName",modelName) ;
+  input("area,facecenter") ;
+  input("plot_postfix") ;
+  input("modelName") ;
+  constraint("ci->cellcenter") ;
+  output("topo") ;
+}
+void dump_boundary_geom::compute(const sequence &seq) {
+  ostringstream oss ;
+
+  oss << "output/bc_geom." << *plot_postfix << "_" << *modelName ;
+  string filename = oss.str() ;
+
+  //    cout << "opening file " << filename << endl ;
+  entitySet set(seq) ;
+  hid_t file_id = createUnorderedFile(filename.c_str(),set) ;
+  writeUnorderedStore(file_id,area,set,"area") ;
+  writeUnorderedStore(file_id,facecenter,set,"facecenter") ;
+  closeUnorderedFile(file_id) ;
+}	
+
+register_rule<dump_boundary_geom> register_dump_boundary_geom ;
+
+
+
+$type alpha_geom_f store<float> ;
+
+$type LDS_nonSymmetricCoeff param<double> ;
+$type LDS_nonSymmetricFactor param<double> ;
+// This defines the cutoff angle where full upwinding occurs,
+// A setting of 2 gives full upwinding at 53 degrees
+$rule default(LDS_nonSymmetricCoeff) {
+  $LDS_nonSymmetricCoeff = 2 ;
+}
+// This defines the slope of the upwind factor relative to the cos(angle)
+// in the limit as angle->0
+$rule default(LDS_nonSymmetricFactor) {
+  $LDS_nonSymmetricFactor = 1 ;
+}
+
+$rule pointwise(alpha_geom_f<-area,facecenter,(cl,cr)->(cellcenter,volume),
+		LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
+  const vector3d<double> df = $cr->$cellcenter-$cl->$cellcenter ;
+  const vector3d<double>  dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
+  double ndv = norm(dv) ;
+  double ndf = norm(df) ;
+  double cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
+		   dot($area.n,df)/ndf) ;
+  double scale = $LDS_nonSymmetricCoeff ;
+  double s = $LDS_nonSymmetricFactor/max(scale,1.0) ; ;
+  double x = min(scale*(1.-cosa),1.0) ;
+  double x2 = x*x ;
+  double x3 = x2*x ;
+  $alpha_geom_f = x2 + s*(x3-2.*x2+x) ;
+}
+  
+$type alphameanp param<Loci::Array<double,2> > ;
+
+$rule unit(alphameanp),constraint(alpha_geom_f) {
+  $alphameanp[0] = 0;
+  $alphameanp[1] = 0 ;
+}
+
+$rule apply(alphameanp<-alpha_geom_f,area)[Loci::Summation] {
+  Loci::Array<double,2> tmp ;
+  tmp[0] = $alpha_geom_f*$area.sada ;
+  tmp[1] = $area.sada ;
+  join($alphameanp,tmp) ;
+}
+
+$type alphastdp param<Loci::Array<double,2> > ;
+
+$rule unit(alphastdp),constraint(alpha_geom_f) {
+  $alphastdp[0] = 0;
+  $alphastdp[1] = 0 ;
+}
+
+$rule apply(alphastdp<-alpha_geom_f,area,alphameanp)[Loci::Summation] {
+  double am = $alphameanp[0]/$alphameanp[1] ;
+  double diff = am-$alpha_geom_f ;
+  Loci::Array<double,2> tmp ;
+  tmp[0] = diff*diff*$area.sada ;
+  tmp[1] = $area.sada ;
+  join($alphastdp,tmp) ;
+}
+
+
+
+
+$rule apply(topo<-alphameanp,alphastdp)[Loci::Maximum],
+  option(disable_threading), prelude {
+  $[Once] {
+    double meana = (*$alphameanp)[0]/(*$alphameanp)[1] ;
+    double sigma = sqrt((*$alphastdp)[0]/(*$alphastdp)[1]);
+    cout << "Dissipation Mesh Quality: (a_mean=" << meana << ", sigma=" << sigma << ")" << endl ;
+    if(meana+sigma < .12) {
+      cout << "  This is a low dissipation mesh. " << endl  ;
+    } else if(meana < .12) {
+      cout << "  This is a low dissipation mesh with limited regions of high dissipation." << endl;
+    } else {
+      cout << "  This mesh is not optimal for the low dissipation solver." << endl ;
+    }
+  }
+} ;
+
+
+$rule pointwise(alpha_cell<-upper->(alpha_geom_f,area),lower->(alpha_geom_f,area)) {
+  int usz = $upper.size() ;
+  double alpha_sum = 0 ;
+  double area_sum = 0 ;
+  for(int i=0;i<usz;++i) {
+    alpha_sum += ($upper[i]->$alpha_geom_f)*($upper[i]->$area.sada) ;
+    area_sum += ($upper[i]->$area.sada) ;
+  }
+  int lsz = $lower.size() ;
+  for(int i=0;i<lsz;++i) {
+    alpha_sum += ($lower[i]->$alpha_geom_f)*($lower[i]->$area.sada) ;
+    area_sum += ($lower[i]->$area.sada) ;
+  }
+  $alpha_cell = alpha_sum/max(area_sum,1e-30) ;
+}
+
+class vectord_node_output : public apply_rule<param<int>, Loci::Maximum<int> > {
+  std::string var_name ;
+  std::string value_name ;
+  Loci::const_store<vect3d > c2n ;
+  Loci::const_param<std::string> plot_postfix ;
+  Loci::const_param<std::string> modelName ;
+  Loci::param<int> topo ;
+public:
+  vectord_node_output(const char *vname, const char *valname) ;
+  virtual void compute(const Loci::sequence &seq) ;
+} ;
+
+void dump_vectord(const sequence &seq,const_store<vect3d > &c2n,
+                 const_param<string> &plot_postfix,                 
+		 const_param<string> &modelName,
+                 string type,
+                 string sname) {
+
+   ostringstream oss ;
+//   int cycle = 0;
+    oss << "output/" << sname << "_" << type << "." << *plot_postfix
+        << "_" << *modelName ;
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   Loci::writeContainer(file_id,sname,c2n.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+
+  
+vectord_node_output::vectord_node_output(const char *vname,
+                                       const char *valname) {
+  var_name = string(vname) ;
+  value_name = string(valname) ;
+  string var_name_time = var_name; 
+  name_store(var_name_time, c2n) ;
+  name_store("plot_postfix",plot_postfix) ;
+  name_store("modelName",modelName) ;
+  name_store("topo",topo) ;
+    
+  constraint("pos") ;
+  input("plot_postfix") ;
+  input("modelName") ;
+  input(var_name_time);
+  output("topo") ;
+  disable_threading() ;
+}
+void vectord_node_output::compute(const Loci::sequence &seq) {
+  dump_vectord(seq,c2n,plot_postfix,modelName,"vec",value_name) ;
+}	
+
+
+
+#define OUTPUT_SCALAR(X,Y) class OUT_##Y : public scalar_node_output {	\
+  public:								\
+  OUT_##Y() : scalar_node_output(X,#Y){}				\
+  }; register_rule<OUT_##Y> register_OUT_##Y 
+
+#define OUTPUT_VECTORD(X,Y) class VECDOUT_##Y : public vectord_node_output {	\
+  public:								\
+  VECDOUT_##Y() : vectord_node_output(X,#Y){}				\
+  }; register_rule<VECDOUT_##Y> register_VECDOUT_##Y 
+
+$rule pointwise (volumeChangeRatio{n} <- volume{n}, volume){
+	$volumeChangeRatio{n} = $volume{n}/$volume;
+}
+
+OUTPUT_SCALAR("cell2nodeMax(nonconvex)",nonconvex) ;
+OUTPUT_SCALAR("cell2nodeMax(cellVolRatio)",volumeRatio) ;
+OUTPUT_SCALAR("cell2nodeMax(cellFaceAngle)",cellFaceAngle) ;
+OUTPUT_SCALAR("cell2nodeMax(cellTwist)",cellTwist) ;
+OUTPUT_SCALAR("cell2nodeMax(cellShearTwist)",cellShearTwist) ;
+OUTPUT_SCALAR("cell2nodeMin(volume)",cellVol) ;
+OUTPUT_VECTORD("nodeDisp",nodeDisp) ;
+OUTPUT_SCALAR("cell2nodeMax(alpha_cell)",alpha) ;
+OUTPUT_SCALAR("rot_angle",rot_angle) ;
+OUTPUT_SCALAR("cell2nodeMax(volumeChangeRatio)",volumeChangeRatio) ;
+//OUTPUT_VECTOR("nodeDisp",nodeDisp) ;
+

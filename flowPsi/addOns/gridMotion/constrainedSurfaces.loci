@@ -1,0 +1,587 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <iostream>
+using std::endl;
+using std::ostream;
+using std::cout ;
+#include <string>
+using std::string;
+#include <Loci.h>
+using Loci::option_value_type;
+
+#include "geomRep.h"
+
+$include "FVM.lh"
+$include "gridMover.lh"
+
+
+
+$type constrainedBoundaryNodes        store<bool> ;
+
+$rule pointwise(face2node->constrainedBoundaryNodes),
+  constraint(ref->constrainedMotion_BCoption) {
+} ;
+  
+
+class constraintImpl : public Loci::CPTR_type {
+public:
+  // project a point onto the closest surface point return
+  // the projected point and the normal of the surface at this point
+  virtual void projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const = 0 ;
+} ;
+
+class constraintImplPlane: public constraintImpl {
+  vect3d plane_pt, plane_n ;
+public:
+  constraintImplPlane(vect3d pt, vect3d n):plane_pt(pt),plane_n(n) {}
+  virtual void projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const ;
+} ;
+
+void constraintImplPlane::projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const {
+  pn = plane_n ;
+  vect3d dv = pt-plane_pt ;
+  ppt = (dv-dot(dv,plane_n)*plane_n)+plane_pt ;
+}
+
+class constraintImplInterp: public constraintImpl {
+public:
+  constraintImplInterp() {}
+  virtual void projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const ;
+} ;
+
+void constraintImplInterp::projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const {
+  pn = vect3d(0.0,0.0,0.0) ;
+  ppt = pt ;
+}
+
+class constraintImplCylinder: public constraintImpl {
+  vect3d cyl_pt1, cyl_pt2, cyl_axis ;
+  real cyl_r ;
+public:
+  constraintImplCylinder(vect3d p1, vect3d p2,real  r) {
+    cyl_pt1 = p1 ;
+    cyl_pt2 = p2 ;
+    cyl_axis = p2-p1 ;
+    cyl_axis *= 1./max(norm(cyl_axis),1e-30) ;
+    cyl_r = r ;
+  }
+  virtual void projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const ;
+} ;
+
+void constraintImplCylinder::projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const {
+  vect3d dv = pt-cyl_pt1 ;
+  vect3d axispt = dot(dv,cyl_axis)*cyl_axis + cyl_pt1 ;
+  vect3d n = pt-axispt ;
+  n *= 1./max(norm(n),1e-30) ;
+  pn = n ;
+  ppt = n*cyl_r + axispt ; // Project out distance of r
+}
+
+
+class constraintImplGeometryFile: public constraintImpl {
+  string filename ;
+  geomRep::surfaceGeometry geo ;
+public:
+  constraintImplGeometryFile(string file) {
+    filename = file ;
+    
+    if(Loci::MPI_rank == 0) {
+      std::string fname = file ;
+      if(!geo.readASCIIFile(fname)) {
+        cerr << "unable to open '" << fname << "'" << endl ;
+        Loci::Abort() ;
+      }
+      cout << "read in case geometry file: " << fname << endl ;
+    }
+    geo.broadcastGeometry(0,MPI_COMM_WORLD) ;
+  } ;
+  virtual void projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const ;
+} ;
+
+void constraintImplGeometryFile::projectPt2Surf(vect3d pt, vect3d &ppt, vect3d &pn) const {
+  ppt = geo.projectGeometryBezier(pt,pn) ;
+  //  if(norm(pt-ppt) > 1e-3) { 
+  //    cout << "pt = " << pt << ",ppt=" << ppt << ",pn=" << pn << endl ;
+  //  }
+}
+
+struct constrainedBCInfo {
+  string bc_name ;
+  Loci::CPTR<constraintImpl> bc_conform ;
+  int id ;
+} ;
+$type constrainedBCData blackbox<std::vector<constrainedBCInfo> > ;
+$type boundary_conditions param<Loci::options_list> ;
+$rule blackbox(constrainedBCData<-boundary_conditions), prelude {
+  using namespace Loci ;
+  (*$constrainedBCData).clear() ;
+  const Loci::options_list &ol = *$boundary_conditions ;
+  options_list::option_namelist l = ol.getOptionNameList() ;
+  options_list::option_namelist::const_iterator ni ;
+  int cnt = 0 ;
+  for(ni=l.begin();ni!=l.end();++ni) {
+    string bcname = *ni ;
+    option_value_type vt = ol.getOptionValueType(bcname);
+    option_values ov = ol.getOption(bcname) ;
+    if(vt == FUNCTION) {
+      options_list::arg_list value_list ;
+      string name ;
+      ov.get_value(name) ;
+      ov.get_value(value_list) ;
+      //      ol.setOption(bcname,name,value_list) ;
+      options_list olarg ;
+      olarg.Input(value_list) ;
+      if(olarg.optionExists("constrainedMotion")) {
+        vt = olarg.getOptionValueType("constrainedMotion");
+        ov = olarg.getOption("constrainedMotion") ;
+        string cname ;
+        ov.get_value(cname) ;
+	constrainedBCInfo bcinfo ;
+	bcinfo.id = cnt ;
+	bcinfo.bc_conform = 0 ;
+	bcinfo.bc_name = bcname ;
+	cnt++ ;
+	olarg.getOption("constrainedMotion",cname,value_list) ;
+	options_list fol ;
+	fol.Input(value_list) ;
+
+	if(cname == "plane") {
+	  vect3d plane_normal(1,0,0) ;
+	  vect3d plane_pt(0,0,0) ;
+          if(!fol.optionExists("normal")) {
+            cerr << "plane needs to define 'normal' vector in constrainedMotion" << endl ;
+          }
+          if(!fol.optionExists("point")) {
+            cerr << "plane needs to define 'point' in constrainedMotion" << endl ;
+          }
+          // needs error check
+	  fol.getOptionUnits("normal","",plane_normal,1) ;
+	  plane_normal *= 1./(norm(plane_normal)+1e-30) ;
+	  fol.getOptionUnits("point","m",plane_pt,1) ;
+	  bcinfo.bc_conform= new constraintImplPlane(plane_pt,plane_normal) ;
+	} else if(cname == "cylinder") {
+	  vect3d p1(1,0,0) ;
+	  vect3d p2(0,0,0) ;
+	  double r = 1 ;
+          if(!fol.optionExists("p1") || !fol.optionExists("p2") ||
+             !fol.optionExists("radius")) {
+            cerr << "cylinder needs to define 'p1', 'p2', and 'radius' in constrainedMotion" << endl ;
+          }
+	  fol.getOptionUnits("p1","m",p1,1) ;
+	  fol.getOptionUnits("p2","m",p2,1) ;
+	  Loci::option_value_type ovt =
+	    fol.getOptionValueType("radius") ;
+	  if(ovt == Loci::REAL) {
+	    fol.getOption("radius",r) ;
+	  } else if(ovt == Loci::UNIT_VALUE) {
+	    Loci::UNIT_type vu ;
+	    fol.getOption("radius",vu) ;
+	    if(!vu.is_compatible("m")) {
+	      cerr << "wrong type of units for radius" << endl ;
+	      Loci::Abort() ;
+	    }
+	    r = vu.get_value_in("m") ;
+	  }
+	  bcinfo.bc_conform= new constraintImplCylinder(p1,p2,r) ;
+	} else if(cname == "geoFile") {
+          if(!fol.optionExists("file")) {
+            cerr << "geoFile needs to goemetry filename with 'file' in constrainedMotion" << endl ;
+          }
+	  string filename ;
+	  fol.getOption("file",filename) ;
+	  bcinfo.bc_conform = new constraintImplGeometryFile(filename) ;
+	} else if(cname == "interpolated") {
+          bcinfo.bc_conform = new constraintImplInterp();
+        } else {
+	  if(Loci::MPI_rank == 0)  {
+	    cerr << "unknown constraint type = " << cname << endl ;
+	    Loci::Abort() ; 
+	  }
+	}
+	//	cout << "surface " <<  bcinfo.bc_name << " id " << bcinfo.id << endl ;
+        (*$constrainedBCData).push_back(bcinfo) ;
+
+      }
+    }
+  }
+  
+} ;
+$type boundary_tags store<std::string> ;
+$type boundary_names store<std::string> ;
+
+$type surfaceConstraintId store<int> ;
+
+$rule pointwise(surfaceConstraintId<-BC_options,boundary_names,constrainedBCData),constraint(constrainedMotion_BCoption) {
+  
+  string tag = $boundary_names ;
+  int num = -1 ;
+  int sz = ($constrainedBCData).size() ;
+  for(int i=0;i<sz;++i)
+    if(($constrainedBCData)[i].bc_name == tag)
+      num = i ;
+  $surfaceConstraintId = num ;
+}
+
+
+$type surfaceMotionConstraintHelper store<vector<int> > ;
+
+$rule unit(surfaceMotionConstraintHelper),constraint(pos) {
+  $surfaceMotionConstraintHelper= vector<int>() ;
+}
+
+$rule apply(face2node->surfaceMotionConstraintHelper<-ref->surfaceConstraintId)[gridMotion::Append] {
+  int fsz = $face2node.size() ;
+  int id = $ref->$surfaceConstraintId ;
+  for(int i=0;i<fsz;++i)
+    $face2node[i]->$surfaceMotionConstraintHelper.push_back(id);
+}
+
+$type surfaceMotionConstraintListNode store<vector<int> > ;
+
+$rule pointwise(surfaceMotionConstraintListNode<-surfaceMotionConstraintHelper) {
+  vector<int> tmp = $surfaceMotionConstraintHelper ;
+  sort(tmp.begin(),tmp.end()) ;
+  vector<int>::iterator uset = std::unique(tmp.begin(),tmp.end()) ;
+  int sz = uset-tmp.begin() ;
+  vector<int> cpy(sz) ;
+  vector<int>::iterator ii ;
+  int cnt = 0 ;
+  for(ii=tmp.begin();ii!=uset;++ii) {
+    cpy[cnt] = *ii ;
+    cnt++ ;
+  }
+  $surfaceMotionConstraintListNode = cpy ;
+} 
+
+
+
+
+$type specifiedDisplacementNodes store<bool> ;
+$rule pointwise(specifiedDisplacementNodes),constraint(prescribedMotionNodes) {
+  $specifiedDisplacementNodes = true ;
+}
+
+$rule pointwise(fixed::specifiedDisplacementNodes),constraint(fixedBoundaryNodes) {
+  $specifiedDisplacementNodes = true ;
+}
+
+inline vect3d getDisplacement(vect3d pos, vect3d disp, 
+			      const vector<int> &disp_list,
+			      const vector<constrainedBCInfo> constrainedBCData) {
+  vect3d np = pos+disp ;
+  const int sclsz = disp_list.size() ;
+  if(sclsz == 1) {
+    int c = disp_list[0] ;
+    vect3d point_constrained, normal_constrained ;
+    constrainedBCData[c].bc_conform->
+      projectPt2Surf(np,point_constrained, normal_constrained) ;
+    return  point_constrained-pos ;
+  } else if(sclsz == 2) {
+    int c0 = disp_list[0] ;
+    int c1 = disp_list[1] ;
+    vect3d p0,n0,p1,n1 ;
+    constrainedBCData[c0].bc_conform->projectPt2Surf(np,p0, n0) ;
+    constrainedBCData[c1].bc_conform->projectPt2Surf(np,p1, n1) ;
+    vect3d n2 = cross(n0,n1) ;
+    n2 *= 1./max(norm(n2),1e-30) ;
+    // Interpolated boundary returns a normal of (0,0,0). In that
+    // case, we just use the average of the two positions.
+    if(norm(n2) == 0.0){
+      return 0.5*(p1+p0)-pos;
+    } else {
+    // Do the real calc if we have a non-zero normal on both sides.
+    real dp0 = dot(p0,n0) ;
+    real dp1 = dot(p1,n1) ;
+    real dp2 = dot(p0,n2) ;
+    vect3d p2(dp0*n1.y*n2.z - dp0*n1.z*n2.y +
+              dp1*n0.z*n2.y - dp1*n0.y*n2.z +
+              dp2*n0.y*n1.z - dp2*n0.z*n1.y,
+	      dp0*n1.z*n2.x - dp0*n1.x*n2.z +
+              dp1*n0.x*n2.z - dp1*n0.z*n2.x +
+              dp2*n0.z*n1.x - dp2*n0.x*n1.z,
+	      dp0*n1.x*n2.y - dp0*n1.y*n2.x +
+              dp1*n0.y*n2.x - dp1*n0.x*n2.y +
+              dp2*n0.x*n1.y - dp2*n0.y*n1.x) ;
+    real det =  ((n0.x*n1.y*n2.z + n0.y*n1.z*n2.x + n0.z*n1.x*n2.y) -
+                 (n0.z*n1.y*n2.x + n0.x*n1.z*n2.y + n0.y*n1.x*n2.z)) ;
+    p2 *= 1./det ;
+    vect3d pti = dot(np-p2,n2)*n2+p2 ;
+    return pti-pos ;
+    }
+  } else {
+    return vect3d(0,0,0) ;
+  }
+}
+
+
+
+
+
+
+
+$type constraintCornerNodes param<vector< pair<pair<int,int>,pair<vect3d,vect3d> > > > ;
+
+$rule unit(constraintCornerNodes{n}),constraint(constrainedBoundaryNodes{n}) {
+  $constraintCornerNodes{n}.clear() ;
+}
+
+$rule apply(constraintCornerNodes{n}<-surfaceMotionConstraintListNode{n},pos0{n})[gridMotion::Append],
+  constraint(constrainedBoundaryNodes{n}) {
+  using std::make_pair ;
+  int sz = $surfaceMotionConstraintListNode{n}.size() ;
+  if(sz > 2) {
+    // corner, loop over all possible edges
+    for(int i=0;i<sz;++i)
+      for(int j=i+1;j<sz;++j) {
+	pair<int,int> edge($surfaceMotionConstraintListNode{n}[i],
+			   $surfaceMotionConstraintListNode{n}[j]) ;
+	pair<vect3d,vect3d> disp($pos0{n},vect3d(0,0,0)) ;
+	$constraintCornerNodes{n}.push_back(make_pair(edge,disp)) ;
+      }
+  }
+}
+
+$rule apply(constraintCornerNodes{n}<-surfaceMotionConstraintListNode{n},pos0{n},nodeDisp_b{n})[gridMotion::Append],
+  constraint(constrainedBoundaryNodes,specifiedDisplacementNodes) {
+  using std::make_pair ;
+  int sz = $surfaceMotionConstraintListNode{n}.size() ;
+  if(sz == 2) {
+    //    cout << "sz = 2, nodes = " << $surfaceMotionConstraintListNode[0]
+    //	 << "," << $surfaceMotionConstraintListNode[1] << endl ;
+    pair<int,int> edge($surfaceMotionConstraintListNode{n}[0],
+		       $surfaceMotionConstraintListNode{n}[1]) ;
+    pair<vect3d,vect3d> disp($pos0{n},$nodeDisp_b{n}) ;
+    $constraintCornerNodes{n}.push_back(make_pair(edge,disp)) ;
+  }
+}
+
+$type constrainedEdgeDisplacement store<vect3d> ;
+
+$rule pointwise(boundary::constrainedEdgeDisplacement{n}<-nodeDisp_b{n},pos0{n},surfaceMotionConstraintListNode{n},constrainedBCData{n}),constraint(specifiedDisplacementNodes{n},constrainedBoundaryNodes{n}) {
+  $constrainedEdgeDisplacement{n} = 
+    getDisplacement($pos0{n},$nodeDisp_b{n},
+		    $surfaceMotionConstraintListNode{n},
+		    $constrainedBCData{n}) ;
+}
+$rule pointwise(fixed::boundary::constrainedEdgeDisplacement{n}),constraint(fixedBoundaryNodes{n}) {
+  $constrainedEdgeDisplacement{n} = vect3d(0,0,0) ;
+}
+
+$rule pointwise(constrainedEdgeDisplacement{n}<-pos0{n},surfaceMotionConstraintListNode{n},constrainedBCData{n},constraintCornerNodes{n}),constraint(constrainedBoundaryNodes{n}) {
+  $constrainedEdgeDisplacement{n} = vect3d(0,0,0) ;
+  if($surfaceMotionConstraintListNode{n}.size() == 2) {
+    int n0 = $surfaceMotionConstraintListNode{n}[0] ;
+    int n1 = $surfaceMotionConstraintListNode{n}[1] ;
+    pair<int,int> testn(n0,n1) ;
+    double w = 0 ;
+    vect3d wdisp(0,0,0) ;
+    int sz = $constraintCornerNodes{n}.size() ;
+    for(int i=0;i<sz;++i) {
+      if($constraintCornerNodes{n}[i].first == testn) {
+	double dist = norm($pos0{n}-$constraintCornerNodes{n}[i].second.first) ;
+	double rd2 = 1./(dist*dist) ;
+	w += rd2 ;
+	wdisp += rd2*$constraintCornerNodes{n}[i].second.second ;
+      }
+    }
+    if(w == 0) {
+      //      cout << "w=0 for (" << n0 << ","<<n1 << ")" << endl;
+      w=1e-30 ;
+    }
+    vect3d disp = (1./w)*wdisp ;
+    $constrainedEdgeDisplacement{n} = 
+      getDisplacement($pos0{n},disp,
+		      $surfaceMotionConstraintListNode{n},
+		      $constrainedBCData{n}) ;
+  }
+}
+
+
+
+$type constraintBoundaryNodes param<std::vector<std::pair<vect3d,vect3d> > > ;
+
+$rule unit(constraintBoundaryNodes),constraint(UNIVERSE) {
+  $constraintBoundaryNodes = std::vector<std::pair<vect3d,vect3d> >() ;
+}
+
+$rule apply(constraintBoundaryNodes<-pos0,constrainedEdgeDisplacement)[gridMotion::Append],constraint(specifiedDisplacementNodes,constrainedBoundaryNodes) {
+  pair<vect3d,vect3d> p($pos0,$constrainedEdgeDisplacement) ;
+  $constraintBoundaryNodes.push_back(p) ;
+}
+$rule apply(constraintBoundaryNodes<-surfaceMotionConstraintListNode,pos0,constrainedEdgeDisplacement)[gridMotion::Append],constraint(constrainedBoundaryNodes) {
+  int sz = $surfaceMotionConstraintListNode.size() ;
+  if(sz > 1) {
+    pair<vect3d,vect3d> p($pos0,$constrainedEdgeDisplacement) ;
+    $constraintBoundaryNodes.push_back(p) ;
+  }
+}
+
+
+$rule pointwise(boundary::constraint::nodeDisp_bc{n}<-nodeDisp_b{n},pos0{n},surfaceMotionConstraintListNode{n},constrainedBCData{n},constrainedEdgeDisplacement{n}),constraint(specifiedDisplacementNodes{n},constrainedBoundaryNodes{n}) {
+  $nodeDisp_bc{n} = $constrainedEdgeDisplacement{n} ;
+}
+
+$rule pointwise(constraint::nodeDisp_bc{n}<-pos0{n},surfaceMotionConstraintListNode{n},constraintBoundaryNodes{n},constrainedBCData{n},constrainedEdgeDisplacement{n}),constraint(constrainedBoundaryNodes{n}) {
+  $nodeDisp_bc{n} = $constrainedEdgeDisplacement{n} ;
+  if($surfaceMotionConstraintListNode{n}.size() == 1) {
+    // Compute displacement vector
+    vect3d disp = vect3d(0,0,0);
+    real wsum = 0 ;
+    int nbn = $constraintBoundaryNodes{n}.size() ;
+    for(int i=0;i<nbn;++i) {
+      vect3d dif = $constraintBoundaryNodes{n}[i].first-$pos0{n} ;
+      real w = 1./dot(dif,dif) ;
+      disp += w*($constraintBoundaryNodes{n}[i].second) ;
+      wsum += w ;
+    }
+    disp *= 1./wsum ;
+    $nodeDisp_bc{n} = getDisplacement($pos0{n},disp,
+				      $surfaceMotionConstraintListNode{n},
+				      $constrainedBCData{n}) ;
+  }
+}
+
+
+// The update version here
+
+$type constraintCornerNodesUpdate param<vector< pair<pair<int,int>,pair<vect3d,vect3d> > > > ;
+
+$rule unit(constraintCornerNodesUpdate{n,it}),constraint(constrainedBoundaryNodes{n,it}) {
+  $constraintCornerNodesUpdate{n,it}.clear() ;
+}
+
+$rule apply(constraintCornerNodesUpdate{n,it}<-surfaceMotionConstraintListNode{n,it},pos0{n,it})[gridMotion::Append],
+  constraint(constrainedBoundaryNodes{n,it}) {
+  using std::make_pair ;
+  int sz = $surfaceMotionConstraintListNode{n,it}.size() ;
+  if(sz > 2) {
+    // corner, loop over all possible edges
+    for(int i=0;i<sz;++i)
+      for(int j=i+1;j<sz;++j) {
+	pair<int,int> edge($surfaceMotionConstraintListNode{n,it}[i],
+			   $surfaceMotionConstraintListNode{n,it}[j]) ;
+	pair<vect3d,vect3d> disp($pos0{n,it},vect3d(0,0,0)) ;
+	$constraintCornerNodesUpdate{n,it}.push_back(make_pair(edge,disp)) ;
+      }
+  }
+}
+
+$type constraintBoundaryNodesUpdate param<std::vector<std::pair<vect3d,vect3d> > > ;
+
+$rule unit(constraintBoundaryNodesUpdate),constraint(UNIVERSE) {
+  $constraintBoundaryNodesUpdate = std::vector<std::pair<vect3d,vect3d> >() ;
+}
+
+$rule apply(constraintBoundaryNodesUpdate<-pos0,constrainedEdgeDisplacement)[gridMotion::Append],constraint(specifiedDisplacementNodes,constrainedBoundaryNodes) {
+  pair<vect3d,vect3d> p($pos0,$constrainedEdgeDisplacement) ;
+  $constraintBoundaryNodesUpdate.push_back(p) ;
+}
+$rule apply(constraintBoundaryNodesUpdate<-surfaceMotionConstraintListNode,pos0,constrainedEdgeDisplacement)[gridMotion::Append],constraint(constrainedBoundaryNodes) {
+  int sz = $surfaceMotionConstraintListNode.size() ;
+  if(sz > 1) {
+    pair<vect3d,vect3d> p($pos0,$constrainedEdgeDisplacement) ;
+    $constraintBoundaryNodesUpdate.push_back(p) ;
+  }
+}
+
+
+
+$rule apply(constraintCornerNodesUpdate{n,it}<-surfaceMotionConstraintListNode{n,it},pos0{n,it},nodeDispUpdate_b{n,it})[gridMotion::Append],
+  constraint(constrainedBoundaryNodes,specifiedDisplacementNodes) {
+  using std::make_pair ;
+  int sz = $surfaceMotionConstraintListNode{n,it}.size() ;
+  if(sz == 2) {
+    //    cout << "sz = 2, nodes = " << $surfaceMotionConstraintListNode[0]
+    //	 << "," << $surfaceMotionConstraintListNode[1] << endl ;
+    pair<int,int> edge($surfaceMotionConstraintListNode{n,it}[0],
+		       $surfaceMotionConstraintListNode{n,it}[1]) ;
+    pair<vect3d,vect3d> disp($pos0{n,it},$nodeDispUpdate_b{n,it}) ;
+    $constraintCornerNodesUpdate{n,it}.push_back(make_pair(edge,disp)) ;
+  }
+}
+
+$type constrainedEdgeDisplacementUpdate store<vect3d> ;
+
+$rule pointwise(boundary::constrainedEdgeDisplacementUpdate{n,it}<-nodeDispUpdate_b{n,it},pos0{n,it},surfaceMotionConstraintListNode{n,it},constrainedBCData{n,it}),constraint(specifiedDisplacementNodes{n,it},constrainedBoundaryNodes{n,it}) {
+  $constrainedEdgeDisplacementUpdate{n,it} = 
+    getDisplacement($pos0{n,it},$nodeDispUpdate_b{n,it},
+		    $surfaceMotionConstraintListNode{n,it},
+		    $constrainedBCData{n,it}) ;
+}
+$rule pointwise(fixed::boundary::constrainedEdgeDisplacementUpdate{n,it}),constraint(fixedBoundaryNodes{n,it}) {
+  $constrainedEdgeDisplacementUpdate{n,it} = vect3d(0,0,0) ;
+}
+
+$rule pointwise(constrainedEdgeDisplacementUpdate{n,it}<-pos0{n,it},surfaceMotionConstraintListNode{n,it},constrainedBCData{n,it},constraintCornerNodesUpdate{n,it}),constraint(constrainedBoundaryNodes{n,it}) {
+  $constrainedEdgeDisplacementUpdate{n,it} = vect3d(0,0,0) ;
+  if($surfaceMotionConstraintListNode{n,it}.size() == 2) {
+    int n0 = $surfaceMotionConstraintListNode{n,it}[0] ;
+    int n1 = $surfaceMotionConstraintListNode{n,it}[1] ;
+    pair<int,int> testn(n0,n1) ;
+    double w = 0 ;
+    vect3d wdisp(0,0,0) ;
+    int sz = $constraintCornerNodesUpdate{n,it}.size() ;
+    for(int i=0;i<sz;++i) {
+      if($constraintCornerNodesUpdate{n,it}[i].first == testn) {
+	double dist = norm($pos0{n,it}-$constraintCornerNodesUpdate{n,it}[i].second.first) ;
+	double rd2 = 1./(dist*dist) ;
+	w += rd2 ;
+	wdisp += rd2*$constraintCornerNodesUpdate{n,it}[i].second.second ;
+      }
+    }
+    if(w == 0) {
+      //      cout << "w=0 for (" << n0 << ","<<n1 << ")" << endl;
+      w=1e-30 ;
+    }
+    vect3d disp = (1./w)*wdisp ;
+    $constrainedEdgeDisplacementUpdate{n,it} = 
+      getDisplacement($pos0{n,it},disp,
+		      $surfaceMotionConstraintListNode{n,it},
+		      $constrainedBCData{n,it}) ;
+  }
+}
+
+
+
+
+$rule pointwise(boundary::constraint::nodeDispUpdate_bc{n,it}<-nodeDispUpdate_b{n,it},pos0{n,it},surfaceMotionConstraintListNode{n,it},constrainedBCData{n,it},constrainedEdgeDisplacementUpdate{n,it}),constraint(specifiedDisplacementNodes{n,it},constrainedBoundaryNodes{n,it}) {
+  $nodeDispUpdate_bc{n,it} = $constrainedEdgeDisplacementUpdate{n,it} ;
+}
+
+$rule pointwise(constraint::nodeDispUpdate_bc{n,it}<-pos0{n,it},surfaceMotionConstraintListNode{n,it},constraintBoundaryNodesUpdate{n,it},constrainedBCData{n,it},constrainedEdgeDisplacementUpdate{n,it}),constraint(constrainedBoundaryNodes{n,it}) {
+  $nodeDispUpdate_bc{n,it} = $constrainedEdgeDisplacementUpdate{n,it} ;
+  if($surfaceMotionConstraintListNode{n,it}.size() == 1) {
+    // Compute displacement vector
+    vect3d disp = vect3d(0,0,0);
+    real wsum = 0 ;
+    int nbn = $constraintBoundaryNodesUpdate{n,it}.size() ;
+    for(int i=0;i<nbn;++i) {
+      vect3d dif = $constraintBoundaryNodesUpdate{n,it}[i].first-$pos0{n,it} ;
+      real w = 1./dot(dif,dif) ;
+      disp += w*($constraintBoundaryNodesUpdate{n,it}[i].second) ;
+      wsum += w ;
+    }
+    disp *= 1./wsum ;
+    $nodeDispUpdate_bc{n,it} = getDisplacement($pos0{n,it},disp,
+				      $surfaceMotionConstraintListNode{n,it},
+				      $constrainedBCData{n,it}) ;
+  }
+}

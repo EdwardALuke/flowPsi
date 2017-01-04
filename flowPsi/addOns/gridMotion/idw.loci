@@ -1,0 +1,287 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci>
+// Loci facilities
+using Loci::param ;
+using Loci::store ;
+using Loci::const_param ;
+using Loci::const_store ;
+using Loci::Entity ;
+using Loci::pointwise_rule ;
+using Loci::sequence ;
+using Loci::entitySet ;
+using Loci::register_rule ;
+
+#include <iostream>
+using std::cout ;
+#include <vector>
+using std::vector;
+
+$include "FVM.lh"
+$include "gridMover.lh"
+
+//--------------------------------------------------------------------
+$rule default(gridMotionExpA) {
+  $gridMotionExpA = 3 ;
+}
+
+//--------------------------------------------------------------------
+$rule default(gridMotionExpB) {
+  $gridMotionExpB = 5 ;
+}
+
+//--------------------------------------------------------------------
+$rule default( gridMotionLref ) {
+  $gridMotionLref = -1 ;
+}
+
+//--------------------------------------------------------------------
+// NOTE: The distance comptued in the following rules is roughly the
+// radius of the domain around all of the participating nodes.
+//--------------------------------------------------------------------
+$rule unit( gridMotionLrefDefault_X ),
+  constraint( UNIVERSE ),parametric(volumeTag(X)) {
+  $gridMotionLrefDefault_X = 0.0;
+}
+//--------------------------------------------------------------------
+$rule apply( gridMotionLrefDefault_X <- pos,
+	     participatingCentroid_X )[Loci::Maximum],
+  constraint( participatingNodes,meshComponentNodes_X),
+  parametric(volumeTag(X)) {
+  join( $gridMotionLrefDefault_X, norm($pos-$participatingCentroid_X) );
+}
+
+//------------------------------------------------------------------
+$rule singleton( gridMotionGlobalLref_X <- gridMotionLref,
+		 gridMotionLrefDefault_X,meshComponentName_X ),
+  parametric(volumeTag(X)) {
+  if ($gridMotionLref > 0) {
+    $gridMotionGlobalLref_X = $gridMotionLref;
+  }
+  else {
+    $gridMotionGlobalLref_X = $gridMotionLrefDefault_X;
+  }
+  Loci::debugout << "gridMotionGlobalLref("<< $meshComponentName_X << "): " << $gridMotionGlobalLref_X << endl;
+  if (Loci::MPI_rank == 0) {
+    cout << "gridMotionGlobalLref("<<$meshComponentName_X << "): " << $gridMotionGlobalLref_X << endl;
+  }
+}
+
+//--------------------------------------------------------------------
+$rule default( gridMotionAlpha ) {
+  $gridMotionAlpha = -1 ;
+}
+
+//--------------------------------------------------------------------
+$rule default(gridMotionAlphaFactor) {
+  $gridMotionAlphaFactor = 5.0 ;
+}
+
+//--------------------------------------------------------------------
+$rule default(gridMotionAlphaFloor) {
+  $gridMotionAlphaFloor = 0.1;
+}
+
+//--------------------------------------------------------------------
+$rule singleton( gridMotionGlobalAlpha_X <- gridMotionAlpha,
+		 meshComponentName_X ),
+  constraint( useConstantAlpha ),parametric(volumeTag(X)) {
+  $gridMotionGlobalAlpha_X = $gridMotionAlpha;
+  Loci::debugout << "gridMotionGlobalAlpha("<< $meshComponentName_X <<"): "
+                 << $gridMotionGlobalAlpha_X << endl;
+  if (Loci::MPI_rank == 0) {
+    cout << "gridMotionGlobalAlpha("<< $meshComponentName_X << "): "
+         << $gridMotionGlobalAlpha_X << endl;
+  }
+}
+//--------------------------------------------------------------------
+$type gridMotionGlobalLrefn_X param<real> ;
+
+$rule singleton(gridMotionGlobalLrefn_X{n=0}<-gridMotionGlobalLref_X),
+  parametric(volumeTag(X)) {
+  $gridMotionGlobalLrefn_X{n=0}=$gridMotionGlobalLref_X ;
+}
+$rule singleton(gridMotionGlobalLrefn_X{n+1}<-gridMotionGlobalLrefn_X{n}),
+  parametric(volumeTag(X)) {
+  $gridMotionGlobalLrefn_X{n+1} = $gridMotionGlobalLrefn_X{n} ;
+}
+
+$rule singleton( gridMotionGlobalAlpha_X <- nodeDataCollection_X,
+                 gridMotionGlobalLrefn_X, gridMotionAlphaFloor,
+                 gridMotionAlphaFactor,meshComponentName_X ),
+constraint( useVariableAlpha ), parametric(volumeTag(X)) {
+  const size_t N = $nodeDataCollection_X.size();
+  const double L = $gridMotionGlobalLrefn_X ;
+  vect3d meanDisp(0,0,0) ;
+  double wsum = 0 ;
+  for (size_t i=0; i<N; ++i) {
+    const double w = $nodeDataCollection_X[i].weight ;
+    const vect3d ndisp  = $nodeDataCollection_X[i].disp ;
+    meanDisp += ndisp*w;
+    wsum += w;
+  }
+  meanDisp *= 1.0/wsum ;
+  double maxAlpha = $gridMotionAlphaFloor ;
+  for (size_t i=0; i<N; ++i) {
+    const vect3d ndisp  = $nodeDataCollection_X[i].disp ;
+    const double alpha = $gridMotionAlphaFactor*norm(ndisp-meanDisp)/L ;
+    maxAlpha = max(maxAlpha, alpha) ;
+  }
+  $gridMotionGlobalAlpha_X = maxAlpha;
+  Loci::debugout << "gridMotionGlobalAlpha("<< $meshComponentName_X << "): "
+                 << $gridMotionGlobalAlpha_X << endl;
+  if (Loci::MPI_rank == 0) {
+    cout << "gridMotionGlobalAlpha("<< $meshComponentName_X << "): "
+         << $gridMotionGlobalAlpha_X << endl;
+  }
+}
+
+//--------------------------------------------------------------------
+// turn on moving mesh features due to loading in this module
+//--------------------------------------------------------------------
+$type movingMesh                store<bool> ;
+//--------------------------------------------------------------------
+$rule pointwise(movingMesh),
+constraint(UNIVERSE) {
+  $movingMesh=true ;
+}
+
+$type pos0 store<vect3d> ;
+
+$rule pointwise(pos0{n}<-pos,pos{n}) {
+  $pos0{n} = $pos ;
+}
+$rule pointwise(pos0{n,it}<-pos),constraint(pos,UNIVERSE{n,it}) {
+  $pos0{n,it} = $pos ;
+}
+
+//--------------------------------------------------------------------
+// Update the mesh node positions
+//--------------------------------------------------------------------
+$rule pointwise(pos{n,it} <- pos{n},pos, nodeDisp{n} ),
+constraint( UNIVERSE{n,it}, pos, GM_timeLaggedCouplingMode ) {
+  $pos{n,it} = $pos + $nodeDisp{n};
+}
+
+// For nonlinear coupling we use a displacement prediction provided
+// at time level n in variable nodeDisp_b,  and an updated displacement 
+// provided at the end of each Newton step in nodeDispUpdate_b
+$rule pointwise(pos{n,it=0} <- pos{n},pos,nodeDisp{n} ), 
+  constraint( UNIVERSE{n}, pos, GM_nonLinearCouplingMode ) {
+    $pos{n,it=0} = $pos + $nodeDisp{n};
+}
+
+// copy to allow constained and fixed surfaces to add (or override)
+// their contributions
+$rule pointwise(nodeDispUpdate_bc{n,it}<-nodeDispUpdate_b{n,it}) {
+  $nodeDispUpdate_bc{n,it} = $nodeDispUpdate_b{n,it} ;
+}
+
+$rule pointwise(fixed::nodeDispUpdate_b{n,it}),constraint(fixedBoundaryNodes{n,it}) {
+  $nodeDispUpdate_b{n,it} = vect3d(0,0,0) ;
+}
+
+$type surfaceUpdateDelta store<vect3d> ;
+
+$rule pointwise(surfaceUpdateDelta<-nodeDispUpdate_bc,pos0,pos), 
+  constraint(participatingNodes) {
+  $surfaceUpdateDelta = ($nodeDispUpdate_bc+$pos0)-$pos ;
+}
+
+$type maxDeltaX param<real> ;
+$rule unit(maxDeltaX),constraint(UNIVERSE) {
+  $maxDeltaX = 0 ;
+}
+$rule apply(maxDeltaX<-surfaceUpdateDelta)[Loci::Maximum],
+  constraint(participatingNodes) {
+  join($maxDeltaX,norm($surfaceUpdateDelta)) ;
+}
+
+$type defnode2surf Map ;
+
+$type maxWallDist2 store<float> ;
+
+$rule unit(maxWallDist2),  constraint(participatingNodes) {
+  $maxWallDist2 = 0 ;
+}
+
+$rule apply(defnode2surf->maxWallDist2<-pos,defnode2surf->pos)[Loci::Maximum] {
+  vect3d dv = $pos-$defnode2surf->$pos ;
+  join($defnode2surf->$maxWallDist2,(float)dot(dv,dv)) ;
+}
+
+$type totMovingArea param<real> ;
+$rule unit(totMovingArea),constraint(UNIVERSE) {
+  $totMovingArea = 0 ;
+}
+$rule apply(totMovingArea<-area)[Loci::Summation],constraint(ref->moving_BCoption) {
+  join($totMovingArea,$area.sada) ;
+}
+
+$type meanMovingDist param<real> ;
+$rule unit(meanMovingDist),constraint(UNIVERSE) {
+  $meanMovingDist = 0 ;
+}
+$rule apply(meanMovingDist<-area,totMovingArea,face2node->maxWallDist2)[Loci::Summation], constraint(ref->moving_BCoption) {
+  int fsz = $face2node.size() ;
+  real md = $face2node[0]->$maxWallDist2 ;
+  for(int i=1;i<fsz;++i)
+    md = max(md,real($face2node[i]->$maxWallDist2)) ;
+  join($meanMovingDist,($area.sada*sqrt(md)/$totMovingArea)) ;
+}
+	    
+
+$rule singleton(OUTPUT{n,it}<-maxDeltaX{n,it}, meanMovingDist),
+      constraint(GM_nonLinearCouplingMode) {
+  if(Loci::MPI_rank == 0) {
+    cout << "maxDeltaX=" << $maxDeltaX{n,it}
+    << ", meanMovingDist=" << $meanMovingDist
+    << endl ;
+  }
+}
+
+$type meshNonLinearStiffness param<real> ;
+$rule default(meshNonLinearStiffness) {
+  $meshNonLinearStiffness = 0.4 ;
+}
+
+$type meanMovingDist0 param<real> ;
+$rule singleton(meanMovingDist0{n,it}<-meanMovingDist),constraint(UNIVERSE{n,it}) {
+  $meanMovingDist0{n,it} = $meanMovingDist ;
+}
+$type nodeDispUpdate store<vect3d> ;
+
+// use exponential blending function to blend surface corrections 
+// into volume.
+$rule pointwise(nodeDispUpdate<-pos0,defnode2surf->(pos0,surfaceUpdateDelta),
+		maxDeltaX,meanMovingDist0,meshNonLinearStiffness), constraint(pos) {
+  real dwall = norm($pos0-$defnode2surf->$pos0) ;
+  real stiffness = $meshNonLinearStiffness ;
+  real reflen = $meanMovingDist0 ;
+  real blendFunc = tanh((1.-stiffness)*dwall/reflen) ;
+  $nodeDispUpdate = (1.-blendFunc)*($defnode2surf->$surfaceUpdateDelta) ;
+}
+
+
+$rule pointwise(pos{n,it+1}<- pos{n,it},pos,nodeDispUpdate{n,it}),
+  constraint(UNIVERSE{n,it},pos,GM_nonLinearCouplingMode) {
+  $pos{n,it+1} = $pos{n,it}+$nodeDispUpdate{n,it} ;
+}

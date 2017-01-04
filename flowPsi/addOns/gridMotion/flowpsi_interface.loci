@@ -1,0 +1,299 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <iostream>
+using std::endl;
+using std::ostream;
+using std::ostringstream ;
+using std::cout ;
+#include <string>
+using std::string;
+#include <Loci.h>
+using Loci::option_value_type;
+#include "gridMotion/gridTypes.h"
+#include "gridMotion/nodeData.h"
+using gridMotion::NodeData;
+#include "gridMotion/rotor.h"
+using gridMotion::Rotor;
+#include "gridMotionTraits.h"
+#include "readGrid.h"
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+$include "flowPsi.lh"
+
+namespace gridMotion {
+  using std::string ;
+
+  class movingBC_check : public flowPsi::BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "*" ; }
+    std::string variablesChecked() { return "fixed,moving,constrainedMotion,deformWeight,farfieldDeform" ; }
+    bool checkOptions(const options_list& bc_options) {
+      // This option is a placeholder for possibly more sophisticated
+      // options to be included later.
+      int cnt = 0 ;
+      if(bc_options.optionExists("fixed")) 
+        cnt++ ;
+      if(bc_options.optionExists("moving"))
+        cnt++ ;
+      if(bc_options.optionExists("constrainedMotion"))
+        cnt++ ;
+      if(cnt == 0 || cnt == 1) {
+        return true;
+      } else {
+        error_message = string("Boundary must be either fixed or moving.");
+        return false;
+      }
+    }
+    ostream & ErrorMessage(ostream &s) {
+      return (s << error_message << endl);
+    }
+  } ;
+  
+  flowPsi::register_BC<movingBC_check> register_BC_movingBC_check ;
+
+}
+
+using flowPsi::scalar_node_output ;
+using flowPsi::variableOperatorList ;
+using flowPsi::vector_node_output ;
+
+namespace Loci {
+  entitySet dist_collect_entitySet(entitySet inSet, 
+				   const vector<entitySet> &ptn) ;
+}
+namespace flowPsi {
+//--------------------------------------------------------------------
+// Rules to set the grid speed terms to zero for steady state cases
+//--------------------------------------------------------------------
+$rule pointwise( priority::moving::us ),
+  constraint( movingMesh, local_timestep ) {
+  $us = vect3d(0.0,0.0,0.0) ;
+}
+//--------------------------------------------------------------------
+$rule pointwise( priority::moving::us_n ),
+  constraint( movingMesh, local_timestep ) {
+  $us_n = 0. ;
+}
+
+  
+  OUTPUT_SCALAR("rot_angle",rot_angle) ;
+  OUTPUT_SCALAR("cell2nodeMin(volumeChangeRatio)",volumeChangeRatio) ;
+  OUTPUT_VECTOR("nodeDisp",nodeDisp) ;
+
+
+  void find_mind_deform(fact_db &facts) {
+    using namespace Loci ;
+    using std::map ;
+    storeRepP sp = facts.get_variable("moving_BCoption") ;
+    entitySet defsurfs ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    sp = facts.get_variable("fixed_BCoption") ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    sp = facts.get_variable("constrainedMotion_BCoption") ;
+    if(sp != 0)
+      defsurfs += sp->domain() ;
+    defsurfs = all_collect_entitySet(defsurfs) ;
+    if(defsurfs == EMPTY)
+      return ;
+    sp = facts.get_variable("ref") ;
+    if(sp == 0) 
+      return ;
+    MapRepP mp = MapRepP(sp->getRep()) ;
+    entitySet bfaces = mp->preimage(defsurfs).first ;
+
+    sp = facts.get_variable("face2node") ;
+    
+    mp = MapRepP(sp->getRep()) ;
+    entitySet nodeSet = mp->image(bfaces) ;
+
+    store<vect3d> pos ;
+
+    pos = facts.get_variable("pos") ;
+    entitySet dom = pos.domain() ;
+    vector<entitySet> posptn = all_collect_vectors(dom,MPI_COMM_WORLD) ;
+    entitySet surfNodes = dist_collect_entitySet(nodeSet,posptn) ;
+    
+    // Now get volume tags
+    variableSet vars = facts.get_extensional_facts() ;
+    map<string,entitySet> volMap ;
+    for(variableSet::const_iterator vi=vars.begin();vi!=vars.end();++vi) {
+      if(variable(*vi).get_arg_list().size() > 0 &&
+         variable(*vi).get_info().name == "volumeTag") {
+        param<string> vname(facts.get_variable(*vi)) ;
+        ostringstream vn ;
+        vn << *vi ;
+        string name = vn.str() ;
+        volMap[name] = vname.domain() ;
+      }
+    }
+
+    // If no volume tags (Weird), then make default tag.
+    if(volMap.begin() == volMap.end()) {
+      volMap[string("Main")] = ~EMPTY ;
+    }
+    vector<entitySet> volSets ;
+    map<string,entitySet>::const_iterator mi ;
+    for(mi=volMap.begin();mi!=volMap.end();++mi) {
+      // This could be a scalability problem!!!!
+      volSets.push_back(all_collect_entitySet(mi->second)) ;
+    }
+
+    // Now get face associations with volumes
+    vector<entitySet> facesets ;
+    int sz = volSets.size() ;
+    Map cl,cr ;
+    cl = facts.get_variable("cl") ;
+    cr = facts.get_variable("cr") ;
+    entitySet domf = cl.domain()+cr.domain() ;
+    for(int i=0;i<sz;++i) {
+      entitySet faces = (cr.preimage(volSets[i]).first +
+                         cl.preimage(volSets[i]).first) ;
+      
+      facesets.push_back(all_collect_entitySet(faces)) ;
+    }
+
+    // Now get node associations with volumes
+
+    vector<entitySet> nodesets ;
+    for(int i=0;i<sz;++i) {
+      entitySet nodes = mp->image(facesets[i]) ;
+      nodesets.push_back(all_collect_entitySet(nodes)) ;
+    }
+    
+
+    Map min_node2surf_loc ;
+    min_node2surf_loc.allocate(pos.domain()) ;
+
+    entitySet excludeSet ;
+    
+    for(int i=0;i<sz;++i) {
+      entitySet nodeSet = nodesets[i] & pos.domain() ;
+      entitySet nodeSetsurf = nodesets[i] & surfNodes ;
+      if(!GLOBAL_OR(nodeSetsurf.size()!=0)) {
+        excludeSet += nodeSet ;
+        continue ;
+      }
+      vector<Loci::kdTree::coord3d> bcnodes_pts(nodeSetsurf.size()) ;
+      vector<int> bcnodes_ids(nodeSetsurf.size()) ;
+
+      int cnt = 0 ;
+      FORALL(nodeSetsurf,nd) {
+        bcnodes_pts[cnt][0] = pos[nd].x ;
+        bcnodes_pts[cnt][1] = pos[nd].y ;
+        bcnodes_pts[cnt][2] = pos[nd].z ;
+        bcnodes_ids[cnt] = nd ;
+        cnt++ ;
+      } ENDFORALL ;
+
+
+      
+      
+      vector<Loci::kdTree::coord3d> node_pts(nodeSet.size()) ;
+      vector<int> closest(nodeSet.size(),-1) ;
+      cnt = 0 ;
+      FORALL(nodeSet,nd) {
+        node_pts[cnt][0] = pos[nd].x ;
+        node_pts[cnt][1] = pos[nd].y ;
+        node_pts[cnt][2] = pos[nd].z ;
+        cnt++ ;
+      } ENDFORALL ;
+      
+      Loci::parallelNearestNeighbors(bcnodes_pts,bcnodes_ids,node_pts,closest,
+                                     MPI_COMM_WORLD) ;
+
+      cnt = 0 ;
+      FORALL(nodeSet,nd) {
+        min_node2surf_loc[nd] = closest[cnt] ;
+        cnt++ ;
+      } ENDFORALL ;
+    }
+
+    Map min_node2surf ;
+
+    if(excludeSet == EMPTY) {
+      min_node2surf.setRep(min_node2surf_loc.Rep()) ;
+    } else {
+      entitySet dom = pos.domain()-excludeSet ;
+      min_node2surf.allocate(dom) ;
+      FORALL(dom,nd) {
+        min_node2surf[nd] = min_node2surf_loc[nd] ;
+      } ENDFORALL ;
+    }
+
+    facts.create_fact("defnode2surf",min_node2surf) ;
+  }    
+
+  
+  using Loci::entitySet ;
+  class deformationNodeMap: public gridPostStep {
+    void processData(fact_db &facts, rule_db &rdb) const ;
+  } ;
+
+  void deformationNodeMap::processData(fact_db &facts,rule_db &rdb) const {
+    find_mind_deform(facts) ;
+  } ;
+
+  registerGridPostProcess<deformationNodeMap> registeter_deformationNodeMap ;
+
+}
+namespace {
+  const char *revision_name = "$Name$" ;
+
+  std::string version() {
+    const char *p = revision_name;
+    while(*p!=':' && *p!='\0')
+      ++p ;
+    if(*p!= '\0')
+      ++p ;
+    while(*p!=' ' && *p!='\0')
+      ++p ;
+    if(*p!= '\0')
+      ++p ;
+    std::string rn ;
+    while(*p!='$' &&  *p!=' ' && *p!='\0') 
+      rn += *p++ ;
+    return rn ;
+  }
+
+  std::string date() {
+    std::string rn ;
+    rn += __DATE__ ;
+    rn += " " ;
+    rn += __TIME__ ;
+    return rn ;
+  }
+
+  class PrintOnConstruct {
+  public:
+    PrintOnConstruct() {
+      if (Loci::MPI_rank ==0) {
+        cout << "FLOWPSI gridMotion version: " << version()
+             << " compiled on " << date() << endl ;
+      }
+  }
+  } ;
+  PrintOnConstruct Instance ;
+
+    
+}

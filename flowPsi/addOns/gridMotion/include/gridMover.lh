@@ -1,0 +1,70 @@
+//#############################################################################
+//#
+//# Copyright 2017, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci>
+#include "gridMotion/nodeData.h"
+#include "gridMotion/rotor.h"
+#include "gridMotion/gridTypes.h"
+#include "gridMotionTraits.h"
+
+typedef Loci::real_t real ;
+typedef Loci::vector3d<Loci::real_t> vect3d ;
+
+using gridMotion::NodeData;
+using gridMotion::Rotor;
+
+
+// gridMover type definitions
+
+// Baseline mesh position
+$type pos0 store<vect3d> ;
+
+// Input displacement
+$type nodeDisp_b                        store<vect3d>;
+// Input displacement for non-linear update
+$type nodeDispUpdate_b  store<vect3d> ;
+// Input displacement with constraints applied
+$type nodeDisp_bc                       store<vect3d>; 
+// Input displacement for non-linear update with constraints applied
+$type nodeDispUpdate_bc store<vect3d> ;
+$type nodeDisp                          store<vect3d>;
+$type nodeDisp_t                        store<vect3d>;
+$type nodeAreaWeight                    store<real>;
+
+// Input Parameters
+$type gridMotionExpA                    param<int> ;
+$type gridMotionExpB                    param<int> ;
+$type gridMotionLref                    param<real>  ;
+$type gridMotionLrefDefault_X             param<real>;
+$type gridMotionGlobalLref_X              param<real>;
+$type gridMotionAlpha                   param<real> ;
+$type gridMotionAlphaFactor             param<real> ;
+$type gridMotionAlphaFloor              param<real> ;
+
+$type gridMotionGlobalAlpha_X             param<real> ;
+$type meshComponentName_X blackbox<string> ;
+
+$type participatingCentroid_X             param<vect3d> ;
+$type nodeDataCollection_X              param< vector<NodeData> >;
+
+//--------------------------------------------------------------------
+$type rot_angle                         store<float> ;
+$type volumeChangeRatio                 store<real> ;
+//--------------------------------------------------------------------
