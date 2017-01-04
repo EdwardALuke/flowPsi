@@ -25,8 +25,8 @@ if [ $ARCH == "Darwin" ]; then
     LIB_POSTFIX="dylib"
 fi
 
-echo Installing flowpsi
-cp src/flowpsi $INSTALL_PATH/bin
+echo Installing flowpsi binaries
+cp bin/* $INSTALL_PATH/bin
 
 cp lib/* $INSTALL_PATH/lib
 

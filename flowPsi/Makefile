@@ -16,10 +16,6 @@ install: all
 setup: FRC
 	mkdir -p lib
 	mkdir -p bin
-	rm -f bin/flowpsi
-	ln -s $(FLOWPSI_BASE)/src/flowpsi bin/flowpsi
-	rm -f bin/ndiff
-	ln -s $(FLOWPSI_BASE)/tools/ndiff bin/ndiff
 
 flowpsi: FRC
 	$(MAKE) -C src LOCI_BASE="$(LOCI_BASE)" all

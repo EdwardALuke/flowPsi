@@ -41,7 +41,7 @@ all:
 
 $(TARGET): $(OBJS) 
 	$(LD) -o  $(TARGET)  $(RPATH)$(FLOWPSI_RPATH) $(OBJS) $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
-
+	mv flowpsi ../bin
 
 FRC : 
 
