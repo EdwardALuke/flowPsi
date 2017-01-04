@@ -1,0 +1,354 @@
+#!/bin/bash
+
+
+# Make this script exit on an error
+set -e
+# don't allow uninitialized variables
+set -u
+
+#default values for adaptation
+TOL=2e-14
+FOLD=0.25
+DELTA=0.001
+ERROR_SENSITIVITY=1
+REFINEMENT_STEPS=1
+REF_LEVELS=1
+NUM_PROCS=1
+ITER=0
+LEVEL=0
+SPECIFIED_LEVEL=0
+REFINE_ONLY=0
+RESTART_FLOWPSI=0
+COLDSTART_FLOWPSI=0
+# -mode 0 for typical 3d refinement (Refines anisotropic cells to isotropy)
+# -mode 1 for 2d refinement (don't refine in z direction)
+# -mode 2 always uses isotropic refinent
+#
+ADAPTMODE=0
+
+ERROR_VARS="Perror Rhoerror Terror"
+
+############################################################################
+# Parse Command Line Arguments
+############################################################################
+FLOWPSI_FLAGS=
+VISCOUS_WALLS=
+CHECKX=
+while [ $# -ne 0 ]; do
+    case "$1" in
+        -np)
+            shift
+            NUM_PROCS=$1
+            ;;
+        -refine_only)
+            REFINE_ONLY=1
+            ;;
+        -restart_flowpsi)
+            RESTART_FLOWPSI=1
+            ;;
+        -coldstart_flowpsi)
+            COLDSTART_FLOWPSI=1
+            ;;
+        -iter)
+            shift
+            ITER=$1
+            ;;
+        -level)
+            shift
+            LEVEL=$1
+            SPECIFIED_LEVEL=1
+            ;;
+        -minspace)
+            shift
+            TOL=$1
+            ;;
+        -delta)
+            shift
+            DELTA=$1
+            ;;
+        -fold)
+            shift
+            FOLD=$1
+            ;;
+        -sensitivity)
+            shift
+            ERROR_SENSITIVITY=$1
+            ;;
+        -rsteps)
+            shift
+            REFINEMENT_STEPS=$1
+            ;;
+        -rlevels)
+            shift
+            REF_LEVELS=$1
+            ;;
+        -mode)
+            shift
+            ADAPTMODE=$1
+            ;;
+        -errorvars)
+            shift
+            ERROR_VARS=$1
+            ;;
+        -bc)
+            shift
+            VISCOUS_WALLS="$VISCOUS_WALLS -bc $1"
+            ;;
+        -xmin)
+            shift
+            CHECKX="$CHECKX -xmin $1"
+            ;;
+        -xmax)
+            shift
+            CHECKX="$CHECKX -xmax $1"
+            ;;
+        -ymin)
+            shift
+            CHECKX="$CHECKX -ymin $1"
+            ;;
+        -ymax)
+            shift
+            CHECKX="$CHECKX -ymax $1"
+            ;;
+        -zmin)
+            shift
+            CHECKX="$CHECKX -zmin $1"
+            ;;
+        -zmax)
+            shift
+            CHECKX="$CHECKX -zmax $1"
+            ;;
+        -dmin)
+            shift
+            CHECKX="$CHECKX -dmin $1"
+            ;;
+        -dmax)
+            shift
+            CHECKX="$CHECKX -dmax $1"
+            ;;
+
+   -load_module)
+       shift
+       FLOWPSI_FLAGS="$FLOWPSI_FLAGS -load_module $1"
+       ;;
+   --display)
+       shift
+       FLOWPSI_FLAGS="$FLOWPSI_FLAGS --display $1"
+       ;;
+   -q)
+       shift
+       FLOWPSI_FLAGS="$FLOWPSI_FLAGS -q $1"
+       ;;
+    -*)
+       FLOWPSI_FLAGS="$FLOWPSI_FLAGS $1"
+       ;;
+    *)
+       break
+       ;;
+    esac
+    shift
+done
+
+############################################################################
+# If arguments not valid, print diagnostic
+############################################################################
+if [ $# -ne 1 ]
+then
+    echo >&2 "Usage: adapt_flowpsi <options> case_name "
+    echo >&2 "Options:"
+    echo >&2 ""
+    echo >&2 " -np #  :  Specify number of processors to use"
+    echo >&2 " -refine_only  :  Run the refinment step only"
+    echo >&2 " -restart_flowpsi  :  Restart flowpsi and then run the refinment step"
+    echo >&2 " -coldstart_flowpsi  :  Cold start flowpsi and then run the refinment step"
+    echo >&2 " -iter #  :  Specify iteration number for refinement"
+    echo >&2 " -level #  :  Specify refinement level to start from"
+    echo >&2 " -minspace #  :  minimum grid spacing for refinement"
+    echo >&2 " -fold #  :  face folding threshold"
+    echo >&2 " -sensitivity #  :  error sensitivity threshold"
+    echo >&2 " -mode #  :  adaptation mode (0, 1, or 2)"
+    echo >&2 " -rsteps #  :  number of refinement steps"
+    echo >&2 " -rlevels #  :  number of refinement levels (mode=2 only)"
+    echo >&2 " -errorvars \"<var list>\"  :  error variables to use for refinement"
+    echo >&2 " <flowpsi option> : flowpsi option passed to flowpsi job"
+    echo >&2 ""
+    exit 1
+fi
+
+
+CASE=$1
+
+
+#MPIRUN="mpirun --hostfile $PBS_NODEFILE -np $NUM_PROCS"
+
+
+MPIRUN=`which mpirun`
+if [ $MPIRUN == "" ]; then
+    MPIRUN=`which mpiexec`
+fi
+
+if [ $MPIRUN == "" ]; then
+    MPIRUNP=""
+    MPIRUNS=""
+else
+    MPIRUNP="$MPIRUN -np $NUM_PROCS"
+    MPIRUNS="$MPIRUN -np 1"
+fi
+
+MARKER="$MPIRUNP marker -mode $ADAPTMODE"
+REFMESH="$MPIRUNP refmesh"
+ADPT="$MPIRUNS -np 1 adpt"
+VISCOUSFIX="viscousFix"
+FLOWPSIEXEC=`which flowpsi`
+FLOWPSI="$MPIRUNP $FLOWPSIEXEC $FLOWPSI_FLAGS"
+
+
+BASE=`pwd`
+
+if [ ! -d adapt.$CASE ]; then
+    mkdir adapt.$CASE
+fi
+cd adapt.$CASE
+
+START_LEVEL=$LEVEL
+if [ $REF_LEVELS -gt 1 ]; then
+    # mode must equal 2 for multiple refinement levels
+    if [ $ADAPTMODE -ne 2 ]; then
+        echo mode must equal 2 for multiple refinement levels
+        echo Setting -rlevels to 1 and continuing with job
+        REF_LEVELS=1
+    fi
+fi
+
+
+# if first refinement has not been performed, run for the first time
+if [ ! -d level.0 ]; then
+    echo Making the level 0 directory
+    mkdir level.0
+    ln -s $BASE/$CASE.vog level.0/$CASE.vog
+    cat $BASE/$CASE.vars | sed  s/\\/\\/level0\\/\\/// > level.0/$CASE.vars
+    cd level.0
+    if [ -d $BASE/restart ]; then 
+        ln -s $BASE/output output
+        ln -s $BASE/restart restart
+    else
+        echo Running flowPsi for level 0
+        $FLOWPSI $CASE >> run.out
+    fi
+    cd ../
+fi
+
+# determine if we specified the restart level or find the starting level
+if [ $SPECIFIED_LEVEL -eq 0 ]; then
+    COUNTER=0
+    while [ $COUNTER -le 10 ]; do
+        if [ -d level.$COUNTER/restart ]; then START_LEVEL=$COUNTER; fi
+        let COUNTER=COUNTER+1 || true
+    done
+fi
+
+
+COUNTER=$START_LEVEL
+STEP=0
+ADPT_FLAG=1
+if [ $ITER -eq 0 ]; then echo Starting refinement process from level $COUNTER; fi
+if [ $ITER -ne 0 ]; then echo Starting refinement process from level $COUNTER at iteration $ITER; fi
+while [ $STEP -lt $REFINEMENT_STEPS ]; do
+    let NEXT=COUNTER+1 || true
+    # Run flowpsi again before refinement?
+    if [ $STEP -eq 0 ] && [ $RESTART_FLOWPSI -eq 1 ]; then
+        if [ $COUNTER -eq 0 ]; then
+          cat $BASE/$CASE.vars | sed  s/\\/\\/level0\\/\\/// > level.0/$CASE.vars
+        else
+          cat $BASE/$CASE.vars | sed -e s/\\/\\/level#\\/\\/// -e s/\\/\\/level$COUNTER\\/\\/// > level.$COUNTER/$CASE.vars
+        fi
+        cd level.$COUNTER
+        if [ -d restart/$ITER ]; then
+            echo Restarting flowPsi from level $COUNTER at iteration $ITER
+            $FLOWPSI $CASE $ITER >> run.out
+        else
+            echo Restart of flowPsi for iteration $ITER requested, but level.$COUNTER/restart/$ITER does not exist !!!
+            echo adapt-flowpsi script is now exiting...
+            exit 1
+        fi
+        # Set flag to ensure adaptation from $ITER=0 in next level
+        ADPT_FLAG=0
+        cd ../
+    fi
+
+    # Cold start flowPsi before refinement?
+    if [ $STEP -eq 0 ] && [ $COLDSTART_FLOWPSI -eq 1 ]; then
+        if [ $COUNTER -eq 0 ]; then
+          cat $BASE/$CASE.vars | sed  s/\\/\\/level0\\/\\/// > level.0/$CASE.vars
+        else
+          cat $BASE/$CASE.vars | sed -e s/\\/\\/level#\\/\\/// -e s/\\/\\/level$COUNTER\\/\\/// > level.$COUNTER/$CASE.vars
+        fi
+        cd level.$COUNTER
+        echo Cold starting flowPsi for level $COUNTER
+        $FLOWPSI $CASE >> run.out
+        # Set flag to ensure adaptation from $ITER=0 in next level
+        ADPT_FLAG=0
+        cd ../
+    fi
+
+    # Begin refinement for this level
+    # Use specified iteration or iteration 0 from restart performed above
+    cd level.$COUNTER
+    # adpt <iter num> <sensitivity> <problem name> <adaptive variable list>
+    if [ $ADPT_FLAG -eq 1 ]; then
+       echo Running ADPT for level $NEXT from level $COUNTER at iteration $ITER
+       $ADPT $CHECKX $ITER $ERROR_SENSITIVITY $CASE $ERROR_VARS
+    else
+       echo Running ADPT for level $NEXT from level $COUNTER
+       $ADPT $CHECKX 0 $ERROR_SENSITIVITY $CASE $ERROR_VARS
+    fi
+
+    # Tag additional cells near viscous walls
+    TAGFILE="refine.dat"
+    if [ "$VISCOUS_WALLS" != "" ]; then
+        echo Running viscousFix for level $COUNTER
+        $VISCOUSFIX $VISCOUS_WALLS -delta $DELTA -tag refine.dat -o vrefine.dat $CASE $ITER
+        TAGFILE="vrefine.dat"
+    fi
+    cd ../
+
+    # Adapt mesh for the next level
+    if [ ! -e refplan.$COUNTER ]; then
+        echo Running MARKER for level $NEXT
+        $MARKER -tol $TOL -fold $FOLD -g $BASE/$CASE.vog -o refplan.$NEXT -levels $REF_LEVELS -tag level.$COUNTER/$TAGFILE
+    else
+        echo Continuing MARKER for level $NEXT using refplan.$COUNTER
+        $MARKER -tol $TOL -fold $FOLD -g $BASE/$CASE.vog -restart -r refplan.$COUNTER -o refplan.$NEXT -levels $REF_LEVELS -tag level.$COUNTER/$TAGFILE
+    fi
+    echo Running REFMESH for level $NEXT using refplan.$NEXT
+    $REFMESH -g $BASE/$CASE.vog -r refplan.$NEXT -o $CASE.$NEXT.vog
+
+    if [ ! -d level.$NEXT ]; then
+        echo Making the level $NEXT directory
+        mkdir level.$NEXT
+    fi
+
+    #copy the restart file
+    if [ $ADPT_FLAG -eq 1 ]; then cp level.$COUNTER/output/put.$ITER\_$CASE level.$NEXT/put.dat; fi
+    if [ $ADPT_FLAG -eq 0 ]; then cp level.$COUNTER/output/put.0_$CASE level.$NEXT/put.dat; fi
+    # Set flag to ensure adaptation from $ITER=0 in next level
+    ADPT_FLAG=0
+
+    if [ ! -L level.$NEXT/$CASE.vog ]; then ln -s ../$CASE.$NEXT.vog level.$NEXT/$CASE.vog; fi
+
+    # copy vars file, uncommenting level# or level.$NEXT lines
+    cat $BASE/$CASE.vars | sed -e s/\\/\\/level#\\/\\/// -e s/\\/\\/level$NEXT\\/\\///  > level.$NEXT/$CASE.vars
+
+    # running flowPsi?
+    if [ $REFINE_ONLY -eq 0 ]; then
+        echo Running flowPsi for level $NEXT
+        cd level.$NEXT
+        $FLOWPSI $CASE >> run.out
+        cd ../
+    fi
+
+    # Update counters and go to next refinement level
+    COUNTER=$NEXT
+    let STEP=STEP+1 || true
+done
+

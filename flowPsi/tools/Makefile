@@ -7,7 +7,7 @@ COPT = $(COPTLESS)
 
 INCLUDES = -I$(FLOWPSI_BASE)/include 
 
-OTHER_APPS = ndiff
+OTHER_APPS = ndiff adpt
 
 LOCAL_LIBS =
 
@@ -21,6 +21,9 @@ FRC:
 
 ndiff: ndiff.o
 	$(LD) -o ndiff ndiff.o $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
+
+adpt: adpt.o 
+	$(LD) -o adpt adpt.o $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
 
 clean:
 	rm -fr $(OBJS) $(JUNK) make.depend make.depend.bak *.o $(OTHER_APPS)
