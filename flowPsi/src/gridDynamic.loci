@@ -125,6 +125,37 @@ namespace flowPsi {
     // Get grid velocity at face by dividing by face area
     $us_n{n,it} = .25*us_n_int/(3.*max($area{n,it}.sada,1e-30)*$dtmax) ;
   }
+
+  $rule pointwise(axi::moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
+    constraint(movingMesh,area,axisymmetricCoordinateModel) {
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos{n} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n} ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = $face2node[nd1]->$pos{n,it} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n,it} ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+    
+    $us_n{n,it} = dot(wc_next-wc_prev,$area{n,it}.n)/$dtmax ;
+  }
+
   // Compute absolute grid velocity for viscous walls
 
   $rule pointwise(us),constraint(area) {
@@ -178,6 +209,37 @@ namespace flowPsi {
     // current normal, remainder of grid velocity goes in current tangetial
     // direction.
     $us{n,it} = $us_n{n,it}*n + ut*utn ;
+  }
+
+
+  $rule pointwise(axi::moving::us{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
+    constraint(movingMesh,area,axisymmetricCoordinateModel) {
+    int fsz = $face2node.size() ;
+    // Compute wireframe center
+    vect3d wc_prev = vect3d(0,0,0) ;
+    vect3d wc_next = vect3d(0,0,0) ;
+    real lensum_prev = 0 ;
+    real lensum_next = 0 ;
+    for(int i=0;i<fsz;++i) {
+      int nd1 = i ;
+      int nd2 = (i+1)==fsz?0:i+1 ;
+      { const vect3d p1 = $face2node[nd1]->$pos{n} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n} ;
+        const real len = norm(p1-p2) ;
+        wc_prev += len*(p1+p2) ;
+        lensum_prev += len ;
+      }
+      { const vect3d p1 = $face2node[nd1]->$pos{n,it} ;
+        const vect3d p2 = $face2node[nd2]->$pos{n,it} ;
+        const real len = norm(p1-p2) ;
+        wc_next += len*(p1+p2) ;
+        lensum_next += len ;
+      }
+    }
+    wc_prev *= .5/lensum_prev ;
+    wc_next *= .5/lensum_next ;
+    
+    $us{n,it} = (wc_next-wc_prev)/$dtmax ;
   }
 
   // Pos initial conditions
