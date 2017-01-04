@@ -42,7 +42,7 @@ $type fwp               store<flowPsi::real> ;
 $type cw1               param<flowPsi::real> ;
 // convection, diffusion, and source terms
 $type SA_src            store<flowPsi::real> ;
-// turmbulent destruction
+// turbulent destruction
 $type SA_destruct       store<flowPsi::real> ;
 // flux jacobians
 $type SA_fjm            store<flowPsi::real> ;
