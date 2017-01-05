@@ -417,7 +417,6 @@ namespace lagrangianP {
           cerr << "bounds error on face id=" << f << ", p=" <<Loci::MPI_rank << endl ;
         }
         // Get particle
-        Particle p = bcp[i] ;
         // if wall type is 2, then bounce, otherwise remove the particle
         if(particle_wall_bc[f] < 2) { // stick wall
           faceflux_info fi ;

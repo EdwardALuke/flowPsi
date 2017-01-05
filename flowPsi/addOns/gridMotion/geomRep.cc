@@ -226,7 +226,6 @@ namespace geomRep {
     int id = kdp->find_closest(thePoint,rmin) ;
     double dmin = 1e30 ;
     vect3d surface_pt(0,0,0) ;
-    double surface_u=0,surface_v=0 ;
     int surface_t = -1 ;
   
     for(int i=offsetMap[id];i<offsetMap[id+1];++i) {
@@ -239,8 +238,6 @@ namespace geomRep {
         dmin = d ;
         surface_pt = triGeom[f].evaluateBezier(u,v) ;
         surface_t = f ;
-        surface_u = u ;
-        surface_v = v ;
       }
     }
     normal = cross(triGeom[surface_t].b030-triGeom[surface_t].b300,

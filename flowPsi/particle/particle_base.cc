@@ -1172,7 +1172,7 @@ namespace lagrangianP {
           buf[0] = 1 ;
           int count = 1 ;
           const sequence& seq = pack_seq[i] ;
-          for(int k=0;k<seq.num_intervals();++k) {
+          for(size_t k=0;k<seq.num_intervals();++k) {
             buf[count++] = seq[k].first ;
             buf[count++] = seq[k].second ;
           }
@@ -1487,7 +1487,7 @@ namespace lagrangianP {
           buf[0] = 1 ;
           int count = 1 ;
           const sequence& seq = pack_seq[i] ;
-          for(int k=0;k<seq.num_intervals();++k) {
+          for(size_t k=0;k<seq.num_intervals();++k) {
             buf[count++] = seq[k].first ;
             buf[count++] = seq[k].second ;
           }
@@ -1776,7 +1776,7 @@ namespace lagrangianP {
           buf[0] = 1 ;
           int count = 1 ;
           const sequence& seq = pack_seq[i] ;
-          for(int k=0;k<seq.num_intervals();++k) {
+          for(size_t k=0;k<seq.num_intervals();++k) {
             buf[count++] = seq[k].first ;
             buf[count++] = seq[k].second ;
           }
@@ -2422,7 +2422,7 @@ namespace lagrangianP {
           buf[0] = 1 ;
           int count = 1 ;
           const sequence& seq = pack_seq[i] ;
-          for(int k=0;k<seq.num_intervals();++k) {
+          for(size_t k=0;k<seq.num_intervals();++k) {
             buf[count++] = seq[k].first ;
             buf[count++] = seq[k].second ;
           }

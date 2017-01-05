@@ -14,10 +14,10 @@ install: all
 .PHONEY: FRC flowpsi tools test turbulence particle guide addOns install
 
 setup: FRC
-	mkdir -p lib
-	mkdir -p bin
+	mkdir -p lib; true
+	mkdir -p bin; true
 
-flowpsi: FRC
+flowpsi: setup
 	$(MAKE) -C src LOCI_BASE="$(LOCI_BASE)" all
 
 turbulence: setup
@@ -29,13 +29,13 @@ addOns: setup
 particle: setup
 	$(MAKE) -C particle FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
-tools: FRC
+tools: setup
 	$(MAKE) -C tools FLOWPSI_BASE="$(FLOWPSI_BASE)"  all
 
 docs: FRC
-	$(MAKE) -C guide FLOWPSI_BASE="$(FLOWPSI_BASE)" guide.pdf
+	$(MAKE) -C guide FLOWPSI_BASE="$(FLOWPSI_BASE)" flowPsiGuide.pdf
 
-test: flowpsi tools turbulence setup
+test: flowpsi tools turbulence
 	$(MAKE) -C quickTest LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" all; 
 	grep -i pass quickTest/TestResults && ( grep -i fail quickTest/TestResults && exit 1 || echo Test Success )
 

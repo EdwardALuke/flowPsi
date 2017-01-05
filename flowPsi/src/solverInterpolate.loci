@@ -33,8 +33,8 @@
 
 #endif
 namespace {
-  void memSpace(string s) {
 #ifdef MEMORY_DEBUG
+  void memSpace(string s) {
     using Loci::debugout ;
     debugout << s <<":" << endl;
     
@@ -67,15 +67,15 @@ namespace {
              << ",local=" << ((mem_alloc_local+512)>>10) << "Mb" << endl ;
 
     debugout.flush() ;
-#endif
   }
+
   string i2s(int i) {
     char buf[512] ;
     bzero(buf,512) ;
     snprintf(buf,511,"%d",i) ;
     return string(buf) ;
   }
-
+#endif
 }
 
 #undef MEMORY_PROFILE

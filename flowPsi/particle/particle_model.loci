@@ -204,11 +204,11 @@ namespace lagrangianP {
     if(!set_mcoupling)
       throw StringError("Must select momentum coupling in particleModel file") ;
 
-    bool set_momentumCouplingModel ;
+//    bool set_momentumCouplingModel ;
     if(pm.momentumCouplingModel == "CliftGauvin" || pm.momentumCouplingModel == "Loth") {
-      set_momentumCouplingModel = true ;
+//      set_momentumCouplingModel = true ;
     } else {
-      set_momentumCouplingModel = false ;
+//      set_momentumCouplingModel = false ;
       string name = pm.momentumCouplingModel ;
       string error = string("unknown momentum coupling model '") + name + "' in reader for particleModel" ;
       throw StringError(error) ;

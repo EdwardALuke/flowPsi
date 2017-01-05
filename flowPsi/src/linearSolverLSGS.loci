@@ -365,12 +365,13 @@ namespace LGSI {
 	dom += pdom ;
       }
 
-      vector<int> index(dom.size()) ;
+      const int dsz = dom.size() ;
+      vector<int> index(dsz) ;
       Map toeqn ;
       toeqn.allocate(dom) ;
       int cnt = 0 ;
       // First number all equations owned by this processor
-      int nmyeqn = mydom.size() ;
+      const int nmyeqn = mydom.size() ;
       FORALL(mydom,ii) {
         index[cnt] = ii ;
         toeqn[ii] = cnt ;
@@ -440,7 +441,7 @@ namespace LGSI {
       } ENDFORALL ;
 
       sort(couples.begin(),couples.end()) ;
-      vector<pair<int,int> > connections(mydom.size()) ;
+      vector<pair<int,int> > connections(nmyeqn) ;
       
       for(int i=0;i<nmyeqn;++i) {
         connections[i].first = -1 ;
@@ -499,7 +500,7 @@ namespace LGSI {
       }
 #endif
 
-      vector<int> lineNo(dom.size(),-2) ;
+      vector<int> lineNo(dsz,-2) ;
       FORALL(mydom,ii) {
         lineNo[toeqn[ii]] = -1 ;
       } ENDFORALL ;
@@ -748,8 +749,8 @@ namespace LGSI {
       // Now lines are sorted for SGS sweeps in line_order, now reorder eqns and
       // collect data structure for high performance implementation.
     
-      vector<int> eqnorder(dom.size()) ;
-      vector<int> eqnvisit(dom.size(),0) ;
+      vector<int> eqnorder(dsz) ;
+      vector<int> eqnvisit(dsz,0) ;
       vector<int> line_offsets(line_order.size()+1) ;
 
       line_offsets[0] = 0 ;
@@ -767,29 +768,29 @@ namespace LGSI {
         }
         line_offsets[i+1] = cnt ;
       }
-      if(cnt != dom.size()) { // Number the remaining equations
+      if(cnt != dsz) { // Number the remaining equations
         // Sort in order of first visited while scanning lines
         for(int i = nmyeqn-1;i>=0;--i) {
           for(int k=offsets[eqnorder[i]];k<offsets[eqnorder[i]+1];++k)
             if(neighbors[k] >= nmyeqn)
               eqnorder[neighbors[k]] = eqnorder[i] ;
         }
-        vector<pair<int,int> > vpairs(dom.size()-nmyeqn) ;
-        for(int i=nmyeqn;i<dom.size();++i) {
+        vector<pair<int,int> > vpairs(dsz-nmyeqn) ;
+        for(int i=nmyeqn;i<dsz;++i) {
           vpairs[i-nmyeqn].first = eqnorder[i] ;
           vpairs[i-nmyeqn].second = i ;
         }
         sort(vpairs.begin(),vpairs.end()) ;
-        for(int i=nmyeqn;i<dom.size();++i) {
+        for(int i=nmyeqn;i<dsz;++i) {
           eqnorder[i] = vpairs[i-nmyeqn].second ;
         }
       }
       
       // build equation local 2 entity number map
-      vector<int> eql2l(dom.size()) ; // map from old local number 2 new one
-      { vector<int> eql2g(dom.size()) ;
+      vector<int> eql2l(dsz) ; // map from old local number 2 new one
+      { vector<int> eql2g(dsz) ;
 	std::map<int,int> g2eql ;
-        for(int i=0;i<dom.size();++i) {
+        for(int i=0;i<dsz;++i) {
           eql2g[i] = index[eqnorder[i]] ;
 	  g2eql[eql2g[i]] = i ;
           eql2l[eqnorder[i]] = i ;

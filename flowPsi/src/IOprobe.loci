@@ -383,8 +383,7 @@ namespace flowPsi {
 	      lower->cl->(temperature,gagePressure,u),
 	      boundary_map->(temperature_f,gagePressure_f,u_f))
   [min_probe_list] {
-    size_t psz = $probeListData.size() ;
-    fatal($probePosFile.size() != psz) ;
+    fatal($probePosFile.size() != $probeListData.size()) ;
     int lsz = $lower.size() ;
     real tmax = $temperature ;
     real tmin = tmax ;

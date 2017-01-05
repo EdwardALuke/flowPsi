@@ -163,7 +163,7 @@ namespace lagrangianP {
         // packing intervals
         send_buf[buf_idx++] = 1 ; // set flag to indicate
                                   // that this is intervals packed
-        for(int k=0;k<eset.num_intervals();++k) {
+        for(size_t k=0;k<eset.num_intervals();++k) {
           send_buf[buf_idx++] = eset[k].first ;
           send_buf[buf_idx++] = eset[k].second ;
         }
@@ -341,7 +341,7 @@ namespace lagrangianP {
         // packing intervals
         send_buf[buf_idx++] = 1 ; // set flag to indicate
                                   // that this is intervals packed
-        for(int k=0;k<seq.num_intervals();++k) {
+        for(size_t k=0;k<seq.num_intervals();++k) {
           send_buf[buf_idx++] = seq[k].first ;
           send_buf[buf_idx++] = seq[k].second ;
         }
@@ -482,7 +482,7 @@ namespace lagrangianP {
       if(pack_interval) {
         local_eset[0] = 1 ;
         int count = 1 ;
-        for(int i=0;i<eset.num_intervals();++i) {
+        for(size_t i=0;i<eset.num_intervals();++i) {
           local_eset[count++] = eset[i].first ;
           local_eset[count++] = eset[i].second ;
         }

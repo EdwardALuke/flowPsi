@@ -21,11 +21,11 @@ FRC:
 
 ndiff: ndiff.o
 	$(LD) -o ndiff ndiff.o $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
-	mv ndiff ../bin
+	mv ndiff ../bin/ndiff
 
 adpt: adpt.o 
 	$(LD) -o adpt adpt.o $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
-	mv adpt ../bin
+	mv adpt ../bin/adpt
 
 clean:
 	rm -fr $(OBJS) $(JUNK) make.depend make.depend.bak *.o $(OTHER_APPS)

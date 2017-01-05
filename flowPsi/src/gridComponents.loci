@@ -1247,7 +1247,7 @@ if(req_queue.size() > 0 || self_send) {
         (*$componentGeometryData)[tag] = sph ;
       } else if(name=="revolution") {
         vect3d p1(0,0,0) ;
-        bool fail = false ;
+	bool fail = false ;
         if(ol.optionExists("p1")) {
           ol.getOptionUnits("p1","meter",p1) ;
         } else

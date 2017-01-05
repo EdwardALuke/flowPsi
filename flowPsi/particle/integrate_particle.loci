@@ -470,7 +470,7 @@ namespace lagrangianP {
       list<Particle>& lp = *particle_bag ;
       list<Particle>::iterator li ;
 
-      vect3d grav = *particleGrav ;
+//      vect3d grav = *particleGrav ;
       for(li=lp.begin();li!=lp.end();++li) {
         Entity cell = li->cell ;
 
