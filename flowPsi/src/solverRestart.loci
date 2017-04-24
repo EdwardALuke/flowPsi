@@ -90,7 +90,10 @@ namespace flowPsi {
     }
   }
 
-  $rule pointwise(OUTPUT{n}<-temperature{n},gagePressure{n},Pambient{n},u{n},stime{n},restart_directory{n},modelName{n},restart_modulo{n},ncycle{n},restart_postfix{n},$n{n}),conditional(do_restart{n}),prelude {
+  $rule pointwise(OUTPUT{n}<-temperature{n},gagePressure{n},Pambient{n},u{n},
+		  cellcenter{n},stime{n},restart_directory{n},modelName{n},
+		  restart_modulo{n},ncycle{n},restart_postfix{n},$n{n}),
+    conditional(do_restart{n}),prelude {
     if(*$ncycle{n} != 0 && *$$n{n} != 0) {
       hid_t file_id = 0 ;
       string filename = *$restart_directory{n} + "flowVars_" + *$modelName{n} ;
@@ -103,13 +106,14 @@ namespace flowPsi {
       file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
 				     H5P_DEFAULT, H5P_DEFAULT) ;
       
-      
       Loci::writeContainer(file_id,"ncycle",$ncycle{n}.Rep()) ;
       Loci::writeContainer(file_id,"stime",$stime{n}.Rep()) ;
       Loci::writeContainer(file_id,"Pambient",$Pambient{n}.Rep()) ;
       Loci::writeContainer(file_id,"temperature",$temperature{n}.Rep()) ;
       Loci::writeContainer(file_id,"gagePressure",$gagePressure{n}.Rep()) ;
       Loci::writeContainer(file_id,"u",$u{n}.Rep()) ;
+      Loci::writeContainer(file_id,"cellcenter",$cellcenter{n}.Rep()) ;
+
       Loci::hdf5CloseFile(file_id) ;
     }
   } ;
