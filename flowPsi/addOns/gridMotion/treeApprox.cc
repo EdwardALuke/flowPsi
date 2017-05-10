@@ -1678,8 +1678,10 @@ inline double frsum_basic(double x[3],double beta[9],double xc[3], int a) {
       MPI_Bcast(&radius[0],tsz,MPI_FLOAT,0,bcomm) ;
       MPI_Bcast(&qpts[0],tsz*3*3,MPI_FLOAT,0,bcomm) ;
       MPI_Bcast(&qerr[0],tsz,MPI_FLOAT,0,bcomm) ;
-      int flag = 1 ;
-      MPI_Send(&flag,1,MPI_INT,0,29,comm) ;
+      if(r == pbuild) {
+	int flag = 1 ;
+	MPI_Send(&flag,1,MPI_INT,0,29,comm) ;
+      }
     }
     MPI_Comm_free(&bcomm) ;
     reportTime("communication",st.stop()) ;
@@ -1892,8 +1894,10 @@ inline double frsum_basic(double x[3],double beta[9],double xc[3], int a) {
       MPI_Bcast(&approxTree.qdisp[0],tsz*3*4,MPI_FLOAT,0,bcomm) ;
       MPI_Bcast(&approxTree.qrot[0],tsz*9*4,MPI_FLOAT,0,bcomm) ;
       MPI_Bcast(&approxTree.drot[0],tsz,MPI_FLOAT,0,bcomm) ;
-      int flag = 1 ;
-      MPI_Send(&flag,1,MPI_INT,0,29,comm) ;
+      if(r == pbuild) {
+	int flag = 1 ;
+	MPI_Send(&flag,1,MPI_INT,0,29,comm) ;
+      }
     }
     MPI_Comm_free(&bcomm) ;
     reportTime("communication",st.stop()) ;
