@@ -160,7 +160,7 @@ $type dtmax             param<flowPsi::TimeValue> ;
 $type timeStepSize      param<flowPsi::real> ;
 $type cflmax            param<flowPsi::real> ;
 $type cflpdt            store<flowPsi::real> ; // Multiply this by dt to get cfl
-$type cfl               param<std::pair<double,double> > ;
+$type cfl               param<std::pair<flowPsi::real,flowPsi::real> > ;
 
 $type dtau              store<flowPsi::real> ;
 $type iblank store<flowPsi::byte_t> ;
@@ -215,8 +215,8 @@ $type grid_vol_iblank param<flowPsi::real> ;
 $type integratedOutputFileManager blackbox<flowPsi::integratedFileDBManager> ;
 $type do_output_integrate param<bool> ;
 
-$type localPBias store<float> ;
-$type localPBias_next store<float> ;
+$type localPBias store<realF> ;
+$type localPBias_next store<realF> ;
 $type timeSteppingMode param<int> ;
 
 $type gravityAccel param<flowPsi::vect3d> ;

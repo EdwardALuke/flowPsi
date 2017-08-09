@@ -242,8 +242,8 @@ namespace flowPsi {
   $rule pointwise(localPBias<-cflpdt,dtmax,timePressureBiasControl),
     constraint(geom_cells,timeStepAccurate) {
     real cfl = $cflpdt*$dtmax ;
-    real factor = min(1.0,max(0.0,0.1*(cfl-1.))) ;
-    $localPBias = max($timePressureBiasControl,pow(factor,0.7)) ;
+    real factor = min<real>(1.0,max<real>(0.0,0.1*(cfl-1.))) ;
+    $localPBias = max<real>($timePressureBiasControl,pow(factor,0.7)) ;
   }
   
   $rule pointwise(localPBias_next{n,it=0}),constraint(geom_cells{n},timeStepAccurate) {

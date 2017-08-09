@@ -59,7 +59,7 @@ namespace flowPsi {
       }
       ol.getOptionUnits("point","m",pt) ;
       ol.getOptionUnits("normal","",n) ;
-      n *= 1./max(norm(n),1e-33) ;
+      n *= 1./max<real>(norm(n),1e-33) ;
     }
     bool inGeomPt(vect3d pt) const ;
   } ;
@@ -511,7 +511,7 @@ namespace flowPsi {
       const Loci::options_list finput = $icRegionInfo[i].state_info ;
       if(finput.optionExists("rotAxis")) {
 	finput.getOptionUnits("rotAxis","",raxi) ;
-	raxi = raxi/max(norm(raxi),1e-30) ;
+	raxi = raxi/max<real>(norm(raxi),1e-30) ;
       }
       if(finput.optionExists("rotSpeed")) {
 	real rpm = 0 ;

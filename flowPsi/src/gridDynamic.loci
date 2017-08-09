@@ -63,7 +63,7 @@ namespace flowPsi {
     $us_n = 0 ;
   }
 
-  $type xgvel param<double> ;
+  $type xgvel param<real> ;
   $rule optional(xgvel) { $xgvel = 0 ;  }
 
   $rule pointwise(specified::us_n<-area,xgvel),constraint(xgvel,area) {
@@ -123,7 +123,7 @@ namespace flowPsi {
       us_n_int += dot(ah,xp-xm);
     }
     // Get grid velocity at face by dividing by face area
-    $us_n{n,it} = .25*us_n_int/(3.*max($area{n,it}.sada,1e-30)*$dtmax) ;
+    $us_n{n,it} = .25*us_n_int/(3.*max<real>($area{n,it}.sada,1e-30)*$dtmax) ;
   }
 
   $rule pointwise(axi::moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
@@ -196,14 +196,14 @@ namespace flowPsi {
 
     // Adjust velocity to match current normal
     // grid velocity at half step
-    vect3d ug = (wc_next-wc_prev)/$dtmax ;
+    vect3d ug = (wc_next-wc_prev)/real($dtmax) ;
     // present normal
     vect3d n = $area{n,it}.n ;
     // tangential component of half step grid velocity
     vect3d utt = ug - dot(ug,n)*n ;
     vect3d utn = utt/(norm(utt)+1e-30) ;
     // Tangential component if normal component equals half step normal velocity
-    double ut = sqrt(max(dot(ug,ug)-$us_n{n,it}*$us_n{n,it},0.0)) ;
+    real ut = sqrt(max<real>(dot(ug,ug)-$us_n{n,it}*$us_n{n,it},0.0)) ;
 
     // reassemble vector so that half step normal velocity is aligned with
     // current normal, remainder of grid velocity goes in current tangetial
@@ -239,7 +239,7 @@ namespace flowPsi {
     wc_prev *= .5/lensum_prev ;
     wc_next *= .5/lensum_next ;
     
-    $us{n,it} = (wc_next-wc_prev)/$dtmax ;
+    $us{n,it} = (wc_next-wc_prev)/real($dtmax) ;
   }
 
   // Pos initial conditions

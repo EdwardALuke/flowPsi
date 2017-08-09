@@ -284,7 +284,7 @@ $rule constraint(componentMRFRotation_X,componentMRFStationary_X<-volumeTag(X),c
     vect3d utt = ug - dot(ug,n)*n ;
     vect3d utn = utt/(norm(utt)+1e-30) ;
     // Tangential component if normal component equals half step normal velocity
-    real ut = sqrt(max(dot(ug,ug)-$us_n*$us_n,0.0)) ;
+    real ut = sqrt(max<real>(dot(ug,ug)-$us_n*$us_n,0.0)) ;
 
     // reassemble vector so that half step normal velocity is aligned with
     // current normal, remainder of grid velocity goes in current tangetial

@@ -154,7 +154,7 @@ namespace flowPsi {
       BCErrorCode |= YPLUS_TOO_LARGE_IN_WALL_LAW ;
       Loci::debugout << "yplus is greater than " << yplus <<"!" << endl ;
     } else {
-      yplus = find_root(FUNC,.01,yplus,1e-8) ;
+      yplus = find_root<real>(FUNC,.01,yplus,1e-8) ;
     }
 
     const real uplus = ui_tan_mag*rb*yp/(yplus*mu) ;
@@ -175,7 +175,7 @@ namespace flowPsi {
 	*expkb ;
     //cout<<"mixed"<<" "<< 1.0 - kapa*pow(uplus,2)<<endl ;
     const real p_ywhite = y_white*wparam.kappa*
-      sqrt(max((1.0 - kapa*pow(uplus,2)),0.0)) ;
+      sqrt(max<real>((1.0 - kapa*pow(uplus,2)),0.0)) ;
 
     mu_t = (1.0 + p_ywhite - muu/mu)*mu + mu_t ;
     const real w_i = 6.0*mu/(0.075*pow(yp,2)*rb) ;
@@ -276,7 +276,7 @@ namespace flowPsi {
       BCErrorCode |= YPLUS_TOO_LARGE_IN_WALL_LAW ;
       Loci::debugout << "yplus is greater than " << yplus <<"!" << endl ;
     } else {
-      yplus = find_root(FUNC,.01,yplus,1e-8) ;
+      yplus = find_root<real>(FUNC,.01,yplus,1e-8) ;
     }
 
     real expkb = exp(-(wparam.kappa)*(wparam.B)) ;
@@ -304,10 +304,10 @@ namespace flowPsi {
                              (asin((2.0*kapa*uplus-beta)/qq)-phi))*expkb ;
 
     const real p_ywhite = 2.0*y_white*wparam.kappa*sqrt(kapa)/qq*
-      sqrt(max((1.0 - pow(2.0*kapa*uplus-beta,2)/pow(qq,2)),0.0)) ;
+      sqrt(max<real>((1.0 - pow(2.0*kapa*uplus-beta,2)/pow(qq,2)),0.0)) ;
 
     mu_t += (1.0 + p_ywhite - muu/mu)*mu ;
-    mu_t = max(mu_t,0.0) ;
+    mu_t = max<real>(mu_t,0.0) ;
     const real w_i = 6.0*mu/(0.075*pow(yp,2)*rb) ;
     const real w_o = utau/(sqrt(wparam.Cmu)*wparam.kappa*yp) ;
     w_wall = sqrt(pow(w_i,2)+pow(w_o,2)) ;

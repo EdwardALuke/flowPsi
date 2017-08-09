@@ -330,7 +330,7 @@ namespace flowPsi {
   $rule pointwise(fint<-kTOT,kT,walters) {
     const real cint = $walters.cint ;
 //    $fint = 1.0 ; // Goes to 1.0 at fully turbulent 
-   $fint= min($kT/(cint*$kTOT),1.0) ;
+   $fint= min<real>($kT/(cint*$kTOT),1.0) ;
   }
 
   // turbulent viscosity coefficient  
@@ -411,7 +411,7 @@ namespace flowPsi {
   $rule pointwise(betaTS<-ReO,walters) {
     const real ctscr = $walters.ctscr ;
     const real ats = $walters.ats ;
-    const real argbTS = max($ReO - ctscr,0.0) ;
+    const real argbTS = max<real>($ReO - ctscr,0.0) ;
     $betaTS = 1.0 - exp( -pow(argbTS,2)/ats ) ;
   }
 
@@ -524,7 +524,7 @@ namespace flowPsi {
   $rule pointwise(betabp<-rho,mu,Omega,kT,walters,cbpcr) {
     const real abp   = $walters.abp ;
     const real denom = $Omega*$mu+EPSILON ; //mch and KW fix for "slug" flow start
-    const real phibp = max((($rho*$kT)/denom)-$cbpcr,0.0) ;
+    const real phibp = max<real>((($rho*$kT)/denom)-$cbpcr,0.0) ;
     $betabp = 1.0 - exp( -phibp/abp ) ;
    }
 
@@ -543,7 +543,7 @@ namespace flowPsi {
     const real anat   = $walters.anat ;
 //    const real denom = max (EPSILON, $fnatcr) ; //mch fix for "slug" flow start
     const real denom = $fnatcr+EPSILON ; //mch fix for KL=0.0 "slug" flow start
-    const real phinat = max( $ReO-cnatcr/denom,0.0) ;
+    const real phinat = max<real>( $ReO-cnatcr/denom,0.0) ;
     $betanat = 1.0 - exp( -phinat/anat ) ;
   }
  

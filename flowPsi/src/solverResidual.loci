@@ -161,7 +161,9 @@ namespace flowPsi {
       real mtmax = $residual{n,it}->mtmax ;
       
       printf("R:%3d |r|=%7.1e rinf=%8.1e |e|=%7.1e einf=%8.1e |m|=%7.1e\n",
-             *$ncycle{n},rtrms,rtmax,etrms,etmax,mtrms) ;
+             *$ncycle{n},realToDouble(rtrms),realToDouble(rtmax),
+	     realToDouble(etrms),realToDouble(etmax),
+	     realToDouble(mtrms)) ;
 
       fflush(stdout) ;
       Loci::debugout << " ncyc = " << *$ncycle{n} <<  "  Cell center max density residual = "  << $residual{n,it}->ccmaxr_center << endl ;

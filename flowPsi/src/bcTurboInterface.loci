@@ -53,7 +53,7 @@ namespace flowPsi {
         weights[i] = deltas[i] ;
       }
       r[0][0] = sqrt(r[0][0]) ;
-      r[0][0] = max(r[0][0],1e-30) ;
+      r[0][0] = max<real>(r[0][0],1e-30) ;
 
       const real rr00 = 1./r[0][0] ;
       for(int i=0;i<ndeltas;++i)
@@ -72,7 +72,7 @@ namespace flowPsi {
       for(int i=0;i<ndeltas;++i)
         r[1][1] += weights[i].y*weights[i].y ;
       r[1][1] = sqrt(r[1][1]) ;
-      r[1][1] = max(r[1][1],1e-30) ;
+      r[1][1] = max<real>(r[1][1],1e-30) ;
       const real rr11 = 1./r[1][1] ;
       for(int i=0;i<ndeltas;++i)
         weights[i].y *= rr11 ;
@@ -86,7 +86,7 @@ namespace flowPsi {
       for(int i=0;i<ndeltas;++i)
         r[2][2] += weights[i].z*weights[i].z ;
       r[2][2] = sqrt(r[2][2]) ;
-      r[2][2] = max(r[2][2],1e-30) ;
+      r[2][2] = max<real>(r[2][2],1e-30) ;
       const real rr22 = 1./r[2][2] ;
       for(int i=0;i<ndeltas;++i)
         weights[i].z *= rr22 ;

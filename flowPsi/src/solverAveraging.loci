@@ -122,7 +122,7 @@ namespace flowPsi {
   $rule singleton(meanCount{n,it=0}<-meanCount{n},meanFreq,useExponentialMean) {
     $meanCount{n,it=0} = $meanCount{n}+1.0 ;
     if($useExponentialMean)
-      $meanCount{n,it=0} = min(double($meanFreq),$meanCount{n,it=0}) ;
+      $meanCount{n,it=0} = min<real>(double($meanFreq),$meanCount{n,it=0}) ;
   }
 
   
@@ -1416,7 +1416,7 @@ namespace flowPsi {
 
   $type X store<real> ;
   $rule pointwise(scalarFavreMean(X){n,it}<-scalarFavreMeanBase(X){n,it},scalarMean(rho){n,it}),parametric(scalarFavreMean(X)) {
-    $scalarFavreMean(X){n,it} = $scalarFavreMeanBase(X){n,it}/max($scalarMean(rho){n,it},1e-60) ;
+    $scalarFavreMean(X){n,it} = $scalarFavreMeanBase(X){n,it}/max<real>($scalarMean(rho){n,it},1e-60) ;
   }
 
   $rule pointwise(scalarFavreMeanBase(X){n,it}<-scalarFavreMeanCell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it},rho{n,it}),parametric(scalarFavreMean(X)) {
@@ -1509,7 +1509,7 @@ namespace flowPsi {
 		  scalarMean_f(rho){n,it}),
     parametric(scalarFavreMean_f(X)){
     $scalarFavreMean_f(X){n,it}=  $scalarFavreMeanBase_f(X){n,it}/
-				    max($scalarMean_f(rho){n,it},1e-60) ;
+				    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
   $rule pointwise(scalarFavreMeanBase_f(X){n,it}<-scalarFavreMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it}),
     parametric(scalarFavreMean_f(X)) {
@@ -1601,7 +1601,7 @@ namespace flowPsi {
 
   $type X store<real> ;
   $rule pointwise(scalarFavreVar(X){n,it}<-scalarFavreVarBase(X){n,it},scalarMean(rho){n,it}),parametric(scalarFavreVar(X)) {
-    $scalarFavreVar(X){n,it} = $scalarFavreVarBase(X){n,it}/max($scalarMean(rho){n,it},1e-60) ;
+    $scalarFavreVar(X){n,it} = $scalarFavreVarBase(X){n,it}/max<real>($scalarMean(rho){n,it},1e-60) ;
   }
 
 
@@ -1705,7 +1705,7 @@ namespace flowPsi {
 		  scalarMean_f(rho){n,it}),
     parametric(scalarFavreVar_f(X)){
     $scalarFavreVar_f(X){n,it}=  $scalarFavreVarBase_f(X){n,it}/
-                                   max($scalarMean_f(rho){n,it},1e-60) ;
+                                   max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;
@@ -1806,7 +1806,7 @@ namespace flowPsi {
 
   $type X store<vect3d> ;
   $rule pointwise(vect3dFavreMean(X){n,it}<-vect3dFavreMeanBase(X){n,it},scalarMean(rho){n,it}),parametric(vect3dFavreMean(X)) {
-    $vect3dFavreMean(X){n,it} = $vect3dFavreMeanBase(X){n,it}/max($scalarMean(rho){n,it},1e-60) ;
+    $vect3dFavreMean(X){n,it} = $vect3dFavreMeanBase(X){n,it}/max<real>($scalarMean(rho){n,it},1e-60) ;
   }
 
   $rule pointwise(vect3dFavreMeanBase(X){n,it}<-vect3dFavreMeanCell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it},rho{n,it}),parametric(vect3dFavreMean(X)) {
@@ -1899,7 +1899,7 @@ namespace flowPsi {
 		  scalarMean_f(rho){n,it}),
     parametric(vect3dFavreMean_f(X)){
     $vect3dFavreMean_f(X){n,it}=  $vect3dFavreMeanBase_f(X){n,it}/
-				    max($scalarMean_f(rho){n,it},1e-60) ;
+				    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
   $rule pointwise(vect3dFavreMeanBase_f(X){n,it}<-vect3dFavreMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it}),
     parametric(vect3dFavreMean_f(X)) {
@@ -1991,7 +1991,7 @@ namespace flowPsi {
 
   $type X store<vect3d> ;
   $rule pointwise(vect3dFavreVar(X){n,it}<-vect3dFavreVarBase(X){n,it},scalarMean(rho){n,it}),parametric(vect3dFavreVar(X)) {
-    $vect3dFavreVar(X){n,it} = $vect3dFavreVarBase(X){n,it}/max($scalarMean(rho){n,it},1e-60) ;
+    $vect3dFavreVar(X){n,it} = $vect3dFavreVarBase(X){n,it}/max<real>($scalarMean(rho){n,it},1e-60) ;
   }
 
 
@@ -2096,7 +2096,7 @@ namespace flowPsi {
 		  scalarMean_f(rho){n,it}),
     parametric(vect3dFavreVar_f(X)){
     $vect3dFavreVar_f(X){n,it}=  $vect3dFavreVarBase_f(X){n,it}/
-                                   max($scalarMean_f(rho){n,it},1e-60) ;
+                                   max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;
@@ -2198,7 +2198,7 @@ namespace flowPsi {
 
   $type X store<vect3d> ;
   $rule pointwise(vect3dFavreCoVar(X){n,it}<-vect3dFavreCoVarBase(X){n,it},scalarMean(rho){n,it}),parametric(vect3dFavreCoVar(X)) {
-    $vect3dFavreCoVar(X){n,it} = $vect3dFavreCoVarBase(X){n,it}/max($scalarMean(rho){n,it},1e-60) ;
+    $vect3dFavreCoVar(X){n,it} = $vect3dFavreCoVarBase(X){n,it}/max<real>($scalarMean(rho){n,it},1e-60) ;
   }
 
 
@@ -2303,7 +2303,7 @@ namespace flowPsi {
 		  scalarMean_f(rho){n,it}),
     parametric(vect3dFavreCoVar_f(X)){
     $vect3dFavreCoVar_f(X){n,it}=  $vect3dFavreCoVarBase_f(X){n,it}/
-                                     max($scalarMean_f(rho){n,it},1e-60) ;
+                                     max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;

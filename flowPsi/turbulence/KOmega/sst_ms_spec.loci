@@ -127,7 +127,7 @@ namespace flowPsi {
     const real x2 = log10($kd) ;
     const real poly = a1 + a2*x1 + a3*x2 + a5*x1*x2 ;
     const real fit = a0/(1.+exp(-poly))+a6 ;
-    $fd = ((x1<1.0) || (x2<-5.0))?1.0:min(fit,1.0) ;
+    $fd = ((x1<1.0) || (x2<-5.0))?1.0:min<real>(fit,1.0) ;
   }
 
   $type sst_tmuu store<real> ;

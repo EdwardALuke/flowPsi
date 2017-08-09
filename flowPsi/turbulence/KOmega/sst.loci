@@ -391,7 +391,7 @@ namespace flowPsi {
   }
 
   $rule apply((cl,cr)->div_w_grad_k<-lefts(w),rights(w),grads_f(k),area)[Loci::Summation],constraint((cl,cr)->(w,div_w_grad_k)) {
-    real w_f = max(0.0,0.5*($lefts(w)+$rights(w))) ;
+    real w_f = max<real>(0.0,0.5*($lefts(w)+$rights(w))) ;
     real gradkdotn = $area.sada*dot($grads_f(k),$area.n) ;
     join($cl->$div_w_grad_k,w_f*gradkdotn) ;
     join($cr->$div_w_grad_k,-w_f*gradkdotn) ;
@@ -413,8 +413,8 @@ namespace flowPsi {
 
   $rule pointwise(crossDiffusionTerm<-sst2,rho,w,laplace_k,div_w_grad_k,vol) {
     const real gradkdotgradw = ($div_w_grad_k-$w*$laplace_k)/$vol ;
-    const real crossterm = max($sst2.sigmae*gradkdotgradw,0.0) ;
-    $crossDiffusionTerm = 2.*$rho*crossterm/max($w,1e-30) ;
+    const real crossterm = max<real>($sst2.sigmae*gradkdotgradw,0.0) ;
+    $crossDiffusionTerm = 2.*$rho*crossterm/max<real>($w,1e-30) ;
   }
 
   $rule pointwise(wilcox08::crossDiffusionTerm<-rho,w,laplace_k,div_w_grad_k,vol),
@@ -422,21 +422,21 @@ namespace flowPsi {
     // t1 = dot(grad(k),grad(w))/w 
     const real  crossterm = ($div_w_grad_k-$laplace_k*$w)/$vol ;
     const real sigma_d = crossterm<=0?0.0:0.125 ;
-    $crossDiffusionTerm = sigma_d*$rho*crossterm/max($w,1e-30) ;
+    $crossDiffusionTerm = sigma_d*$rho*crossterm/max<real>($w,1e-30) ;
   }
 
     
 #else
 
   $rule pointwise(crossDiffusionTerm<-sst2,rho,w, grads(k),grads(w)) {
-    const real crossterm = max($sst2.sigmae*dot($grads(k),$grads(w)),0.0) ;
-    $crossDiffusionTerm = 2.*$rho*crossterm/max($w,1e-30) ;
+    const real crossterm = max<real>($sst2.sigmae*dot($grads(k),$grads(w)),0.0) ;
+    $crossDiffusionTerm = 2.*$rho*crossterm/max<real>($w,1e-30) ;
   }
   $rule pointwise(wilcox08::crossDiffusionTerm<-rho,w,grads(k),grads(w)),
     constraint(Wilcox08Model,geom_cells) {
     const real crossterm = dot($grads(k),$grads(w)) ;
     const real sigma_d = crossterm<=0?0.0:0.125 ;
-    $crossDiffusionTerm = sigma_d*$rho*crossterm/max($w,1e-30) ;
+    $crossDiffusionTerm = sigma_d*$rho*crossterm/max<real>($w,1e-30) ;
   }
 #endif
   
@@ -449,7 +449,7 @@ namespace flowPsi {
     const real y = $dist_noslip ;
     const real nu = $muu/$rho ;
     const real ls = max(sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)) ;
-    const real arg1= min(min(ls, 4.*$rho*sigma_w2*$k/(CD*y*y)),32.0) ;
+    const real arg1= min<real>(min(ls, 4.*$rho*sigma_w2*$k/(CD*y*y)),32.0) ;
     const real arg1_2 = arg1*arg1 ;
     const real arg1_4 = arg1_2*arg1_2 ;
     $bF1 = tanh(arg1_4) ;
@@ -470,7 +470,7 @@ namespace flowPsi {
     constraint(SSTModel,dist_noslip) {
       const real y = $dist_noslip ;
       const real nu = $muu/$rho ;
-      real arg2 =min(max(2.0*sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)),1000.0) ;
+      real arg2 =min<real>(max(2.0*sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)),1000.0) ;
       $bF2 = tanh(arg2*arg2) ;
   }
 
@@ -495,7 +495,7 @@ namespace flowPsi {
     constraint(SSTModel,SST_ROUGH_WALL,dist_noslip) {
       const real y = $dist_noslip ;
       const real nu = $muu/$rho ;
-      const real arg = min(150.0*nu/($w*y*y),32.0) ;
+      const real arg = min<real>(150.0*nu/($w*y*y),32.0) ;
       const real arg4 = pow(arg,4) ;
       $bF3 = 1.-tanh(arg4) ;
   }
@@ -703,7 +703,7 @@ namespace flowPsi {
   // Definition of turbulence viscosity
   $rule pointwise(kw_tmuu<-tmuu_clip,rho,k,w,sst1m,bF2,bF3,strainRate),
     constraint(k,w,SST_BSL_KW) {
-    $kw_tmuu = min($rho*$sst1m.a1*$k/max(1e-30,max($sst1m.a1*$w,$strainRate*$bF2*$bF3)),$tmuu_clip);
+    $kw_tmuu = min($rho*$sst1m.a1*$k/max<real>(1e-30,max($sst1m.a1*$w,$strainRate*$bF2*$bF3)),$tmuu_clip);
   }
 
   $rule pointwise(wilcox08::kw_tmuu<-tmuu_clip,rho,k,w,sst1m,strainRate,divu),
@@ -728,7 +728,7 @@ namespace flowPsi {
     const real S = $strainRate ;
     const real Omega = $vortMag ;
 
-    $stress_scalar=max($kw_tmuu*(S*Omega-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    $stress_scalar=max<real>($kw_tmuu*(S*Omega-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
                        0.0) ;
   }
 
@@ -743,7 +743,7 @@ namespace flowPsi {
     constraint(vorticity_production,k,kw_tmuu) {
     const real O2 = $vortMag*$vortMag ;
     
-    $stress_scalar = max($kw_tmuu*(O2-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    $stress_scalar = max<real>($kw_tmuu*(O2-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
                          0.0) ;
   }    
 
@@ -751,9 +751,9 @@ namespace flowPsi {
   $rule pointwise(vortex_correction::stress_scalar<-kw_tmuu,rho,k,divu,
                   vortMag,strainRate,Cvor),
     constraint(vortex_preserving_production,k,kw_tmuu) {
-    const real O = max($vortMag + $Cvor*(min($strainRate-$vortMag,0.0)),0.) ;
+    const real O = max<real>($vortMag + $Cvor*(min<real>($strainRate-$vortMag,0.0)),0.) ;
     const real S = $strainRate ;
-    $stress_scalar = max($kw_tmuu*(S*O-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    $stress_scalar = max<real>($kw_tmuu*(S*O-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
                          0.0);
   }    
 
@@ -819,7 +819,7 @@ namespace flowPsi {
   }
   $rule pointwise(wilcox08::k_nu_f<-muu_f,rho_f,k_f,w_f,sigmak_f),
     constraint(k_f,Wilcox08Model) {
-    const real kw_tmuu_f = $rho_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmuu_f = $rho_f*$k_f/max<real>($w_f,1e-30) ;
     $k_nu_f=($muu_f+kw_tmuu_f*$sigmak_f) ;
   }
 #endif
@@ -833,7 +833,7 @@ namespace flowPsi {
 
   $rule pointwise(wilcox08::w_nu_f<-muu_f,rho_f,k_f,w_f,sigmae_f),
     constraint(w_f,Wilcox08Model) {
-    const real kw_tmuu_f = $rho_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmuu_f = $rho_f*$k_f/max<real>($w_f,1e-30) ;
     $w_nu_f=($muu_f+kw_tmuu_f*$sigmae_f) ;
   }    
 #endif
@@ -923,7 +923,7 @@ namespace flowPsi {
     const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
-    const real fmt = max(Mt2-mt0*mt0,0.0) ;
+    const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
     // compressibility dissipation constant (adjusted from Sarkars original
     // value
     const real psi = $wilcox_xi ;
@@ -943,7 +943,7 @@ namespace flowPsi {
     const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
-    const real fmt = max(Mt2-mt0*mt0,0.0) ;
+    const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
     // compressibility dissipation constant (adjusted from Sarkars original
     // value
     const real psi = $wilcox_xi ;

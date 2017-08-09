@@ -955,7 +955,7 @@ namespace flowPsi {
                                             cellcenter[cc].y,
                                             cellcenter[cc].z) ;
         real size_norm = mxstencil/sqrt(max(cellSize2[cc],1e-30f)) ;
-        int size_i = max(int(min(2e9,size_norm)),1) ;
+        int size_i = max(int(min<real>(2e9,size_norm)),1) ;
         points[cnt].second = size_i ;
         cnt++ ;
       }

@@ -112,7 +112,7 @@ namespace flowPsi {
       M=maxMach ;
       const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
       const real ur2 = dot(rigid_u,rigid_u) ;
-      const real un = sqrt(max(utot*utot-ur2,0.0)) ;
+      const real un = sqrt(max<real>(utot*utot-ur2,0.0)) ;
       ub = un*n + rigid_u ;
     }
 
@@ -140,7 +140,7 @@ namespace flowPsi {
         M=maxMach ;
         const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
         const real ur2 = dot(rigid_u,rigid_u) ;
-        const real un = sqrt(max(utot*utot-ur2,0.0)) ;
+        const real un = sqrt(max<real>(utot*utot-ur2,0.0)) ;
         ub = un*n + rigid_u ;
       }
       

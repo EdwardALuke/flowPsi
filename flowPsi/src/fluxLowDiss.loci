@@ -113,7 +113,7 @@ namespace flowPsi {
   }
   
 
-  $type alpha_geom_f store<float> ;
+  $type alpha_geom_f store<realF> ;
 
   $rule pointwise(alpha_geom_f<-area,facecenter,(cl,cr)->(cellcenter,vol),
                   LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
@@ -121,11 +121,11 @@ namespace flowPsi {
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
     real ndv = norm(dv) ;
     real ndf = norm(df) ;
-    real cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
+    real cosa= min(sqrt(max<real>(1.-2.*ndv/ndf,0.0)),
                      dot($area.n,df)/ndf) ;
     real scale = $LDS_nonSymmetricCoeff ;
-    real s = $LDS_nonSymmetricFactor/max(scale,1.0) ; ;
-    real x = min(scale*(1.-cosa),1.0) ;
+    real s = $LDS_nonSymmetricFactor/max<real>(scale,1.0) ; ;
+    real x = min<real>(scale*(1.-cosa),1.0) ;
     real x2 = x*x ;
     real x3 = x2*x ;
     //    $alpha_geom_f =3.*x2-2.*x3 + s*(x3-2.*x2+x) ;
@@ -244,7 +244,7 @@ namespace flowPsi {
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
     const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
-			     min(1.0,dp*1.0-0.5)) ;
+			     min<real>(1.0,dp*1.0-0.5)) ;
 
     const real alpha = max(alpha_c,real($alpha_geom_f)) ;
 
@@ -265,7 +265,7 @@ namespace flowPsi {
       //Thornber low dissipation preconditioning
       const real amin = sqrt(min(al2,ar2)) ;
       const real utmax = max(fabs(dot(uL,an)+$us_n),fabs(dot(uR,an)+$us_n)) ;
-      const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
+      const real Ma = max(alpha_c,min<real>(1.0,utmax/amin+1e-4)) ;
       vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
       vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
       inviscidRiemannFlux($iflux, pgL,tL,uLp, pgR, tR, uRp,
@@ -364,7 +364,7 @@ namespace flowPsi {
     const real ar2 = $gamma*$Rtilde*tR ;
     const real dp = 2.*fabs(pgL-pgR)/max(rL*al2,rR*ar2) ;
     const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
-			     min(1.0,dp*1.0-0.5)) ;
+			     min<real>(1.0,dp*1.0-0.5)) ;
 
     const real alpha = max(alpha_c,real($alpha_geom_f)) ;
 
@@ -385,7 +385,7 @@ namespace flowPsi {
       //Thornber low dissipation preconditioning
       const real amin = sqrt(min(al2,ar2)) ;
       const real utmax = max(fabs(dot(uL,an)+$us_n),fabs(dot(uR,an)+$us_n)) ;
-      const real Ma = max(alpha_c,min(1.0,utmax/amin+1e-4)) ;
+      const real Ma = max(alpha_c,min<real>(1.0,utmax/amin+1e-4)) ;
       const vect3d uLp = uL+0.5*(1.-Ma)*(uR-uL) ;
       const vect3d uRp = uR+0.5*(1.-Ma)*(uL-uR) ;
       inviscidRiemannFlux($iflux, pgL,tL,uLp, pgR, tR, uRp,

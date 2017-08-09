@@ -102,14 +102,14 @@ namespace flowPsi {
 
     real dTlim = (relax*(2*Tn-Tstar))/2.0 ;
     
-    alpha = min(alpha,dTlim/max(fabs(dT),1e-30)) ;
+    alpha = min<real>(alpha,dTlim/max<real>(fabs(dT),1e-30)) ;
 
     const real pgstar = $gagePressure{n,it} ;
     const real peps = $localPBias{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
 
     real dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
-    alpha = min(alpha,dplim/max(fabs(dp),1e-30)) ;
+    alpha = min(alpha,dplim/max<real>(fabs(dp),1e-30)) ;
     alpha = ($iblank{n,it}>1)?0.0:alpha ;
     $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;
     $gagePressure_i{n,it+1} = $gagePressure{n,it} + alpha*dp ;

@@ -45,7 +45,7 @@ namespace LGSI {
   $type X_D store<real> ;
   $type X_L store<real> ;
   $type X_U store<real> ;
-  $type LSGSConnectivity(X) store<float> ;
+  $type LSGSConnectivity(X) store<realF> ;
 
   $type LSGSRelaxation param<real> ;
   $type LSGSAbsTol param<real> ;
@@ -954,7 +954,7 @@ namespace LGSI {
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
         real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
-        Dp[i] = 1./(Dt<0.0?min(Dt,-1e-30):max(Dt,1e-30)) ;
+        Dp[i] = 1./(Dt<0.0?min<real>(Dt,-1e-30):max<real>(Dt,1e-30)) ;
       }
     }
     $LSGSscalarMatrix(X)->B.swap(B) ; 
@@ -1220,7 +1220,7 @@ namespace LGSI {
   using flowPsi::tmp_array ;
 
   $rule pointwise(LSGSConnectivity(X)<-X_L,X_U),parametric(LSGSblockedMatrix(X)) {
-    float diagnorm = 0 ;
+    realF diagnorm = 0 ;
     for(int i=0;i<$*X_L.vecSize();++i) {
       diagnorm = max(diagnorm,max(fabs($X_L[i][i]),fabs($X_U[i][i]))) ;
     }

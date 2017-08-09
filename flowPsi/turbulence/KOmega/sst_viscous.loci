@@ -84,7 +84,7 @@ namespace flowPsi {
     const real beta = 1e-2 ;
     real v = norm(u) ;
     k = (3./2.)*(beta*v)*(beta*v) ;
-    k = max(k,1e-3) ;
+    k = max<real>(k,1e-3) ;
 
     if(finput.optionExists("k")) {
       finput.getOption("k",k) ;
@@ -140,7 +140,7 @@ namespace flowPsi {
     $k_f = $prescribe_turb_ref[0] ;
     real muut = $prescribe_turb_ref[1] ;
     
-    $w_f = max($k_f*$rho_f/(muut+1e-10),1e-10) ;
+    $w_f = max<real>($k_f*$rho_f/(muut+1e-10),1e-10) ;
     
     if(dot($u_f,n)+$us_n >= -0.0){ 
       $k_f = $ci->$k ;
@@ -229,7 +229,7 @@ namespace flowPsi {
   $type ks_BC store<real> ;
   $rule pointwise(ks_BC<-BC_options),constraint(ks_BCoption) {
     $BC_options.getOptionUnits("ks","m",$ks_BC) ;
-    $ks_BC = max($ks_BC,1e-8) ;
+    $ks_BC = max<real>($ks_BC,1e-8) ;
   }
 
   $type ksRef store<real> ;
@@ -243,7 +243,7 @@ namespace flowPsi {
     const real nu_w = $muu_f/$rho_f ;
     const real tau_w = $lam_tau_w ;
     const real utau = sqrt(tau_w/$rho_f) ;
-    $ksp = max(utau*$ksRef/nu_w,1e-30) ;
+    $ksp = max<real>(utau*$ksRef/nu_w,1e-30) ;
   }
 
   $rule pointwise(rough::viscousWall::prescribe::k_f,rough::viscousWall::prescribe::w_f<-rho_f,

@@ -75,7 +75,7 @@ namespace flowPsi {
                         gu.z.x*gu.z.x + gu.z.y*gu.z.y + gu.z.z*gu.z.z) ;
     const real d = $dist_noslip ;
     const real ka =$spalart.k_coeff ;
-    const real r_d = ($mu+$tmu)/max($rho*S*ka*ka*d*d,1e-30) ;
+    const real r_d = ($mu+$tmu)/max<real>($rho*S*ka*ka*d*d,1e-30) ;
     $f_ddes = 1.-tanh(512.*r_d*r_d*r_d) ;
   }
   
@@ -89,7 +89,7 @@ namespace flowPsi {
     constraint(SA_DDES,geom_cells) {
     const real des_param = 0.65 ;
     const real d = $dist_noslip ;
-    $sa_dist_noslip = d - $f_ddes*max(0.,d-des_param*$LG) ;
+    $sa_dist_noslip = d - $f_ddes*max<real>(0.,d-des_param*$LG) ;
   }
   // IDDES section
   $type f_iddes store<real> ;
@@ -103,8 +103,8 @@ namespace flowPsi {
                         gu.z.x*gu.z.x + gu.z.y*gu.z.y + gu.z.z*gu.z.z) ;
     const real d = $dist_noslip ;
     const real ka = $spalart.k_coeff ;
-    const real r_d = $tmu/max($rho*S*ka*ka*d*d,1e-30) ;
-    const real r_dl = $mu/max($rho*S*ka*ka*d*d,1e-30) ;
+    const real r_d = $tmu/max<real>($rho*S*ka*ka*d*d,1e-30) ;
+    const real r_dl = $mu/max<real>($rho*S*ka*ka*d*d,1e-30) ;
     const real fd = 1.-tanh(512.*r_d*r_d*r_d) ;
 
     const real ct = 1.63 ;
@@ -119,14 +119,14 @@ namespace flowPsi {
     } else {
        f_hill = 2.*exp(-9.*alph*alph) ;
     }
-    $f_restore = max((f_hill-1.),0.)*f_amp ;
-    const real f_step = min(2.*exp(-9.*alph*alph),1.) ;
+    $f_restore = max<real>((f_hill-1.),0.)*f_amp ;
+    const real f_step = min<real>(2.*exp(-9.*alph*alph),1.) ;
     $f_iddes = max((1.-fd),f_step) ;
     const real fwstar = 0.424 ;
     const real ft2 = 0. ;
     real tmpRe = 1. - $spalart.cb1*(ft2+(1.-ft2)*$fv2)/($cw1*ka*ka*fwstar) ;
-    tmpRe = tmpRe/($fv1*max(1.0e-10,1.-ft2)) ;
-    tmpRe = min(100.,tmpRe) ;
+    tmpRe = tmpRe/($fv1*max<real>(1.0e-10,1.-ft2)) ;
+    tmpRe = min<real>(100.,tmpRe) ;
     $low_Re = sqrt(tmpRe) ;
   }
   $rule pointwise(iddes::sa_dist_noslip<-dist_noslip,LG,f_iddes,f_restore,low_Re,LGMIN),

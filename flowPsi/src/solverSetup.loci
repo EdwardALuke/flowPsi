@@ -71,7 +71,7 @@ namespace flowPsi {
   $rule apply(plot_status{n}<-ncycle{n},maximumRunTime)[Loci::Maximum],prelude {
     double currTime = MPI_Wtime() ;
     double elapsedTime = currTime - flowPsi::StartTime ;
-    double maxTime = *$maximumRunTime ;
+    double maxTime = realToDouble(real(*$maximumRunTime)) ;
     if(elapsedTime > maxTime)
       join(*$plot_status{n},2) ;
   } ;

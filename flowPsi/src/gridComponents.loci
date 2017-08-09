@@ -489,7 +489,7 @@ namespace flowPsi {
     }
     real x1l = x[1]-x[0] ;
     real t1l = t[1]-t[0] ;
-    xp[0] = x1l/max(t1l,1e-33) ;
+    xp[0] = x1l/max<real>(t1l,1e-33) ;
     if(n>2 && t1l > 1e-33) {
       real x2l = x[2]-x[0] ;
       real t2l = t[2]-t[0] ;
@@ -533,8 +533,8 @@ namespace flowPsi {
   real spline(int ind,real tval,const vector<real> &t,
                 const vector<real> &x,
                 const vector<real> &xp) {
-    const real dt = max((t[ind+1]-t[ind]),1e-33) ;
-    const real T = max(0.0,min(1.0,(tval-t[ind])/dt)) ;
+    const real dt = max<real>((t[ind+1]-t[ind]),1e-33) ;
+    const real T = max<real>(0.0,min<real>(1.0,(tval-t[ind])/dt)) ;
     const real p0 = x[ind] ;
     const real p1 = x[ind+1] ;
     const real m0 = xp[ind]*dt ;
@@ -742,7 +742,7 @@ namespace flowPsi {
   option(disable_threading),prelude {
     entitySet dom = entitySet(seq) ;
     int nc = (*$componentNameList).size() ;
-    float delta = sqrt(*$stencilSize2) ;
+    realF delta = sqrt(*$stencilSize2) ;
     //    Loci::debugout << "delta = " << delta << endl ;
     vector<Array<float,6> > bbox_set(nc) ;
     for(int i=0;i<nc;++i) {
@@ -1095,7 +1095,7 @@ if(req_queue.size() > 0 || self_send) {
     for(size_t i=0;i<pts.size();++i) {
       maxdist = max(maxdist,dot(pt-pts[i],normals[i])) ;
     }
-    return max(maxdist,0.0) ;
+    return max<real>(maxdist,0.0) ;
   }
 
   geometry_type *sphere_type::applyXform(componentXform xform) const {

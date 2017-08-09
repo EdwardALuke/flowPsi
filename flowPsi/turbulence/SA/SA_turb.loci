@@ -210,7 +210,7 @@ namespace flowPsi {
     real eps = 1e-8 ;
     int i ;
     // Initial guess is turbulent value
-    real chi = max(chi_turb,1.0) ;
+    real chi = max<real>(chi_turb,1.0) ;
     for( i=0;i<MAX_ITER;++i) {
       real chi3 = chi*chi*chi ;
       real f = chi_turb*(chi3+cv13)-chi3*chi ;
@@ -219,7 +219,7 @@ namespace flowPsi {
       real fp = 3*chi_turb*chi*chi-4.*chi3 ;
       real dchi = -f/fp ;
       // limit change so that chi does not overshoot
-      real scale = min(1.0,.5*chi/(fabs(dchi)+1e-30)) ;
+      real scale = min<real>(1.0,.5*chi/(fabs(dchi)+1e-30)) ;
       chi += dchi*scale ;
     }
     if(i == MAX_ITER) {
@@ -354,7 +354,7 @@ $rule default(Cvor),comments("Vorticity correction coefficient used when SA_prod
   $type S_tilda store<real> ;
   $rule apply(S_tilda<-vortMag,strainRate,S_tilda,Cvor)[Loci::Summation],
     constraint(vortMag,SP_rotat) {
-    $S_tilda += $Cvor*min(0.0, ($strainRate-$vortMag)) ;
+    $S_tilda += $Cvor*min<real>(0.0, ($strainRate-$vortMag)) ;
   }
 
   $rule apply(nuTilde_srcJ<-rho,nuTilde,sa_dist_noslip,cw1,

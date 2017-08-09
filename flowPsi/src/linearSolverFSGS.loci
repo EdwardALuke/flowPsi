@@ -635,7 +635,7 @@ namespace FGSI {
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
         real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
-        Dp[i] = 1./(Dt<0.0?min(Dt,-1e-30):max(Dt,1e-30)) ;
+        Dp[i] = 1./(Dt<0.0?min<real>(Dt,-1e-30):max<real>(Dt,1e-30)) ;
       }
     }
     $FSGSscalarMatrix(X)->B.swap(B) ; 

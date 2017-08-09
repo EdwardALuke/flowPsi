@@ -22,6 +22,9 @@ namespace flowPsi {
 #endif
   typedef realF real_fj ;
 
+  using Loci::realToDouble ;
+  using Loci::realToFloat ;
+
   typedef unsigned char byte_t ;
   
   
@@ -279,10 +282,10 @@ namespace flowPsi {
   }
 
   struct TimeValue {
-    real val ;
-    operator real() const { return val ; }
+    double val ;
+    operator double() const { return val ; }
     TimeValue &operator=(const TimeValue &v) { val = v.val ; return *this ;}
-    TimeValue &operator=(real v) { val = v ; return *this; }
+    TimeValue &operator=(double v) { val = v ; return *this; }
     TimeValue &operator=(float v) { val = v ; return *this; }
     TimeValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -299,10 +302,10 @@ namespace flowPsi {
   }        
 
   struct TemperatureValue {
-    real val ;
-    operator real() const { return val ; }
+    double val ;
+    operator double() const { return val ; }
     TemperatureValue &operator=(const TemperatureValue  &v) { val = v.val ; return *this; }
-    TemperatureValue &operator=(real v) { val = v ; return *this; }
+    TemperatureValue &operator=(double v) { val = v ; return *this; }
     TemperatureValue &operator=(float v) { val = v ; return *this; }
     TemperatureValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -319,10 +322,10 @@ namespace flowPsi {
   }        
 
   struct PressureValue {
-    real val ;
-    operator real() const { return val ; }
+    double val ;
+    operator double() const { return val ; }
     PressureValue &operator=(const PressureValue &v) { val = v.val ; return *this; }
-    PressureValue &operator=(real v) { val = v ; return *this; }
+    PressureValue &operator=(double v) { val = v ; return *this; }
     PressureValue &operator=(float v) { val = v ; return *this; }
     PressureValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -349,28 +352,28 @@ namespace Loci {
     int getSize() const {
       return 1 ;
     }
-    void getState(flowPsi::real *buf, int &size) {
+    void getState(double *buf, int &size) {
       buf[0] = ref.val ;
       size = 1 ;
     }
-    void setState(flowPsi::real *buf, int size) {
+    void setState(double *buf, int size) {
       ref.val = buf[0] ;
     }
   } ;
   
   template<> struct data_schema_traits<flowPsi::TimeValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef flowPsi::real Converter_Base_Type ;
+    typedef double Converter_Base_Type ;
     typedef ValConverter<flowPsi::TimeValue> Converter_Type ;
   } ;
   template<> struct data_schema_traits<flowPsi::TemperatureValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef flowPsi::real Converter_Base_Type ;
+    typedef double Converter_Base_Type ;
     typedef ValConverter<flowPsi::TemperatureValue> Converter_Type ;
   } ;
   template<> struct data_schema_traits<flowPsi::PressureValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef flowPsi::real Converter_Base_Type ;
+    typedef double Converter_Base_Type ;
     typedef ValConverter<flowPsi::PressureValue> Converter_Type ;
   } ;
 }

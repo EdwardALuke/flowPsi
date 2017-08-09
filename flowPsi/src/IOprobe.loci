@@ -112,7 +112,7 @@ namespace Loci {
     void setState(flowPsi::real *buf, int size) {
       ref.clear() ;
       int p = 0 ;
-      int sz = int(buf[p++]) ;
+      int sz = int(realToDouble(buf[p++])) ;
       ref.reserve(sz) ;
       for(int i=0;i<sz;++i) {
         flowPsi::probe_values pv ;

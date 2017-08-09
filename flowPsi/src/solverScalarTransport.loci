@@ -265,8 +265,8 @@ namespace flowPsi {
     constraint(geom_cells{n,it},timeStepAccurate{n,it},C),
     inplace(X{n+1}|X_n{n,it}),
     parametric(scalarTransportP(X,C)) {
-    real Xstar = max($X_n{n,it},1e-15) ;
-    real dXstar = max((Xstar-$X{n})/Xstar,-1.95) ;
+    real Xstar = max<real>($X_n{n,it},1e-15) ;
+    real dXstar = max<real>((Xstar-$X{n})/Xstar,-1.95) ;
     if(dXstar < 0.0)
       dXstar += 0.25*dXstar*dXstar ;
     $X{n+1} = Xstar*(1. + dXstar) ;
@@ -278,8 +278,8 @@ namespace flowPsi {
   $type X_np1 store<real> ;
   $rule pointwise(X_np1{n,it}<-X{n,it},X{n}),constraint(timeStepAccurate{n,it},X{n},geom_cells,C),
     parametric(scalarTransportP(X,C)) {
-    real Xstar = max($X{n,it},1e-15) ;
-    real dXstar = max((Xstar-$X{n})/Xstar,-1.95) ;
+    real Xstar = max<real>($X{n,it},1e-15) ;
+    real dXstar = max<real>((Xstar-$X{n})/Xstar,-1.95) ;
     if(dXstar < 0.0)
       dXstar += 0.25*dXstar*dXstar ;
     $X_np1{n,it} = Xstar*(1. + dXstar) ;
@@ -292,7 +292,7 @@ namespace flowPsi {
     real tscale = 1.0 ;
     tscale = min(tscale,relax*$X/(fabs($X_dq)+1e-15)) ;
     $X_next = $X + tscale*$X_dq ;
-    $X_next = max($X_next,1e-15) ;
+    $X_next = max<real>($X_next,1e-15) ;
   }
   
   $rule pointwise(X_next<-X),
@@ -427,20 +427,20 @@ namespace flowPsi {
   $rule apply(X_fjp<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = max($X_mdot_f,0.0) ;
+    real jdiff = max<real>($X_mdot_f,0.0) ;
     $X_fjp += jdiff;
   }    
   $rule apply(X_fjm<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = min($X_mdot_f,0.0) ;
+    real jdiff = min<real>($X_mdot_f,0.0) ;
     $X_fjm += jdiff;
   }    
   
   $rule apply(ci->X_srcJ<-X_mdot_f)[Loci::Summation],
     constraint(ci->X,C),
     parametric(scalarTransportP(X,C)) {
-    real jdiff = max($X_mdot_f,0.0) ;
+    real jdiff = max<real>($X_mdot_f,0.0) ;
     $ci->$X_srcJ -= jdiff ;
   }
 
@@ -587,7 +587,8 @@ namespace flowPsi {
     if(Loci::MPI_rank == 0) {
       string varname = *$scalarTransportName_X ;
       real sarms = sqrt(*$X_residual{n,it}) ;
-      printf("SR:%3d |%s|=%7.1e\n", *$ncycle{n},varname.c_str(),sarms) ;
+      printf("SR:%3d |%s|=%7.1e\n", *$ncycle{n},varname.c_str(),
+	     realToDouble(sarms)) ;
       fflush(stdout) ;
       string filename = "output/" + varname + "_resid.dat" ;
       ofstream *ofile = getStreamFluxFile(filename, *$ncycle{n}==0) ;
@@ -945,20 +946,20 @@ namespace flowPsi {
   $rule apply(X_fjp<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransport(X,C)) {
-    real jdiff = max($X_mdot_f,0.0) ;
+    real jdiff = max<real>($X_mdot_f,0.0) ;
     $X_fjp += jdiff;
   }    
   $rule apply(X_fjm<-X_mdot_f)[Loci::Summation],
     constraint((cl,cr)->vol,C),
     parametric(scalarTransport(X,C)) {
-    real jdiff = min($X_mdot_f,0.0) ;
+    real jdiff = min<real>($X_mdot_f,0.0) ;
     $X_fjm += jdiff;
   }    
   
   $rule apply(ci->X_srcJ<-X_mdot_f)[Loci::Summation],
     constraint(ci->X,C),
     parametric(scalarTransport(X,C)) {
-    real jdiff = max($X_mdot_f,0.0) ;
+    real jdiff = max<real>($X_mdot_f,0.0) ;
     $ci->$X_srcJ -= jdiff ;
   }
 
@@ -1105,7 +1106,8 @@ namespace flowPsi {
     if(Loci::MPI_rank == 0) {
       string varname = *$scalarTransportName_X ;
       real sarms = sqrt(*$X_residual{n,it}) ;
-      printf("SR:%3d |%s|=%7.1e\n", *$ncycle{n},varname.c_str(),sarms) ;
+      printf("SR:%3d |%s|=%7.1e\n", *$ncycle{n},varname.c_str(),
+	     realToDouble(sarms)) ;
       fflush(stdout) ;
       string filename = "output/" + varname + "_resid.dat" ;
       ofstream *ofile = getStreamFluxFile(filename, *$ncycle{n}==0) ;
