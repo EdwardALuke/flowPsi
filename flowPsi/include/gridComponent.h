@@ -41,9 +41,9 @@ namespace flowPsi {
 
   class cylinder_type : public geometry_type {
     vect3d pt1,pt2 ;
-    double radius ;
-    double radius2 ; // radius squared
-    double rlen2 ; // reciprocal of len(pt1-pt2)^2
+    real radius ;
+    real radius2 ; // radius squared
+    real rlen2 ; // reciprocal of len(pt1-pt2)^2
   public:
     cylinder_type() {
       pt1=vect3d(0,0,0) ;
@@ -52,7 +52,7 @@ namespace flowPsi {
       radius2 = 0 ;
       rlen2 = 1;
     }
-    cylinder_type(vect3d p1, vect3d p2, double r) : pt1(p1),pt2(p2),radius(r)
+    cylinder_type(vect3d p1, vect3d p2, real r) : pt1(p1),pt2(p2),radius(r)
     { rlen2 = 1./dot(pt2-pt1,pt2-pt1) ; radius2 = r*r; }
     geometry_type *applyXform(componentXform xform) const ;
     bool inGeometry(vect3d pt) const ;
@@ -74,15 +74,15 @@ namespace flowPsi {
 
   class sphere_type : public geometry_type {
     vect3d center ;
-    double radius ;
-    double radius2 ; // radius squared
+    real radius ;
+    real radius2 ; // radius squared
   public:
     sphere_type() {
       center=vect3d(0,0,0) ;
       radius = 0 ;
       radius2 = 0 ;
     }
-    sphere_type(vect3d c,double r) : center(c),radius(r)
+    sphere_type(vect3d c,real r) : center(c),radius(r)
     { radius2 = r*r; }
     geometry_type *applyXform(componentXform xform) const ;
     bool inGeometry(vect3d pt) const ;
@@ -91,15 +91,15 @@ namespace flowPsi {
 
   class revolution_type : public geometry_type {
     vect3d p1,p2 ;
-    double rlen2 ; // reciprocal of len(pt1-pt2)^2
-    std::vector<pair<double,double> > radius_pairs ;
+    real rlen2 ; // reciprocal of len(pt1-pt2)^2
+    std::vector<pair<real,real> > radius_pairs ;
   public:
     revolution_type() {
       p1=vect3d(0,0,0) ;
       p2=vect3d(0,0,0) ;
     }
     revolution_type(vect3d p1i, vect3d p2i,
-                    std::vector<pair<double,double> > rp ) : p1(p1i),p2(p2i),
+                    std::vector<pair<real,real> > rp ) : p1(p1i),p2(p2i),
                                                         radius_pairs(rp)
     { std::sort(radius_pairs.begin(),radius_pairs.end()) ; 
       rlen2 = 1./dot(p2-p1,p2-p1) ; }
@@ -108,22 +108,22 @@ namespace flowPsi {
     real distToSurface(vect3d pt) const ;
   } ;
   // Find the time interval that we are splining
-  int findt(const std::vector<double> &t, double tval) ;
+  int findt(const std::vector<real> &t, real tval) ;
   // Compute spline derivatives for hermite spline
-  void splineD(std::vector<double> &xp, const std::vector<double> &x,
-               const std::vector<double> &t) ;
+  void splineD(std::vector<real> &xp, const std::vector<real> &x,
+               const std::vector<real> &t) ;
   // cubic spline
-  double spline(int ind,double tval,const std::vector<double> &t,
-                const std::vector<double> &x,
-                const std::vector<double> &xp) ;
+  real spline(int ind,real tval,const std::vector<real> &t,
+                const std::vector<real> &x,
+                const std::vector<real> &xp) ;
   
   struct motionSplines {
-    std::vector<double> t,x,y,z,q0,q1,q2,q3 ;
-    std::vector<double> xp,yp,zp,q0p,q1p,q2p,q3p ;
-    void initialize(std::vector<double> ti,std::vector<double> xi,
-                    std::vector<double> yi,std::vector<double> zi,
-                    std::vector<double> q0i,std::vector<double> q1i,
-                    std::vector<double> q2i,std::vector<double> q3i) {
+    std::vector<real> t,x,y,z,q0,q1,q2,q3 ;
+    std::vector<real> xp,yp,zp,q0p,q1p,q2p,q3p ;
+    void initialize(std::vector<real> ti,std::vector<real> xi,
+                    std::vector<real> yi,std::vector<real> zi,
+                    std::vector<real> q0i,std::vector<real> q1i,
+                    std::vector<real> q2i,std::vector<real> q3i) {
       t = ti ;
       x = xi ;
       splineD(xp,x,t) ;
@@ -140,7 +140,7 @@ namespace flowPsi {
       q3 = q3i ;
       splineD(q3p,q3,t) ;
     }
-    void getMotion(vect3d &cg,Quaternion &q,double tv) const {
+    void getMotion(vect3d &cg,Quaternion &q,real tv) const {
       int ind = findt(t,tv) ;
       cg.x = spline(ind,tv,t,x,xp) ;
       cg.y = spline(ind,tv,t,y,yp) ;

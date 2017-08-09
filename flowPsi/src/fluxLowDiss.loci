@@ -99,8 +99,8 @@ namespace flowPsi {
     $LDS_compFactor = 5.0 ;
   }
 
-  $type LDS_nonSymmetricCoeff param<double> ;
-  $type LDS_nonSymmetricFactor param<double> ;
+  $type LDS_nonSymmetricCoeff param<real> ;
+  $type LDS_nonSymmetricFactor param<real> ;
   // This defines the cutoff angle where full upwinding occurs,
   // A setting of 2 gives full upwinding at 53 degrees
   $rule default(LDS_nonSymmetricCoeff) {
@@ -119,15 +119,15 @@ namespace flowPsi {
                   LDS_nonSymmetricCoeff,LDS_nonSymmetricFactor) {
     const vect3d df = $cr->$cellcenter-$cl->$cellcenter ;
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
-    double ndv = norm(dv) ;
-    double ndf = norm(df) ;
-    double cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
+    real ndv = norm(dv) ;
+    real ndf = norm(df) ;
+    real cosa= min(sqrt(max(1.-2.*ndv/ndf,0.0)),
                      dot($area.n,df)/ndf) ;
-    double scale = $LDS_nonSymmetricCoeff ;
-    double s = $LDS_nonSymmetricFactor/max(scale,1.0) ; ;
-    double x = min(scale*(1.-cosa),1.0) ;
-    double x2 = x*x ;
-    double x3 = x2*x ;
+    real scale = $LDS_nonSymmetricCoeff ;
+    real s = $LDS_nonSymmetricFactor/max(scale,1.0) ; ;
+    real x = min(scale*(1.-cosa),1.0) ;
+    real x2 = x*x ;
+    real x3 = x2*x ;
     //    $alpha_geom_f =3.*x2-2.*x3 + s*(x3-2.*x2+x) ;
     $alpha_geom_f = x2 + s*(x3-2.*x2+x) ;
   }
@@ -137,7 +137,7 @@ namespace flowPsi {
 
     int usz = $upper.size() ;
     vect3d ccenter = $cellcenter ;
-    double maxdist2 = 0 ;
+    real maxdist2 = 0 ;
     for(int i=0;i<usz;++i) {
       vect3d dv = $upper[i]->$facecenter-ccenter ;
       maxdist2 = max(maxdist2,dot(dv,dv)) ;
@@ -147,7 +147,7 @@ namespace flowPsi {
       vect3d dv = $lower[i]->$facecenter-ccenter ;
       maxdist2 = max(maxdist2,dot(dv,dv)) ;
     }
-    double len = 2.*sqrt(maxdist2) ;
+    real len = 2.*sqrt(maxdist2) ;
     // Compute alpha_comp
     real factor = $LDS_compFactor*(fabs($veldiv))*len/($soundSpeed*$vol) ;
     real alpha_comp= factor*factor ;
@@ -184,7 +184,7 @@ namespace flowPsi {
 
     const real rf = (pgf+pambient)/(Rt*tf) ;
     const real mdot = rf*ufn ;
-    double coef = area ;
+    real coef = area ;
     iflux[0] += coef*mdot ;
     const int mi = 1 ;
     iflux[mi+0] += coef*(mdot*uf.x + pgf*an.x) ;
@@ -246,7 +246,7 @@ namespace flowPsi {
     const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
 			     min(1.0,dp*1.0-0.5)) ;
 
-    const real alpha = max(alpha_c,double($alpha_geom_f)) ;
+    const real alpha = max(alpha_c,real($alpha_geom_f)) ;
 
     if(alpha >1e-10) {
       const real sada = $area.sada*alpha ;
@@ -315,7 +315,7 @@ namespace flowPsi {
 
   }
 
-  $type SSF_Coeff param<double> ;
+  $type SSF_Coeff param<real> ;
   $rule default(SSF_Coeff) {
     $SSF_Coeff = 1.0 ;
   }
@@ -366,7 +366,7 @@ namespace flowPsi {
     const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
 			     min(1.0,dp*1.0-0.5)) ;
 
-    const real alpha = max(alpha_c,double($alpha_geom_f)) ;
+    const real alpha = max(alpha_c,real($alpha_geom_f)) ;
 
     if(alpha >1e-10) {
       const real sada = $area.sada*alpha ;
@@ -396,7 +396,7 @@ namespace flowPsi {
     }
 
     
-    double CC = $SSF_Coeff/6.0 ;
+    real CC = $SSF_Coeff/6.0 ;
     
 
     const real sada = $area.sada*(1.-alpha) ;
@@ -431,7 +431,7 @@ namespace flowPsi {
 					dot($cr->$gradv3d(u).z,dv)) ;
 
     
-    double coef2 = (1.+2.*CC)*sada ;
+    real coef2 = (1.+2.*CC)*sada ;
     kec_flux($iflux,pg_l,t_l,u_l,pg_r,t_r,u_r,an,coef2,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
 
@@ -458,7 +458,7 @@ namespace flowPsi {
 				     2.*dot($cr->$gradv3d(u).y,dv2),
 				     2.*dot($cr->$gradv3d(u).z,dv2)) ;
     
-    double coef = -CC*sada ;
+    real coef = -CC*sada ;
     kec_flux($iflux,pg_l,t_l,u_l,pg_rr,t_rr,u_rr,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
     kec_flux($iflux,pg_ll,t_ll,u_ll,pg_r,t_r,u_r,an,coef,

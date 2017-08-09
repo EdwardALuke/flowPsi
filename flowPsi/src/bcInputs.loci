@@ -27,133 +27,6 @@ $include "flowPsi.lh"
 namespace flowPsi {
   using std::string ;
 
-  void get_vect3dOption(const options_list &ol,std::string vname,
-                        std::string units, vect3d &vec, real scale) {
-    Loci::option_value_type ovt= ol.getOptionValueType(vname) ;
-    if(ovt == Loci::REAL) {
-      double v ;
-      ol.getOption(vname,v) ;
-      vec = vect3d(v*scale,0,0) ;
-    } else if(ol.getOptionValueType(vname) == Loci::UNIT_VALUE) {
-      Loci::UNIT_type vu ;
-      ol.getOption(vname,vu) ;
-      if(!vu.is_compatible(units)) {
-        std::cerr << "wrong type of units for vector " << vname
-                  << ": " << vu << std::endl ;
-        Loci::Abort() ;
-      } else {
-        double v ;
-        v = vu.get_value_in(units) ;
-        vec = vect3d(v,0,0) ;
-      }
-    } else if(ovt == Loci::LIST) {
-      Loci::options_list::arg_list value_list ;
-      ol.getOption(vname,value_list) ;
-      if(value_list.size() != 3) {
-        std::cerr << "error on reading '" << vname
-                  <<"': vector input must contain 3 terms"
-                  << std::endl ;
-        Loci::Abort() ;
-      }
-      for(int i=0;i<3;++i)
-        if(value_list[i].type_of() != Loci::REAL &&
-           value_list[i].type_of() != Loci::UNIT_VALUE) {
-          std::cerr << "improper vector specification for '"
-                    << vname << std::endl ;
-          Loci::Abort() ;
-        }
-      double vecval[3] ;
-      for(int i=0;i<3;++i) {
-        if(value_list[i].type_of() == Loci::UNIT_VALUE) {
-          Loci::UNIT_type vu ;
-          value_list[i].get_value(vu) ;
-          if(!vu.is_compatible(units)) {
-            std::cerr << "wrong type of units for vector " << vname
-                      << ": " << vu << std::endl ;
-            Loci::Abort() ;
-          }
-          vecval[i] = vu.get_value_in(units) ;
-        } else {
-          value_list[i].get_value(vecval[i]) ;
-          vecval[i] *= scale ;
-        }
-      }
-      vec.x = vecval[0] ;
-      vec.y = vecval[1] ;
-      vec.z = vecval[2] ;
-    } else if(ovt == Loci::FUNCTION) {
-      string name ;
-      Loci::options_list::arg_list value_list ;
-      ol.getOption(vname,name,value_list) ;
-      if(name != "polar") {
-        std::cerr << "don't know coordinate function '" << name
-                  <<"', defaulting to polar" << std::endl ;
-        Loci::Abort() ;
-      }
-      if(value_list.size() != 3) {
-        std::cerr << "error on reading '"
-                  << vname << "': vector input must contain 3 terms"
-                  << std::endl ;
-        Loci::Abort() ;
-      }
-      for(int i=0;i<3;++i)
-        if(value_list[i].type_of() != Loci::REAL &&
-           value_list[i].type_of() != Loci::UNIT_VALUE) {
-          std::cerr << "improper vector specification for '"
-                    << vname << std::endl ;
-          Loci::Abort() ;
-        }
-      real r=1 ,theta=0 ,eta=0 ;
-      real conv = M_PI/180.0 ;
-      if(value_list[0].type_of() == Loci::UNIT_VALUE) {
-        Loci::UNIT_type vu ;
-        value_list[0].get_value(vu) ;
-        if(!vu.is_compatible(units)) {
-          std::cerr << "wrong type of units for vector " << vname
-                    << ": " << vu << std::endl ;
-          Loci::Abort() ;
-        }
-        r = vu.get_value_in(units) ;
-      } else {
-        value_list[0].get_value(r) ;
-        r *= scale ;
-      }
-      if(value_list[1].type_of() == Loci::UNIT_VALUE) {
-        Loci::UNIT_type vu ;
-        value_list[1].get_value(vu) ;
-        if(!vu.is_compatible("radians")) {
-          std::cerr << "wrong type of units for vector " << vname
-                    << ": " << vu << std::endl ;
-          Loci::Abort() ;
-        }
-        theta = vu.get_value_in("radians") ;
-      } else {
-        value_list[1].get_value(theta) ;
-        theta *= conv  ;
-      }
-      if(value_list[2].type_of() == Loci::UNIT_VALUE) {
-        Loci::UNIT_type vu ;
-        value_list[2].get_value(vu) ;
-        if(!vu.is_compatible("radians")) {
-          std::cerr << "wrong type of units for vector " << vname
-                    << ": " << vu << std::endl ;
-          Loci::Abort() ;
-        }
-        eta = vu.get_value_in("radians") ;
-      } else {
-        value_list[2].get_value(eta) ;
-        eta *= conv  ;
-      }
-
-      vec.x = r*cos(theta)*cos(eta) ;
-      vec.y = r*sin(theta)*cos(eta) ;
-      vec.z = r*sin(eta) ;
-    } else {
-      std::cerr << "unable to get vector type!" << std::endl ;
-      Loci::Abort() ;
-    }
-  }
-
   $type BC_options store<Loci::options_list> ;
   $type prescribed_BC store<std::string> ;
   $type prescribed_qwall_BC store<std::string> ;
@@ -173,26 +46,26 @@ namespace flowPsi {
 
   //This rule overrides a default value with user input
   $rule pointwise(input::Uwall_BC<-BC_options),constraint(Uwall_BCoption) {
-    get_vect3dOption($BC_options,"Uwall","m/s",$Uwall_BC) ;
+    $BC_options.getOptionUnits("Uwall","m/s",$Uwall_BC) ;
   }
 
   //This rule overrides a default value with user input
   $rule pointwise(input::angVel_BC<-BC_options),constraint(angVel_BCoption) {
-    get_vect3dOption($BC_options,"angVel","radians/sec",$angVel_BC,
+    $BC_options.getOptionUnits("angVel","radians/sec",$angVel_BC,
                      0.104720) ; //no units == rpm
   }
 
   //This rule overrides a default value with user input
   $rule pointwise(rotAxis_BC<-BC_options),constraint(rotAxis_BCoption) {
     vect3d vec(1,0,0) ;
-    get_vect3dOption($BC_options,"rotAxis","",vec) ;
+    $BC_options.getOptionUnits("rotAxis","",vec) ;
     vec = vec/(norm(vec)+1e-30) ;
     $rotAxis_BC = vec ;
   }
 
   $rule pointwise(input::angVel_BC<-BC_options),constraint(rotAxis_BCoption,rotSpeed_BCoption) {
     vect3d vec(1,0,0) ;
-    get_vect3dOption($BC_options,"rotAxis","",vec) ;
+    $BC_options.getOptionUnits("rotAxis","",vec) ;
     vec = vec/(norm(vec)+1e-30) ;
     real rpm = 0 ;
 
@@ -203,13 +76,13 @@ namespace flowPsi {
 
   $rule pointwise(flowDir_BC<-BC_options),constraint(flowDir_BCoption) {
     vect3d vec(1,0,0) ;
-    get_vect3dOption($BC_options,"flowDir","",vec) ;
+    $BC_options.getOptionUnits("flowDir","",vec) ;
     vec = vec/(norm(vec)+1e-30) ;
     $flowDir_BC = vec ;
   }
 
   $rule pointwise(user::rotCenter_BC<-BC_options),constraint(rotCenter_BCoption) {
-    get_vect3dOption($BC_options,"rotCenter","m",$rotCenter_BC,1) ;
+    $BC_options.getOptionUnits("rotCenter","m",$rotCenter_BC,1) ;
   }
 
   $rule pointwise(wallVelocity<-ref->Uwall_BC) {
@@ -291,27 +164,27 @@ namespace flowPsi {
   }
 
   $rule pointwise(swirlCenter_BC<-BC_options),constraint(swirlCenter_BCoption) {
-    get_vect3dOption($BC_options,"swirlCenter","m",$swirlCenter_BC,1) ;
+    $BC_options.getOptionUnits("swirlCenter","m",$swirlCenter_BC,1) ;
   }
 
 
   $rule pointwise(swirlAxis_BC<-BC_options),constraint(swirlAxis_BCoption) {
-    get_vect3dOption($BC_options,"swirlAxis","",$swirlAxis_BC) ;
+    $BC_options.getOptionUnits("swirlAxis","",$swirlAxis_BC) ;
   }
 
   $rule pointwise(momentCenter_BC<-BC_options),constraint(momentCenter_BCoption){
-    get_vect3dOption($BC_options,"momentCenter","m",$momentCenter_BC,1) ;
+    $BC_options.getOptionUnits("momentCenter","m",$momentCenter_BC,1) ;
   }
 
   $rule pointwise(M_BC<-BC_options),constraint(M_BCoption) {
-    get_vect3dOption($BC_options,"M","",$M_BC) ;
+    $BC_options.getOptionUnits("M","",$M_BC) ;
   }
 
   $rule pointwise(u_BC<-BC_options),constraint(u_BCoption) {
-    get_vect3dOption($BC_options,"u","m/s",$u_BC) ;
+    $BC_options.getOptionUnits("u","m/s",$u_BC) ;
   }
   $rule pointwise(u_BC<-BC_options),constraint(v_BCoption) {
-    get_vect3dOption($BC_options,"v","m/s",$u_BC) ;
+    $BC_options.getOptionUnits("v","m/s",$u_BC) ;
   }
 
 

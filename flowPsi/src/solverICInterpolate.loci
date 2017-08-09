@@ -42,49 +42,50 @@ namespace flowPsi {
 
   typedef vector3d<float> coord3df ;
   void read_puT_file_serial(std::string filename,
-                 store<vect3d> &loc,
-                 store<real> &p,
-                 store<real> &T,
-                 store<vect3d> &vel,
-                 store<real> &k,
-                 store<real> &mu_t
-                 ) {
+			    store<vect3d> &loc,
+			    store<real> &p,
+			    store<real> &T,
+			    store<vect3d> &vel,
+			    store<real> &k,
+			    store<real> &mu_t
+			    ) {
 
     ifstream bf(filename.c_str(),ios::in) ;
-      if(bf.fail()) {
-        cerr << "open failed on '" << filename <<"'"<< endl ;
-        Loci::Abort() ;
-      }
+    if(bf.fail()) {
+      cerr << "open failed on '" << filename <<"'"<< endl ;
+      Loci::Abort() ;
+    }
 
-      Loci::parse::kill_white_space(bf) ;
-      int np ;
-      bf >> np ; // read in number of points 
+    Loci::parse::kill_white_space(bf) ;
+    int np ;
+    bf >> np ; // read in number of points 
 
-      entitySet dom = interval(0,np-1) ;
+    entitySet dom = interval(0,np-1) ;
 
-      loc.allocate(dom) ;
-      p.allocate(dom) ;
-      T.allocate(dom) ;
-      vel.allocate(dom) ;
-      k.allocate(dom) ;
-      mu_t.allocate(dom) ;
+    loc.allocate(dom) ;
+    p.allocate(dom) ;
+    T.allocate(dom) ;
+    vel.allocate(dom) ;
+    k.allocate(dom) ;
+    mu_t.allocate(dom) ;
 
-      Loci::parse::kill_white_space(bf) ;
+    Loci::parse::kill_white_space(bf) ;
 
-      for(int i=0;i<np;++i) {
-        bf >> loc[i]  // read in position of sample
-           >> vel[i]  // velocity vector
-           >> p[i]    // pressure
-           >> T[i]    // temperature
-           >> k[i]    // Turbulent kinetic energy
-           >> mu_t[i]    // omega
-          ;
-	        }
-      if(bf.eof()) {
-        cerr << "unexpected EOF reading " << filename << endl ;
-      }
+    for(int i=0;i<np;++i) {
+      bf >> loc[i]  // read in position of sample
+	 >> vel[i]  // velocity vector
+	 >> p[i]    // pressure
+	 >> T[i]    // temperature
+	 >> k[i]    // Turbulent kinetic energy
+	 >> mu_t[i]    // omega
+	;
+    }
+    if(bf.eof()) {
+      cerr << "unexpected EOF reading " << filename << endl ;
+    }
       
   }
+
   void read_puT_file(std::string filename,
                      store<vect3d> &loc,
                      store<real> &p,
@@ -126,7 +127,9 @@ namespace flowPsi {
   $type initialConditionsFile param<string> ;
   $rule optional(initialConditionsFile) { }
 
-  $rule pointwise(temperature_ic,gagePressure_ic,u_ic<-initialConditionsFile,cellcenter,Pambient),constraint(geom_cells),option(disable_threading), prelude { 
+  $rule pointwise(temperature_ic,gagePressure_ic,u_ic<-initialConditionsFile,
+		  cellcenter,Pambient),constraint(geom_cells),
+    option(disable_threading), prelude { 
     if(Loci::GLOBAL_AND(seq==EMPTY))
       return ;
     store<vect3d> loc,vel ;
@@ -150,11 +153,11 @@ namespace flowPsi {
 
     Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
 
-    double dist = 1e30 ;
+    real dist = 1e30 ;
     for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
       vector<int> neighbors = get_stencil(kd,$cellcenter[*si],dist) ;
 
-      vector<double> w  ;
+      vector<real> w  ;
       stencil_weights(w,neighbors,loc,$cellcenter[*si]) ;
 
       vect3d ur(0,0,0) ;
@@ -165,7 +168,7 @@ namespace flowPsi {
       for(size_t i=0;i<neighbors.size();++i) {
         int pt = neighbors[i] ;
 
-        double weight = w[i] ;
+        real weight = w[i] ;
         ur += weight*vel[pt] ;
         pr += weight*p[pt] ;
         Tr += weight*T[pt] ;

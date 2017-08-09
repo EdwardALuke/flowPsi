@@ -40,8 +40,6 @@ namespace lagrangianP {
   using std::ifstream ;
   using std::vector ;
   using std::ios ;
-  extern void get_vect3dOption(const options_list &ol,std::string vname,
-                        std::string units, vect3d &vec, real scale) ;
 
   $type BC_options store<Loci::options_list> ;
 

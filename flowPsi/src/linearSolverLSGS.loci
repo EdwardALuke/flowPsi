@@ -30,13 +30,16 @@ $include "flowPsi.lh"
 //#define JACOBI
 // Scalar solver using modified line gauss seidel method
 namespace LGSI {
+  using flowPsi::real ;
+  using flowPsi::real_fj ;
+  using flowPsi::realF ;
   using std::vector ;
   using std::sort ;
   using std::swap ;
   using std::set ;
   using std::cerr ;
   using std::endl ;  
-  typedef double real ;
+  typedef real real ;
   // Scalar solve
   $type X_B store<real> ;
   $type X_D store<real> ;
@@ -162,9 +165,9 @@ namespace LGSI {
   vector<matrixStructure> matrixInfo ;
 
   struct scalarMatrixData {
-    vector<double> B ;
-    vector<double> D ;
-    vector<double> F ;
+    vector<real> B ;
+    vector<real> D ;
+    vector<real> F ;
   } ;
 
   $type LSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
@@ -922,9 +925,9 @@ namespace LGSI {
   $rule blackbox(LSGSscalarMatrix(X)<-LSGSmatrixTopology(X),
 		 X_B,X_D,upper->X_U,lower->X_L), prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
-    vector<double> B(matrix.eql2g.size()); 
-    vector<double> D(matrix.eql2g.size()); 
-    vector<double> F(matrix.outerCLR.size()); 
+    vector<real> B(matrix.eql2g.size()); 
+    vector<real> D(matrix.eql2g.size()); 
+    vector<real> F(matrix.outerCLR.size()); 
     
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
@@ -942,15 +945,15 @@ namespace LGSI {
 
     // Preprocess lines (recompute diagonal term)
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      double *L = &F[matrix.lineData[l].Lstart] ;
-      double *U = &F[matrix.lineData[l].Ustart] ;
-      double *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
+      real *L = &F[matrix.lineData[l].Lstart] ;
+      real *U = &F[matrix.lineData[l].Ustart] ;
+      real *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
       int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
       //      D[0] = 1./(D[0]<0.0?min(D[0],-1e-30):max(D[0],1e-30)) ;
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
-        double Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
+        real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
         Dp[i] = 1./(Dt<0.0?min(Dt,-1e-30):max(Dt,1e-30)) ;
       }
     }
@@ -968,16 +971,16 @@ namespace LGSI {
     option(disable_threading),prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
     // initialize x to zero
-    vector<double> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
+    vector<real> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
 
-    double * X = &x1[0] ;
-    vector<double> rhs(matrix.mxlinelen) ;
+    real * X = &x1[0] ;
+    vector<real> rhs(matrix.mxlinelen) ;
 
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const double *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-      const double *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-      const double *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-      const double *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+      const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+      const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+      const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+      const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
       
       const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
@@ -987,7 +990,7 @@ namespace LGSI {
       for(int i=0;i<lsz;++i)
         rhs[i] = B[i] ;
 
-	double *restrict x = &X[eqb] ;
+	real *restrict x = &X[eqb] ;
 	// now solve line
 	// forward solve 
 	x[0] = rhs[0] ;
@@ -1000,13 +1003,13 @@ namespace LGSI {
 	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
 	}
     }
-    vector<double> send_data(matrix.send_entitiesl.size()) ;
-    vector<double> recv_data(matrix.recv_entitiesl.size()) ;
+    vector<real> send_data(matrix.send_entitiesl.size()) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
 
-    double zero_resid = 1 ;
-    double w = *$LSGSRelaxation ;
+    real zero_resid = 1 ;
+    real w = *$LSGSRelaxation ;
     int num_iter = *$LSGSMaxIter ;
     // do num_iter steps
     for(int iter = 0;iter < num_iter;++iter) {
@@ -1047,11 +1050,11 @@ namespace LGSI {
 
       // Forward sweep
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const double *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const double *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const double *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const double *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const double *F = &$LSGSscalarMatrix(X)->F[0] ;
+	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
 
         const int ls = matrix.lineData[l].eqnstart ;
         const int le = matrix.lineData[l].eqnend ;
@@ -1073,7 +1076,7 @@ namespace LGSI {
 	    -= X[matrix.outerCLR[i].second]*F[i] ;
 	}
       
-	double *restrict x = &X[ls] ;
+	real *restrict x = &X[ls] ;
 	// now solve line
 	// forward solve 
 	x[0] = rhs[0] ;
@@ -1089,11 +1092,11 @@ namespace LGSI {
 
       // Backward sweep
       for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const double *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const double *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const double *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const double *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const double *F = &$LSGSscalarMatrix(X)->F[0] ;
+	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
 
 	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
 
@@ -1109,7 +1112,7 @@ namespace LGSI {
 	  rhs[matrix.outerCLR[i].first-ls] -= X[matrix.outerCLR[i].second]*F[i] ;
 	}
 
-	double *restrict x = &X[ls] ;
+	real *restrict x = &X[ls] ;
 	// now solve line
 	// forward solve 
 	x[0] = rhs[0] ;
@@ -1127,18 +1130,18 @@ namespace LGSI {
         send_data[i] = X[matrix.send_entitiesl[i]] ;
 
       // Relax update and compute current estimate for residual
-      double residl = 0 ;
+      real residl = 0 ;
       for(int i=0;i<matrix.nmyeqn;++i) {
         X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = X[i]-xt[i] ;
+	real r = X[i]-xt[i] ;
 	residl += r*r ;
       }
-      double resid = 0 ;
+      real resid = 0 ;
       MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
       resid = sqrt(resid) ;
       if(0 == iter)
 	zero_resid = resid ;
-      double rel_resid = resid/zero_resid ;
+      real rel_resid = resid/zero_resid ;
       //      if(Loci::MPI_rank == 0)
       //	cout << iter << ":sresid = " << rel_resid << endl ;
       if(rel_resid > 1.0)
@@ -1153,8 +1156,8 @@ namespace LGSI {
 #ifdef JACOBI
       // jacobi solve
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const double *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const double *F = &$LSGSscalarMatrix(X)->F[0] ;
+	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
 
         const int ls = matrix.lineData[l].eqnstart ;
         const int le = matrix.lineData[l].eqnend ;
@@ -1176,15 +1179,15 @@ namespace LGSI {
       }
 
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const double *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const double *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const double *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
         const int ls = matrix.lineData[l].eqnstart ;
         const int le = matrix.lineData[l].eqnend ;
 
 	const int lsz = le-ls ;
 	real *restrict rhsl = &xt[matrix.lineData[l].eqnstart] ;
-	double *restrict x = &X[ls] ;
+	real *restrict x = &X[ls] ;
 	
 	// now solve line
 	// forward solve 
@@ -1209,7 +1212,6 @@ namespace LGSI {
   } ;
     
 
-  typedef float real_fj ;
   // Blocked version
   $type X_D storeMat<real_fj> ;
   $type X_L storeMat<real_fj> ;
@@ -1238,7 +1240,7 @@ namespace LGSI {
 			   const real_fj *D, const pivot_type *pivot,
 			   const real_fj *L, const real_fj *U, 
 			   int lsz, int vs) const = 0 ;
-    virtual double lineVerify(const real *X, const real *rhs, 
+    virtual real lineVerify(const real *X, const real *rhs, 
 			      const real_fj *D, const pivot_type *pivot,
 			      const real_fj *L, const real_fj *U, 
 			      int lsz, int vs) const = 0 ;
@@ -1256,7 +1258,7 @@ namespace LGSI {
 			   const real_fj *D, const pivot_type *pivot,
 			   const real_fj *L, const real_fj *U, 
 			   int lsz, int vs) const ;
-    virtual double lineVerify(const real *X, const real *rhs, 
+    virtual real lineVerify(const real *X, const real *rhs, 
 			      const real_fj *D, const pivot_type *pivot,
 			      const real_fj *L, const real_fj *U, 
 			      int lsz, int vs) const ;
@@ -1378,14 +1380,14 @@ namespace LGSI {
     }
   }
 
-  double matrixHelpersGeneric::
+  real matrixHelpersGeneric::
   lineVerify(const real *X, const real *rhs, 
 	     const real_fj *D, const pivot_type *pivot,
 	     const real_fj *L, const real_fj *U, 
 	     int lsz, int vs) const {
     int vs2 = vs*vs ;
-    vector<double> sum(vs*lsz) ;
-    double mxrhs = 0 ;
+    vector<real> sum(vs*lsz) ;
+    real mxrhs = 0 ;
     for(int l=0;l<lsz;++l) {
       for(int i=0;i<vs;++i) {
 	sum[l*vs+i] = rhs[l*vs+i] ;
@@ -1400,7 +1402,7 @@ namespace LGSI {
       const_Mat<real_fj> Ll(&L[l*vs2],vs) ;
       Ll.dotprod_accum(&X[l*vs],&sum[(l+1)*vs]) ;
     }
-    double msq = 0 ;
+    real msq = 0 ;
     for(int i=0;i<vs*lsz;++i)
       msq += sum[i]*sum[i] ;
 
@@ -1512,12 +1514,12 @@ namespace LGSI {
     $LSGSBlockedSSolve(X,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
     int vsize = matrix.eql2g.size() ;
-    vector<double> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
+    vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
     
-    double *X = &x1[0] ;
+    real *X = &x1[0] ;
     
-    vector<double> rhs(matrix.mxlinelen*vs) ;
-    double zero_resid =1;
+    vector<real> rhs(matrix.mxlinelen*vs) ;
+    real zero_resid =1;
     // jacobi initializes iteration
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
       const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
@@ -1536,13 +1538,13 @@ namespace LGSI {
       $LSGSblockedMatrix(X)->matrixHelp
 	->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       //      const real_fj *Dr = &($LSGSblockedMatrix(X)->Dreal[ls*vs2]) ;
-      //      double err = $LSGSblockedMatrix(X)->matrixHelp
+      //      real err = $LSGSblockedMatrix(X)->matrixHelp
       //      	->lineVerify(X+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
       //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
     }
 
-    vector<double> send_data(matrix.send_entitiesl.size()*vs) ;
-    vector<double> recv_data(matrix.recv_entitiesl.size()*vs) ;
+    vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()+matrix.send_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()+matrix.send_processors.size()) ;
     int num_iter = *$LSGSMaxIter ;
@@ -1682,10 +1684,10 @@ namespace LGSI {
       }
 
       // Compute residual
-      double residl = 0 ;
+      real residl = 0 ;
       for(int i=0;i<matrix.nmyeqn*vs;++i) {
 	X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = X[i]-xt[i] ;
+	real r = X[i]-xt[i] ;
 	residl += r*r ;
       }
 
@@ -1741,12 +1743,12 @@ namespace LGSI {
       }
 
       // Check residual
-      double resid = 0 ;
+      real resid = 0 ;
       MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
       resid = sqrt(resid) ;
       if(0 == iter)
 	zero_resid = resid ;
-      double rel_resid = resid/zero_resid ;
+      real rel_resid = resid/zero_resid ;
       //      if(Loci::MPI_rank == 0)
       //	cout << iter << ":resid = " << rel_resid << endl ;
       if(rel_resid > 1.0)
@@ -1782,11 +1784,11 @@ namespace LGSI {
     $LSGSPreconditioner(X,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
     int vsize = matrix.eql2g.size() ;
-    vector<double> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
+    vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
     
-    double *X = &x1[0] ;
+    real *X = &x1[0] ;
     
-    vector<double> rhs(matrix.mxlinelen*vs) ;
+    vector<real> rhs(matrix.mxlinelen*vs) ;
     // jacobi initializes iteration
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
       const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
@@ -1805,13 +1807,13 @@ namespace LGSI {
       $LSGSblockedMatrix(X)->matrixHelp
 	->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       //      const real_fj *Dr = &($LSGSblockedMatrix(X)->Dreal[ls*vs2]) ;
-      //      double err = $LSGSblockedMatrix(X)->matrixHelp
+      //      real err = $LSGSblockedMatrix(X)->matrixHelp
       //      	->lineVerify(X+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
       //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
     }
 
-    vector<double> send_data(matrix.send_entitiesl.size()*vs) ;
-    vector<double> recv_data(matrix.recv_entitiesl.size()*vs) ;
+    vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
     int num_iter = *$LSGSPreconSteps ;

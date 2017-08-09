@@ -328,8 +328,8 @@ namespace flowPsi {
 
   $rule singleton(sst1m<-sst1,sst1_wilcox08,sst1_weight) {
     $sst1m = $sst1 ;
-    double w1 = 1.0-$sst1_weight ;
-    double w2 = $sst1_weight ;
+    real w1 = 1.0-$sst1_weight ;
+    real w2 = $sst1_weight ;
     $sst1m.sigmak =  w1*$sst1.sigmak + w2*$sst1_wilcox08.sigmak ;
     $sst1m.sigmae =  w1*$sst1.sigmae + w2*$sst1_wilcox08.sigmae ;
     $sst1m.beta   =  w1*$sst1.beta   + w2*$sst1_wilcox08.beta ;

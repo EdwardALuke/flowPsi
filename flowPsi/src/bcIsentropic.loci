@@ -122,7 +122,7 @@ namespace flowPsi {
     // Isentropic inflow has a problem if the gas inside is too cold
     // We detect if this is happening and if it does happen, we switch
     // to a more robust way of imposing the isentropic conditions
-    double f = (Tb-ti)/max(ti,Tb)-.1 ;
+    real f = (Tb-ti)/max(ti,Tb)-.1 ;
     if(f > 0) {
       // Compute isentropic conditions assuming soundspeed stays the same
       // as in the chamber (as a weighted average)

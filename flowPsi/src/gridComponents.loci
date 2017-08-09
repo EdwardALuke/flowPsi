@@ -69,7 +69,7 @@ namespace flowPsi {
   $rule default(componentPriority),
     comments("Specifies component priority in hole cutting") {}
 
-  $type holeCuttingTolerance param<double> ;
+  $type holeCuttingTolerance param<real> ;
 
   $rule default(holeCuttingTolerance),
     comments("Specifies the distance to surface that becomes ambiguous for determining which component is closest.") {
@@ -215,7 +215,7 @@ namespace flowPsi {
 
     vect3d vec(1,0,0) ;
     if(ol.optionExists("axis")) { 
-      get_vect3dOption(ol,"axis","",vec) ;
+      ol.getOptionUnits("axis","",vec) ;
       vec = vec/(norm(vec)+1e-30) ;
     } else {
       if(Loci::MPI_rank) {
@@ -225,7 +225,7 @@ namespace flowPsi {
     $componentRotationAxis_X = vec ;
 
     if(ol.optionExists("center")) { 
-      get_vect3dOption(ol,"center","m",$componentRotationCenter_X) ;
+      ol.getOptionUnits("center","m",$componentRotationCenter_X) ;
     } else {
       if(Loci::MPI_rank) {
         cerr << "WARNING: Defaulting to origin for center of component rotation!" << endl ;
@@ -263,7 +263,7 @@ namespace flowPsi {
 
     vect3d vec(1,0,0) ;
     if(ol.optionExists("axis")) { 
-      get_vect3dOption(ol,"axis","",vec) ;
+      ol.getOptionUnits("axis","",vec) ;
       vec = vec/(norm(vec)+1e-30) ;
     } else {
       if(Loci::MPI_rank) {
@@ -273,7 +273,7 @@ namespace flowPsi {
     $componentServoAxis_X = vec ;
 
     if(ol.optionExists("center")) { 
-      get_vect3dOption(ol,"center","m",$componentServoCenter_X) ;
+      ol.getOptionUnits("center","m",$componentServoCenter_X) ;
     } else {
       if(Loci::MPI_rank) {
         cerr << "WARNING: Defaulting to origin for center of component servo!" << endl ;
@@ -300,7 +300,7 @@ namespace flowPsi {
  
   $rule apply(componentMotionData<-componentRotationAxis_X,componentRotationCenter_X,componentRotationSpeed_X,componentName_X,dtmax,stime)[Loci::NullOp],
     constraint(componentRotation_X),parametric(volumeTag(X)), prelude {
-    double t = *$stime + *$dtmax ;
+    real t = *$stime + *$dtmax ;
     
     const real angle = *$componentRotationSpeed_X*t ;
     Quaternion rotation(*$componentRotationAxis_X,angle) ;
@@ -326,10 +326,10 @@ namespace flowPsi {
     (*$componentMotionData)[name] = xform ;
   } ;
 
-  $type ServoPositionInfo blackbox<map<string,double> > ;
+  $type ServoPositionInfo blackbox<map<string,real> > ;
 
   $rule unit(ServoPositionInfo),constraint(UNIVERSE) {
-    map<string,double> tmp ;
+    map<string,real> tmp ;
     $ServoPositionInfo = tmp ;
   }
 
@@ -338,7 +338,7 @@ namespace flowPsi {
     
     //    const real angle = *$componentRotationSpeed_X*t ;
     real angle = 0 ;
-    map<string,double>::const_iterator mi = 
+    map<string,real>::const_iterator mi = 
       (*$ServoPositionInfo).find(*$componentServoName_X) ;
     if(mi == (*$ServoPositionInfo).end()) {
       cerr << "could not find position info for servo " << *$componentServoName_X << endl ;
@@ -470,16 +470,16 @@ namespace flowPsi {
   // Prescribed motion starts here... First we implement a cubic spline
 
   // Compute spline derivatives
-  void splineD(vector<double> &xp, const vector<double> &x,
-               const vector<double> &t) {
+  void splineD(vector<real> &xp, const vector<real> &x,
+               const vector<real> &t) {
     int n = x.size() ;
-    vector<double> tmp(n) ;
+    vector<real> tmp(n) ;
     xp.swap(tmp) ;
     for(int i=1;i<n-1;++i) {
-      const double dt1 = t[i+1]-t[i] ;
-      const double dt2 = t[i]-t[i-1] ;
-      const double dx1 = x[i+1]-x[i] ;
-      const double dx2 = x[i]-x[i-1] ;
+      const real dt1 = t[i+1]-t[i] ;
+      const real dt2 = t[i]-t[i-1] ;
+      const real dx1 = x[i+1]-x[i] ;
+      const real dx2 = x[i]-x[i-1] ;
       if(dt1 < 1e-33)
         xp[i] = dx2/dt2 ;
       else if(dt2 < 1e-33)
@@ -487,12 +487,12 @@ namespace flowPsi {
       else
         xp[i] = (dx1+dx2)/(dt1+dt2) ;
     }
-    double x1l = x[1]-x[0] ;
-    double t1l = t[1]-t[0] ;
+    real x1l = x[1]-x[0] ;
+    real t1l = t[1]-t[0] ;
     xp[0] = x1l/max(t1l,1e-33) ;
     if(n>2 && t1l > 1e-33) {
-      double x2l = x[2]-x[0] ;
-      double t2l = t[2]-t[0] ;
+      real x2l = x[2]-x[0] ;
+      real t2l = t[2]-t[0] ;
       if(t[2]-t[1] > 1e-33)
         xp[0] = (t2l*t2l*x1l-t1l*t1l*x2l)/(t1l*t2l*t2l-t2l*t1l*t1l) ;
     }
@@ -501,18 +501,18 @@ namespace flowPsi {
     t1l = t[N-1]-t[N] ;
     xp[N] = x1l/t1l ;
     if(n>2) {
-      double t2l = t[N-2]-t[N] ;
-      double x2l = x[N-2]-x[N] ;
+      real t2l = t[N-2]-t[N] ;
+      real x2l = x[N-2]-x[N] ;
       if(t[N-1]-t[N-2] > 1e-33)
         xp[N] = (t2l*t2l*x1l-t1l*t1l*x2l)/(t1l*t2l*t2l-t2l*t1l*t1l) ;
     }
   }
 
   // Find the time interval that we are splining
-  int findt(const vector<double> &t, double tval) {
+  int findt(const vector<real> &t, real tval) {
     int n = t.size() ;
-    double tmin = t[0] ;
-    double tmax = t[n-1] ;
+    real tmin = t[0] ;
+    real tmax = t[n-1] ;
     int nmin = 0 ;
     int nmax = n-1 ;
     if(tval < tmin)
@@ -530,18 +530,18 @@ namespace flowPsi {
     return pt ;
   }
 
-  double spline(int ind,double tval,const vector<double> &t,
-                const vector<double> &x,
-                const vector<double> &xp) {
-    const double dt = max((t[ind+1]-t[ind]),1e-33) ;
-    const double T = max(0.0,min(1.0,(tval-t[ind])/dt)) ;
-    const double p0 = x[ind] ;
-    const double p1 = x[ind+1] ;
-    const double m0 = xp[ind]*dt ;
-    const double m1 = xp[ind+1]*dt ;
-    const double T2 = T*T ;
-    const double T3 = T*T2 ;
-    double xi = ((2.*T3-3.*T2+1.)*p0 + (T3-2.*T2+T)*m0 +
+  real spline(int ind,real tval,const vector<real> &t,
+                const vector<real> &x,
+                const vector<real> &xp) {
+    const real dt = max((t[ind+1]-t[ind]),1e-33) ;
+    const real T = max(0.0,min(1.0,(tval-t[ind])/dt)) ;
+    const real p0 = x[ind] ;
+    const real p1 = x[ind+1] ;
+    const real m0 = xp[ind]*dt ;
+    const real m1 = xp[ind+1]*dt ;
+    const real T2 = T*T ;
+    const real T3 = T*T2 ;
+    real xi = ((2.*T3-3.*T2+1.)*p0 + (T3-2.*T2+T)*m0 +
                  (-2.*T3+3.*T2  )*p1 + (T3-T2     )*m1 ) ;
     return xi ;
   }
@@ -568,8 +568,8 @@ namespace flowPsi {
         cerr << "check file for validity"<< endl ;
         Loci::Abort() ;
       }
-      vector<double> t(npnts),x(npnts),y(npnts),z(npnts) ;
-      vector<double> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
+      vector<real> t(npnts),x(npnts),y(npnts),z(npnts) ;
+      vector<real> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
       for(int i=0;i<npnts;++i) {
         infile >> t[i] >> x[i] >> y[i] >> z[i]
                >> q0[i] >> q1[i] >> q2[i] >> q3[i] ;
@@ -595,8 +595,8 @@ namespace flowPsi {
     } else {
       int npnts ;
       MPI_Bcast(&npnts,1,MPI_INT,0,MPI_COMM_WORLD) ;
-      vector<double> t(npnts),x(npnts),y(npnts),z(npnts) ;
-      vector<double> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
+      vector<real> t(npnts),x(npnts),y(npnts),z(npnts) ;
+      vector<real> q0(npnts),q1(npnts),q2(npnts),q3(npnts) ;
       MPI_Bcast(&t[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
       MPI_Bcast(&x[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
       MPI_Bcast(&y[0],npnts,MPI_DOUBLE,0,MPI_COMM_WORLD) ;
@@ -620,7 +620,7 @@ namespace flowPsi {
 
   $rule apply(componentMotionData<-prescribedMotion_X,prescribedCG_X,componentName_X,dtmax,stime)[Loci::NullOp],
     constraint(componentPrescribed_X),parametric(volumeTag(X)), prelude {
-    double t = *$stime + *$dtmax ;
+    real t = *$stime + *$dtmax ;
     vect3d cg_new ;
     Quaternion q ;
     $prescribedMotion_X->getMotion(cg_new,q,t) ;
@@ -703,7 +703,7 @@ namespace flowPsi {
   }
 
 
-  $type stencilSize2 param<double> ;
+  $type stencilSize2 param<real> ;
   $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
 
   $type crossComponentDist_node store<float> ;
@@ -716,9 +716,9 @@ namespace flowPsi {
 
   $rule pointwise(distanceFieldGradient<-pos,node2surf->(pos,surfaceNodeNormal)) {
     vector3d<float> dv = $pos-$node2surf->$pos ;
-    double ldv = max(norm(dv),1e-30f) ;
+    real ldv = max(norm(dv),1e-30f) ;
     vector3d<float> sn = -1.*$node2surf->$surfaceNodeNormal ;
-    double lsn = max(norm(sn),1e-30f) ;
+    real lsn = max(norm(sn),1e-30f) ;
     $distanceFieldGradient = (ldv< 1e-10)?((1./lsn)*sn):((1./ldv)*dv) ;
   }
   // Here we will try to find the closest point using a bounding box search
@@ -971,14 +971,14 @@ if(req_queue.size() > 0 || self_send) {
       kdlist[i] = new Loci::kdTree::kd_tree(pnts[i],pnt_id[i]) ;
     }
 
-  double rmin2 = delta*delta ;
+  real rmin2 = delta*delta ;
   FORALL(dom,nd) {
     int id = $componentID_node[nd] ;
     Loci::kdTree::coord3d p($pos[nd].x,$pos[nd].y,$pos[nd].z) ;
     float nearest_dist = 1e30 ;
     for(int i=0;i<nc;++i) {
       if(id != i) {
-	double rmin = rmin2 ;
+	real rmin = rmin2 ;
 	int pi = -1 ;
 	// If no geometry is defined, then by default the geometry
 	// is everything.  Otherwise check to see if it is in geometry
@@ -993,11 +993,11 @@ if(req_queue.size() > 0 || self_send) {
 	  real distloc = recv_pnts[pi][3] ;
 	  vect3d n(recv_pnts[pi][4],recv_pnts[pi][5],recv_pnts[pi][6]) ;
 	  vect3d dv = $pos[nd] -loc ;
-	  double dn = distloc + dot(dv,n) ;
-	  double epsdist = *$holeCuttingTolerance ;
-	  double d = (dn > -epsdist && dn < epsdist)?epsdist:dn ;
-	  double priority = (*$componentPriorityList)[i] ;
-	  double dp = d*priority ;
+	  real dn = distloc + dot(dv,n) ;
+	  real epsdist = *$holeCuttingTolerance ;
+	  real d = (dn > -epsdist && dn < epsdist)?epsdist:dn ;
+	  real priority = (*$componentPriorityList)[i] ;
+	  real dp = d*priority ;
 	  if($crossComponentID_node[nd] < 0 || nearest_dist > dp) {
 	    nearest_dist = dp ;
 	    $crossComponentID_node[nd] = i ;
@@ -1031,11 +1031,11 @@ if(req_queue.size() > 0 || self_send) {
 
   bool cylinder_type::inGeometry(vect3d pt) const {
     vect3d p = pt-pt1 ;
-    double t = dot(p,pt2-pt1)*rlen2 ;
+    real t = dot(p,pt2-pt1)*rlen2 ;
     if(t < 0 || t > 1)
       return false ;
     vect3d v = t*(pt2-pt1) ;
-    double r2axis = dot(v-p,v-p) ;
+    real r2axis = dot(v-p,v-p) ;
     if(r2axis < radius2)
       return true ;
     return false ;
@@ -1043,7 +1043,7 @@ if(req_queue.size() > 0 || self_send) {
 
   real cylinder_type::distToSurface(vect3d pt) const {
     vect3d p = pt-pt1 ;
-    double t = dot(p,pt2-pt1)*rlen2 ;
+    real t = dot(p,pt2-pt1)*rlen2 ;
     if(t < 0 || t > 1) {
       vect3d v(0,0,0) ;
       vect3d n = pt2-pt1 ;
@@ -1059,7 +1059,7 @@ if(req_queue.size() > 0 || self_send) {
     }
 
     vect3d v = t*(pt2-pt1) ;
-    double r2axis = dot(v-p,v-p) ;
+    real r2axis = dot(v-p,v-p) ;
     if(r2axis < radius2)
       return 0 ;
     return sqrt(r2axis)-radius ;
@@ -1091,7 +1091,7 @@ if(req_queue.size() > 0 || self_send) {
     return ingeometry ;
   }
   real planelist_type::distToSurface(vect3d pt) const {
-    double maxdist = 0 ;
+    real maxdist = 0 ;
     for(size_t i=0;i<pts.size();++i) {
       maxdist = max(maxdist,dot(pt-pts[i],normals[i])) ;
     }
@@ -1105,7 +1105,7 @@ if(req_queue.size() > 0 || self_send) {
 
   bool sphere_type::inGeometry(vect3d pt) const {
     vect3d p = pt-center ;
-    double r2 = dot(p,p) ;
+    real r2 = dot(p,p) ;
     if(r2 < radius2)
       return true ;
     return false ;
@@ -1113,7 +1113,7 @@ if(req_queue.size() > 0 || self_send) {
 
   real sphere_type::distToSurface(vect3d pt) const {
     vect3d p = pt-center ;
-    double r2 = dot(p,p) ;
+    real r2 = dot(p,p) ;
     if(r2 < radius2)
       return 0 ;
     return sqrt(r2)-radius ;
@@ -1127,20 +1127,20 @@ if(req_queue.size() > 0 || self_send) {
 
   bool revolution_type::inGeometry(vect3d pt) const {
     vect3d p = pt-p1 ;
-    double t = dot(p,p2-p1)*rlen2 ;
+    real t = dot(p,p2-p1)*rlen2 ;
     if(t < 0 || t > 1)
       return false ;
     vect3d v = t*(p2-p1) ;
-    double r = 0 ;
+    real r = 0 ;
     for(size_t i=1;i<radius_pairs.size();++i)
       if(t >= radius_pairs[i-1].first && t < radius_pairs[i].first) {
-        double t1 = radius_pairs[i-1].first ;
-        double t2 = radius_pairs[i].first ;
-        double w = (t1-t)/(t1-t2) ;
+        real t1 = radius_pairs[i-1].first ;
+        real t2 = radius_pairs[i].first ;
+        real w = (t1-t)/(t1-t2) ;
         r = radius_pairs[i-1].second*(1.-w)+radius_pairs[i].second*w ;
       }
 
-    double r2axis = dot(v-p,v-p) ;
+    real r2axis = dot(v-p,v-p) ;
     if(r2axis < r*r)
       return true ;
     return false ;
@@ -1148,23 +1148,23 @@ if(req_queue.size() > 0 || self_send) {
 
   real revolution_type::distToSurface(vect3d pt) const {
     vect3d p = pt-p1 ;
-    double t = dot(p,p2-p1)*rlen2 ;
+    real t = dot(p,p2-p1)*rlen2 ;
     if(t < 0)
       return norm(p) ;
     if(t > 1)
       return norm(pt-p2) ;
 
     vect3d v = t*(p2-p1) ;
-    double r = 0 ;
+    real r = 0 ;
     for(size_t i=1;i<radius_pairs.size();++i)
       if(t >= radius_pairs[i-1].first && t < radius_pairs[i].first) {
-        double t1 = radius_pairs[i-1].first ;
-        double t2 = radius_pairs[i].first ;
-        double w = (t1-t)/(t1-t2) ;
+        real t1 = radius_pairs[i-1].first ;
+        real t2 = radius_pairs[i].first ;
+        real w = (t1-t)/(t1-t2) ;
         r = radius_pairs[i-1].second*(1.-w)+radius_pairs[i].second*w ;
       }
 
-    double r2axis = dot(v-p,v-p) ;
+    real r2axis = dot(v-p,v-p) ;
     if(r2axis < r*r)
       return 0 ;
     return sqrt(r2axis)-r ;
@@ -1204,7 +1204,7 @@ if(req_queue.size() > 0 || self_send) {
         } else
           fail = true ;
 
-        double radius = 0 ;
+        real radius = 0 ;
         if(ol.optionExists("radius")) {
           ol.getOptionUnits("radius","meter",radius) ;
         } else
@@ -1228,7 +1228,7 @@ if(req_queue.size() > 0 || self_send) {
         } else
           fail = true ;
 
-        double radius = 0 ;
+        real radius = 0 ;
         if(ol.optionExists("radius")) {
           ol.getOptionUnits("radius","meter",radius) ;
         } else
@@ -1259,8 +1259,8 @@ if(req_queue.size() > 0 || self_send) {
         } else
           fail = true ;
 
-        vector<double> radius ;
-        vector<double> offsets ;
+        vector<real> radius ;
+        vector<real> offsets ;
         if(ol.optionExists("radius")) {
           Loci::option_value_type ovt= ol.getOptionValueType("radius") ;
           if(ovt != Loci::LIST) {
@@ -1280,7 +1280,7 @@ if(req_queue.size() > 0 || self_send) {
               }
               radius.push_back(vu.get_value_in("meter")) ;
             } else if(value_list[i].type_of() == Loci::REAL) {
-              double r =0 ;
+              real r =0 ;
               value_list[i].get_value(r) ;
               radius.push_back(r) ;
             } else {
@@ -1299,7 +1299,7 @@ if(req_queue.size() > 0 || self_send) {
           int sz = value_list.size() ;
           for(int i=0;i<sz;++i)
             if(value_list[i].type_of() == Loci::REAL) {
-              double o =0 ;
+              real o =0 ;
               value_list[i].get_value(o) ;
               offsets.push_back(o) ;
             } else {
@@ -1312,7 +1312,7 @@ if(req_queue.size() > 0 || self_send) {
           Loci::Abort() ;
         }
         int sz = radius.size() ;
-        vector<pair<double,double> > vrad(sz) ;
+        vector<pair<real,real> > vrad(sz) ;
         for(int i=0;i<sz;++i) {
           vrad[i].first = offsets[i] ;
           vrad[i].second = radius[i] ;
@@ -1471,7 +1471,7 @@ if(req_queue.size() > 0 || self_send) {
   //
 
 
-  $type interpolateMinStencilSize param<double> ;
+  $type interpolateMinStencilSize param<real> ;
 
   $rule unit(stencilSize2<-interpolateMinStencilSize) {
     $stencilSize2 = $interpolateMinStencilSize*$interpolateMinStencilSize ;
@@ -1480,7 +1480,7 @@ if(req_queue.size() > 0 || self_send) {
   $rule apply(stencilSize2<-facecenter,ci->cellcenter,face2node->pos)
   [Loci::Maximum],constraint(interface_BC) {
     vect3d d1 = $facecenter-$ci->$cellcenter ;
-    double md = 4.*dot(d1,d1) ;
+    real md = 4.*dot(d1,d1) ;
     join($stencilSize2,md) ;
   }
 
@@ -1494,7 +1494,7 @@ if(req_queue.size() > 0 || self_send) {
       xsum += $face2node[i]->$xblank ;
     if(xsum > 0) {
       vect3d d = $face2node[0]->$pos - $face2node[sz-1]->$pos ;
-      double len = dot(d,d) ;
+      real len = dot(d,d) ;
       for(int i=1;i<sz;++i) {
         d = $face2node[i-1]->$pos - $face2node[i]->$pos ;
         len = max(len,dot(d,d)) ;
@@ -1576,14 +1576,14 @@ if(req_queue.size() > 0 || self_send) {
     $yblank = $xblank ;
 
     if($xblank != 0) {
-      double priority = $componentPriorityList[$componentID_node] ;
+      real priority = $componentPriorityList[$componentID_node] ;
       if($crossComponentDist_node < 0 || $crossComponentID_node < 0)
         $yblank = 3 ;
       else {
 	float epsdist = $holeCuttingTolerance ;
         float dist = norm($pos - $node2surf->$pos) ;
-        double d = priority*max(dist,epsdist) ;
-	double cross_priority = $componentPriorityList[$crossComponentID_node] ;
+        real d = priority*max(dist,epsdist) ;
+	real cross_priority = $componentPriorityList[$crossComponentID_node] ;
         if(d < cross_priority*$crossComponentDist_node) {
           $yblank = 0 ;
         }
@@ -1766,9 +1766,9 @@ if(req_queue.size() > 0 || self_send) {
     if($nblank == 0)
       $nblankf = 0.0 ;
   }
-  $type fblank store<double> ;
+  $type fblank store<real> ;
   $rule pointwise(fblank<-iblank) {
-    $fblank = double($iblank) ;
+    $fblank = real($iblank) ;
   }
 
   $type donorCell store<flowPsi::byte_t> ;
@@ -1802,7 +1802,7 @@ if(req_queue.size() > 0 || self_send) {
   $rule apply((cl,cr)->cellSize2<-face2node->pos)[Loci::Maximum],constraint((cl,cr)->geom_cells) {
     int sz = $face2node.size() ;
     vect3d vd = $face2node[0]->$pos-$face2node[sz-1]->$pos ;
-    double d2 = dot(vd,vd) ;
+    real d2 = dot(vd,vd) ;
     for(int i=1;i<sz;++i) {
       vd = $face2node[i-1]->$pos-$face2node[i]->$pos ;
       max(d2,dot(vd,vd)) ;

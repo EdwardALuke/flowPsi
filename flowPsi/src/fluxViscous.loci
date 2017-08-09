@@ -60,8 +60,8 @@ namespace flowPsi {
   } ;
   
   struct Sutherland_param { 
-    double a1,a2,a3 ; //coefficients in Sutherland transport model
-    double k1,k2,k3 ; // Conductivity Parameters
+    real a1,a2,a3 ; //coefficients in Sutherland transport model
+    real k1,k2,k3 ; // Conductivity Parameters
     Sutherland_param() {
       a1 = 1.458e-6 ; // Sutherland Coefficients for air
       a2 = 1.5 ;

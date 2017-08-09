@@ -64,19 +64,19 @@ namespace flowPsi {
   $rule pointwise(sst_k_bc,sst_w_bc<-BC_options) {
     bool set_k = false ;
     bool set_w = false ;
-    double k = 5e-6 ;
-    double w = 500 ;
+    real k = 5e-6 ;
+    real w = 500 ;
     const Loci::options_list &finput = $BC_options ;
     vect3d u = vect3d(0,0,0);
     if(finput.optionExists("u")) {
-      get_vect3dOption($BC_options,"u","m/s",u) ;
+      $BC_options.getOptionUnits("u","m/s",u) ;
     }
     if(finput.optionExists("v")) {
-      get_vect3dOption($BC_options,"v","m/s",u) ;
+      $BC_options.getOptionUnits("v","m/s",u) ;
     }
     if(finput.optionExists("M")) {
       vect3d M = vect3d(0,0,0) ;
-      get_vect3dOption($BC_options,"M","",M) ;
+      $BC_options.getOptionUnits("M","",M) ;
       u = 340.*M ;
     }
     // fraction of laminar values for

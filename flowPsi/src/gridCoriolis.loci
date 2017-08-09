@@ -51,21 +51,21 @@ namespace flowPsi {
   $rule singleton(frameRotAxis,frameRotCenter,frameRotSpeed<-coriolis) {
     vect3d vec(1,0,0) ;
     if($coriolis.optionExists("frameRotAxis")) {
-      get_vect3dOption($coriolis,"frameRotAxis","",vec) ;
+      $coriolis.getOptionUnits("frameRotAxis","",vec) ;
       vec = vec/(norm(vec)+1e-30) ;
     }
     if($coriolis.optionExists("axis")) {
-      get_vect3dOption($coriolis,"axis","",vec) ;
+      $coriolis.getOptionUnits("axis","",vec) ;
       vec = vec/(norm(vec)+1e-30) ;
     }
     $frameRotAxis = vec ;
 
     $frameRotCenter = vect3d(0,0,0) ;
     if($coriolis.optionExists("frameRotCenter")) {
-      get_vect3dOption($coriolis,"frameRotCenter","m",$frameRotCenter) ;
+      $coriolis.getOptionUnits("frameRotCenter","m",$frameRotCenter) ;
     }
     if($coriolis.optionExists("center")) {
-      get_vect3dOption($coriolis,"center","m",$frameRotCenter) ;
+      $coriolis.getOptionUnits("center","m",$frameRotCenter) ;
     }
 
     $frameRotSpeed = 0.0 ;

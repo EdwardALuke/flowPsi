@@ -172,10 +172,10 @@ namespace flowPsi {
     real rmdot = rr*utr ;
     real pl = pgl+pambient ;
     real pr = pgr+pambient ;
-    double coef = 0.5*area ;
-    double AL = coef*((SL > 0) ? (SR < 0 ? 1.:2.) : ( SR < 0 ? 0.:1. )) ;
-    double AR = coef*((SR < 0) ? (SL > 0 ? 1.:2.) : ( SL > 0 ? 0.:1. )) ;
-    double AM = coef*((SL > 0 || SR < 0) ? 0.:1.) ;
+    real coef = 0.5*area ;
+    real AL = coef*((SL > 0) ? (SR < 0 ? 1.:2.) : ( SR < 0 ? 0.:1. )) ;
+    real AR = coef*((SR < 0) ? (SL > 0 ? 1.:2.) : ( SL > 0 ? 0.:1. )) ;
+    real AM = coef*((SL > 0 || SR < 0) ? 0.:1.) ;
 
     // Build up iflux first and F_l + F_r, 
     iflux[0] = AL*lmdot+AR*rmdot ;
@@ -772,7 +772,7 @@ namespace flowPsi {
     const real_fj ar = sqrt(gamma*Rt*Tr) ;
 
     // Temporal damping
-    double coefd = beta*(fabs(utr)+ar)*coef ;
+    real coefd = beta*(fabs(utr)+ar)*coef ;
     fj[0][0] -= coefd*drdT ;
     fj[1][0] -= coefd*drdT*Ur.x ;
     fj[2][0] -= coefd*drdT*Ur.y ;
@@ -809,7 +809,7 @@ namespace flowPsi {
     const real_fj al = sqrt(gamma*Rt*Tl) ;
     
     // Temporal damping
-    double coefd = beta*(fabs(utl)+al)*coef ;
+    real coefd = beta*(fabs(utl)+al)*coef ;
     fj[0][0] += coefd*drdT ;
     fj[1][0] += coefd*drdT*Ul.x ;
     fj[2][0] += coefd*drdT*Ul.y ;

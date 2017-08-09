@@ -57,8 +57,8 @@ namespace flowPsi {
         cerr << "leftPlane needs 'point' and 'normal'" << endl ;
         Loci::Abort() ;
       }
-      get_vect3dOption(ol,"point","m",pt) ;
-      get_vect3dOption(ol,"normal","",n) ;
+      ol.getOptionUnits("point","m",pt) ;
+      ol.getOptionUnits("normal","",n) ;
       n *= 1./max(norm(n),1e-33) ;
     }
     bool inGeomPt(vect3d pt) const ;
@@ -72,7 +72,7 @@ namespace flowPsi {
     
 
   class inBox : public geomTest {
-    double xmax,xmin,ymax,ymin,zmax,zmin ;
+    real xmax,xmin,ymax,ymin,zmax,zmin ;
   public:
     inBox(vect3d p1, vect3d p2) {
       xmax = max(p1.x,p2.x) ;
@@ -90,8 +90,8 @@ namespace flowPsi {
         Loci::Abort() ;
       }
       vect3d p1,p2 ;
-      get_vect3dOption(ol,"p1","m",p1) ;
-      get_vect3dOption(ol,"p2","m",p2) ;
+      ol.getOptionUnits("p1","m",p1) ;
+      ol.getOptionUnits("p2","m",p2) ;
       xmax = max(p1.x,p2.x) ;
       xmin = min(p1.x,p2.x) ;
     
@@ -114,11 +114,11 @@ namespace flowPsi {
   }
       
   class inSphere : public geomTest {
-    double r ;
-    double r2 ;
+    real r ;
+    real r2 ;
     vect3d center ;
   public:
-    inSphere(double ri,  vect3d c) { r=ri; center=c; r2=r*r ; }
+    inSphere(real ri,  vect3d c) { r=ri; center=c; r2=r*r ; }
     inSphere(const options_list &ol) {
       // Here get sphere information
       if(!ol.optionExists("radius") || !ol.optionExists("center")) {
@@ -126,7 +126,7 @@ namespace flowPsi {
         Loci::Abort() ;
       }
       ol.getOptionUnits("radius","m",r) ;
-      get_vect3dOption(ol,"center","m",center) ;
+      ol.getOptionUnits("center","m",center) ;
       r2=r*r ;
     }      
     bool inGeomPt(vect3d pt) const ;
@@ -139,13 +139,13 @@ namespace flowPsi {
   }
 
   class inCylinder : public geomTest {
-    double r ;
-    double r2 ;
+    real r ;
+    real r2 ;
     vect3d p1,p2 ;
     vect3d n ;
-    double mag ;
+    real mag ;
   public:
-    inCylinder(double ri,  vect3d p1i,vect3d p2i) {
+    inCylinder(real ri,  vect3d p1i,vect3d p2i) {
       r=ri;r2=r*r ;
       p1=p1i;p2=p2i;
       n = p2-p1 ;
@@ -160,8 +160,8 @@ namespace flowPsi {
         Loci::Abort() ;
       }
       ol.getOptionUnits("radius","m",r) ;
-      get_vect3dOption(ol,"p1","m",p1) ;
-      get_vect3dOption(ol,"p2","m",p2) ;
+      ol.getOptionUnits("p1","m",p1) ;
+      ol.getOptionUnits("p2","m",p2) ;
       n = p2-p1 ;
       mag = norm(n) ;
       n *= 1./mag ;
@@ -171,7 +171,7 @@ namespace flowPsi {
   } ;
 
   bool inCylinder::inGeomPt(vect3d pt) const {
-    double v = dot(pt-p1,n) ;
+    real v = dot(pt-p1,n) ;
     if(v < 0.0 || v > mag)
       return false ;
     // project point onto axis
@@ -182,13 +182,13 @@ namespace flowPsi {
   }
 
   class inCone : public geomTest {
-    double r1 ;
-    double r2 ;
+    real r1 ;
+    real r2 ;
     vect3d p1,p2 ;
     vect3d n ;
-    double mag ;
+    real mag ;
   public:
-    inCone(double r1i, double r2i, vect3d p1i,vect3d p2i) {
+    inCone(real r1i, real r2i, vect3d p1i,vect3d p2i) {
       r1=r1i;r2=r2i ;
       p1=p1i;p2=p2i;
       n = p2-p1 ;
@@ -204,8 +204,8 @@ namespace flowPsi {
       }
       ol.getOptionUnits("r1","m",r1) ;
       ol.getOptionUnits("r2","m",r2) ;
-      get_vect3dOption(ol,"p1","m",p1) ;
-      get_vect3dOption(ol,"p2","m",p2) ;
+      ol.getOptionUnits("p1","m",p1) ;
+      ol.getOptionUnits("p2","m",p2) ;
       n = p2-p1 ;
       mag = norm(n) ;
       n *= 1./mag ;
@@ -214,13 +214,13 @@ namespace flowPsi {
   } ;
 
   bool inCone::inGeomPt(vect3d pt) const {
-    double v = dot(pt-p1,n) ;
+    real v = dot(pt-p1,n) ;
     if(v < 0.0 || v > mag)
       return false ;
     // project point onto axis
-    double t = v/mag ;
-    double rx = r1*(1.-t) + r2*t ;
-    double rx2 = rx*rx ;
+    real t = v/mag ;
+    real rx = r1*(1.-t) + r2*t ;
+    real rx2 = rx*rx ;
     vect3d paxis = p1 + n*v ;
     if(dot(pt-paxis,pt-paxis) > rx2) // Check radius
       return false ; // outside
@@ -385,9 +385,9 @@ namespace flowPsi {
       bool T_set = false ;
       bool p_set = false ;
       bool rho_set = false ;
-      double T = 0 ;
-      double p = 0 ;
-      double rho = 0 ;
+      real T = 0 ;
+      real p = 0 ;
+      real rho = 0 ;
       const Loci::options_list finput = $icRegionInfo[i].state_info ;
       if(finput.optionExists("rho")) {
 	if(finput.getOptionValueType("rho") == Loci::REAL) {
@@ -470,14 +470,14 @@ namespace flowPsi {
       vect3d u = vect3d(0,0,0) ;
       
       if(finput.optionExists("M")) {
-	get_vect3dOption(finput,"M","",u) ;
+	finput.getOptionUnits("M","",u) ;
 	real soundSpeed = sqrt($gamma*$Rtilde*T) ;
 	u *= soundSpeed ;
 	M_set = true ;
       }
     
       if(finput.optionExists("u")) {
-	get_vect3dOption(finput,"u","m/s",u) ;
+	finput.getOptionUnits("u","m/s",u) ;
 	u_set = true ;
       }
       if(M_set && u_set) {
@@ -510,7 +510,7 @@ namespace flowPsi {
       vect3d rctr(0,0,0) ;
       const Loci::options_list finput = $icRegionInfo[i].state_info ;
       if(finput.optionExists("rotAxis")) {
-	get_vect3dOption(finput,"rotAxis","",raxi) ;
+	finput.getOptionUnits("rotAxis","",raxi) ;
 	raxi = raxi/max(norm(raxi),1e-30) ;
       }
       if(finput.optionExists("rotSpeed")) {
@@ -519,7 +519,7 @@ namespace flowPsi {
 	avel = (0.104720*rpm)*raxi ;
       }
       if(finput.optionExists("rotCenter")) {
-	get_vect3dOption(finput,"rotCenter","m",rctr,1) ;
+	finput.getOptionUnits("rotCenter","m",rctr,1) ;
       }
       angvel_list.push_back(avel) ;
       rotaxis_list.push_back(raxi) ;
@@ -589,7 +589,7 @@ namespace flowPsi {
     Loci::readContainer(file_id,"u",$u_ic.Rep(),read_set) ;
     param<real> Pref ;
     Loci::readContainer(file_id,"Pambient",Pref.Rep(),read_set) ;
-    double dp = *Pref-*$Pambient ;
+    real dp = *Pref-*$Pambient ;
     FORALL(read_set,ii) {
       $gagePressure_ic[ii] += dp ;
     } ENDFORALL ;

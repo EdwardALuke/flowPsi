@@ -153,7 +153,7 @@ namespace flowPsi {
     for(options_list::option_namelist::const_iterator li=l.begin();
 	li!=l.end();++li) {
       vect3d val=vect3d(0.,0.,0.) ;
-      get_vect3dOption($probe,li->c_str(),"m",val,1) ;
+      $probe.getOptionUnits(li->c_str(),"m",val) ;
       pposlist.push_back(val) ;
     }
     $probePos = pposlist ;
@@ -291,7 +291,7 @@ namespace flowPsi {
             probefiles[i]->precision(14) ;
           }
         }
-        double time = *stime ;
+        real time = *stime ;
         size_t i = 0 ;
         for(options_list::option_namelist::const_iterator li=l.begin();
             li!=l.end();++li,++i) {

@@ -15,7 +15,12 @@
 namespace flowPsi {
   
   typedef Loci::real_t real ;
-  typedef float  real_fj ;
+#ifdef USE_AUTODIFF
+  typedef Loci::real_t realF ;
+#else
+  typedef float realF ;
+#endif
+  typedef realF real_fj ;
 
   typedef unsigned char byte_t ;
   
@@ -31,9 +36,6 @@ namespace flowPsi {
   using Loci::periodic_info ;
   typedef Loci::vector3d<real> vect3d ;
   typedef Loci::tensor3d<real> tens3d ;
-
-  void get_vect3dOption(const options_list &ol,std::string vname,
-                        std::string units, vect3d &vec, real scale=1.0) ;
 
   // Used to do a priority join using pairs
   template <class T> struct priority_joiner {
@@ -254,8 +256,8 @@ namespace Loci {
 
 
 namespace flowPsi {
-  inline double get_val_in_units(std::istream &s, const char *units) {
-    double val ;
+  inline real get_val_in_units(std::istream &s, const char *units) {
+    real val ;
     s >> val ;
     while(s.peek() == ' ' || s.peek() == '\t')
       s.get() ;
@@ -277,10 +279,10 @@ namespace flowPsi {
   }
 
   struct TimeValue {
-    double val ;
-    operator double() const { return val ; }
+    real val ;
+    operator real() const { return val ; }
     TimeValue &operator=(const TimeValue &v) { val = v.val ; return *this ;}
-    TimeValue &operator=(double v) { val = v ; return *this; }
+    TimeValue &operator=(real v) { val = v ; return *this; }
     TimeValue &operator=(float v) { val = v ; return *this; }
     TimeValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -297,10 +299,10 @@ namespace flowPsi {
   }        
 
   struct TemperatureValue {
-    double val ;
-    operator double() const { return val ; }
+    real val ;
+    operator real() const { return val ; }
     TemperatureValue &operator=(const TemperatureValue  &v) { val = v.val ; return *this; }
-    TemperatureValue &operator=(double v) { val = v ; return *this; }
+    TemperatureValue &operator=(real v) { val = v ; return *this; }
     TemperatureValue &operator=(float v) { val = v ; return *this; }
     TemperatureValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -317,10 +319,10 @@ namespace flowPsi {
   }        
 
   struct PressureValue {
-    double val ;
-    operator double() const { return val ; }
+    real val ;
+    operator real() const { return val ; }
     PressureValue &operator=(const PressureValue &v) { val = v.val ; return *this; }
-    PressureValue &operator=(double v) { val = v ; return *this; }
+    PressureValue &operator=(real v) { val = v ; return *this; }
     PressureValue &operator=(float v) { val = v ; return *this; }
     PressureValue &operator=(int v) { val = v ; return *this; }
   } ;
@@ -347,28 +349,28 @@ namespace Loci {
     int getSize() const {
       return 1 ;
     }
-    void getState(double *buf, int &size) {
+    void getState(flowPsi::real *buf, int &size) {
       buf[0] = ref.val ;
       size = 1 ;
     }
-    void setState(double *buf, int size) {
+    void setState(flowPsi::real *buf, int size) {
       ref.val = buf[0] ;
     }
   } ;
   
   template<> struct data_schema_traits<flowPsi::TimeValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef double Converter_Base_Type ;
+    typedef flowPsi::real Converter_Base_Type ;
     typedef ValConverter<flowPsi::TimeValue> Converter_Type ;
   } ;
   template<> struct data_schema_traits<flowPsi::TemperatureValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef double Converter_Base_Type ;
+    typedef flowPsi::real Converter_Base_Type ;
     typedef ValConverter<flowPsi::TemperatureValue> Converter_Type ;
   } ;
   template<> struct data_schema_traits<flowPsi::PressureValue> {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef double Converter_Base_Type ;
+    typedef flowPsi::real Converter_Base_Type ;
     typedef ValConverter<flowPsi::PressureValue> Converter_Type ;
   } ;
 }

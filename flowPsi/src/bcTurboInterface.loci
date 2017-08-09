@@ -40,13 +40,13 @@ using std::set;
 namespace flowPsi {
   namespace {
     // Use least squares method to compute 
-    void computeWeights(vector3d<double> *wvec,
-                        const vector3d<double> *deltas,
-                        const double *deltaweights,
+    void computeWeights(vector3d<real> *wvec,
+                        const vector3d<real> *deltas,
+                        const real *deltaweights,
                         int ndeltas) {
-      tmp_array<vector3d<double> > weights(ndeltas) ;
+      tmp_array<vector3d<real> > weights(ndeltas) ;
 
-      double r[3][3] ;
+      real r[3][3] ;
       r[0][0] = 0 ;
       for(int i=0;i<ndeltas;++i) {
         r[0][0] += deltas[i].x*deltas[i].x ;
@@ -55,7 +55,7 @@ namespace flowPsi {
       r[0][0] = sqrt(r[0][0]) ;
       r[0][0] = max(r[0][0],1e-30) ;
 
-      const double rr00 = 1./r[0][0] ;
+      const real rr00 = 1./r[0][0] ;
       for(int i=0;i<ndeltas;++i)
         weights[i].x *= rr00 ;
       r[0][1] = 0 ;
@@ -73,7 +73,7 @@ namespace flowPsi {
         r[1][1] += weights[i].y*weights[i].y ;
       r[1][1] = sqrt(r[1][1]) ;
       r[1][1] = max(r[1][1],1e-30) ;
-      const double rr11 = 1./r[1][1] ;
+      const real rr11 = 1./r[1][1] ;
       for(int i=0;i<ndeltas;++i)
         weights[i].y *= rr11 ;
 
@@ -87,7 +87,7 @@ namespace flowPsi {
         r[2][2] += weights[i].z*weights[i].z ;
       r[2][2] = sqrt(r[2][2]) ;
       r[2][2] = max(r[2][2],1e-30) ;
-      const double rr22 = 1./r[2][2] ;
+      const real rr22 = 1./r[2][2] ;
       for(int i=0;i<ndeltas;++i)
         weights[i].z *= rr22 ;
       // Compute R inverse
@@ -98,7 +98,7 @@ namespace flowPsi {
       // Rinv[3] = R^-1[1][1]
       // Rinv[4] = R^-1[1][2]
       // Rinv[5] = R^-1[2][2]
-      double Rinv[6] ;
+      real Rinv[6] ;
       Rinv[0] = rr00 ;
       Rinv[1] = -r[0][1]*rr00*rr11 ;
       Rinv[2] = (r[0][1]*r[1][2]-r[0][2]*r[1][1])*rr00*rr11*rr22 ;
@@ -107,11 +107,11 @@ namespace flowPsi {
       Rinv[5] = rr22 ;
 
       for(int i=0;i<ndeltas;++i) {
-        double weightx = Rinv[0]*weights[i].x + Rinv[1]*weights[i].y +
+        real weightx = Rinv[0]*weights[i].x + Rinv[1]*weights[i].y +
           Rinv[2]*weights[i].z ;
-        double weighty = Rinv[3]*weights[i].y + Rinv[4]*weights[i].z ;
-        double weightz = Rinv[5]*weights[i].z ;
-        wvec[i] = vector3d<double>(weightx,weighty,weightz)*deltaweights[i] ;
+        real weighty = Rinv[3]*weights[i].y + Rinv[4]*weights[i].z ;
+        real weightz = Rinv[5]*weights[i].z ;
+        wvec[i] = vector3d<real>(weightx,weighty,weightz)*deltaweights[i] ;
       }
     }
   }
@@ -148,18 +148,18 @@ namespace flowPsi {
 
    $type boundary_names store<string> ;
   // this section contains codes for the sliding interface walking part
-  typedef vector3d<double> vec3d;
+  typedef vector3d<real> vec3d;
 
   // normalization of 3d vector
   inline void
-  normalize(Loci::vector3d<double>& v) {
+  normalize(Loci::vector3d<real>& v) {
     if( (fabs(v.x) <= 0.0) &&
         (fabs(v.y) <= 0.0) &&
         (fabs(v.z) <= 0.0)) {
       //cerr << "WARNING: normalizing zero vector, nothing done!" << endl ;
       return ;
     }
-    double t = sqrt(v.x*v.x + v.y*v.y + v.z*v.z) ;
+    real t = sqrt(v.x*v.x + v.y*v.y + v.z*v.z) ;
     v.x /= t ;
     v.y /= t ;
     v.z /= t ;
@@ -280,19 +280,19 @@ namespace flowPsi {
 
   // rules that compute the global minimum
   // and maximum edge length in the mesh
-  $type turbo_min_edge_len param<double> ; // minimum edge length in the mesh
-  $type turbo_max_edge_len param<double> ; // maximum edge length in the mesh
+  $type turbo_min_edge_len param<real> ; // minimum edge length in the mesh
+  $type turbo_max_edge_len param<real> ; // maximum edge length in the mesh
 
   // a rule that computes the global minimum edge length
   // this is a unit/apply rule that performs a reduction
   $rule unit(turbo_min_edge_len), constraint(UNIVERSE) {
-    $turbo_min_edge_len = std::numeric_limits<double>::max() ;
+    $turbo_min_edge_len = std::numeric_limits<real>::max() ;
   }
   $rule apply(turbo_min_edge_len <- face2node->pos)[Loci::Minimum] {
     // get the number of nodes in a face2node map for a particular face
     int size = $face2node.size() ;
-    double local_turbo_min_edge_len = std::numeric_limits<double>::max() ;
-    double local_len = 0 ;
+    real local_turbo_min_edge_len = std::numeric_limits<real>::max() ;
+    real local_len = 0 ;
     // looping over all edges to compute each edge length
     for(int i=0;i<size-1;++i) {
       local_len = norm($face2node[i]->$pos -
@@ -315,8 +315,8 @@ namespace flowPsi {
   }
   $rule apply(turbo_max_edge_len <- face2node->pos)[Loci::Maximum] {
     int size = $face2node.size() ;
-    double local_turbo_max_edge_len = 0 ;
-    double local_len = 0 ;
+    real local_turbo_max_edge_len = 0 ;
+    real local_len = 0 ;
     for(int i=0;i<size-1;++i) {
       local_len = norm($face2node[i]->$pos -
                        $face2node[i+1]->$pos) ;
@@ -334,7 +334,7 @@ namespace flowPsi {
   // computation to avoid possible errors caused by floating point
   // round-off errors. it is now defined to be the 1/100 of the
   // global minimum edge length in the mesh
-  $type turbo_dot_threshold param<double> ;
+  $type turbo_dot_threshold param<real> ;
   $rule singleton(turbo_dot_threshold <- turbo_min_edge_len) {
     $turbo_dot_threshold = $turbo_min_edge_len / 100 ;
   }
@@ -352,7 +352,7 @@ namespace flowPsi {
     // this range is derived from the fact that the "atan2" function
     // always returns the range [-PI,PI], then two angles involved
     // can at most have [-2PI,2PI]
-    inline double norm_theta(double theta)
+    inline real norm_theta(real theta)
     {
       if(theta > PI) {
         // we can be sure that t is within range (PI,2PI] because
@@ -379,9 +379,9 @@ namespace flowPsi {
     // the input angles are assumed to be within the range [-PI, PI],
     // the normal range returned by the "atan2" function.
     // the output angle is normalized to be within [-PI, PI] as well.
-    inline double theta_diff(double t1, double t2) // t1-t2
+    inline real theta_diff(real t1, real t2) // t1-t2
     {
-      double t = t1-t2;
+      real t = t1-t2;
       return norm_theta(t);
     }
 
@@ -390,9 +390,9 @@ namespace flowPsi {
     // coordinate directly. the (R,Theta) corresponds to the
     // the (Y,Z) plane in the Cartesian coordinate system.
 
-    // we use the Loci type vector3d<double> to represent both
+    // we use the Loci type vector3d<real> to represent both
     // the Cartesian and the cylindrical coordinate points.
-    // all operations defined on the original vector3d<double> type
+    // all operations defined on the original vector3d<real> type
     // can be reused for cylindrical coordinate points. we will
     // need to ensure that the angle "Theta" is normalized after
     // each operation though.
@@ -420,16 +420,16 @@ namespace flowPsi {
 		    Loci::Entity f) {
       int nn = face2node[f].size();
       vec3d p0 = pos[face2node[f][0]] ;
-      double r2max = p0.y*p0.y+p0.z*p0.z ;
-      double r2min = r2max ;
+      real r2max = p0.y*p0.y+p0.z*p0.z ;
+      real r2min = r2max ;
       for(int i=1;i<nn;++i) {
 	vec3d p1 = pos[face2node[f][i]] ;
-	double r2 = p1.y*p1.y+p1.z*p1.z ;
+	real r2 = p1.y*p1.y+p1.z*p1.z ;
 	r2max = max(r2max,r2) ;
 	r2min = min(r2min,r2) ;
       }
-      double rmax = sqrt(r2max) ;
-      double rmin = sqrt(r2min) ;
+      real rmax = sqrt(r2max) ;
+      real rmin = sqrt(r2min) ;
       return (rmax-rmin < rmin*0.1) ;
     }
 
@@ -456,18 +456,18 @@ namespace flowPsi {
       // (e.g., in reference to the facecenter calculation in
       // FVMMod/metrics.loci
       vec3d nodesum(0,0,0);
-      double lensum = 0;
+      real lensum = 0;
       for(int i=0;i<nn-1;++i) {
         vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
         vec3d edge = (cpos[i]-cpos[i+1]);
-        double len = sqrt(dot(edge,edge));
+        real len = sqrt(dot(edge,edge));
         nodesum += len*mid;
         lensum += len;
       }
       // last edge
       vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
       vec3d edge = (cpos[0]-cpos[nn-1]);
-      double len = sqrt(dot(edge,edge));
+      real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
       lensum += len;
 
@@ -497,7 +497,7 @@ namespace flowPsi {
       }
       // last nodes pair
       sum += cross(cpos[nn-1],cpos[0]) ;
-      double sada = sqrt(dot(sum,sum));
+      real sada = sqrt(dot(sum,sum));
       vec3d normal = -1.0*sum*(1./(sada+1e-33));
       return normal;
     }
@@ -515,18 +515,18 @@ namespace flowPsi {
         cpos[i] = (pos[face2node[f][i]]);
 
       vec3d nodesum(0,0,0);
-      double lensum = 0;
+      real lensum = 0;
       for(int i=0;i<nn-1;++i) {
         vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
         vec3d edge = (cpos[i]-cpos[i+1]);
-        double len = sqrt(dot(edge,edge));
+        real len = sqrt(dot(edge,edge));
         nodesum += len*mid;
         lensum += len;
       }
       // last edge
       vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
       vec3d edge = (cpos[0]-cpos[nn-1]);
-      double len = sqrt(dot(edge,edge));
+      real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
       lensum += len;
 
@@ -550,7 +550,7 @@ namespace flowPsi {
       }
       // last nodes pair
       sum += cross(cpos[nn-1],cpos[0]) ;
-      double sada = sqrt(dot(sum,sum));
+      real sada = sqrt(dot(sum,sum));
       vec3d normal = sum*(1./(sada+1e-33));
       return normal;
     }
@@ -710,13 +710,13 @@ namespace flowPsi {
   }
   
   // spaceH is per interface value
-  $type spaceH store<double>;
+  $type spaceH store<real>;
   $rule unit(spaceH),constraint(turboSurfaces) {
     $spaceH =1e30;
   }
   $rule apply(ref->spaceH <- facecenter,area,ci->cellcenter)[Loci::Minimum],
     constraint(turboInterface_BC) {
-    double localH = dot($facecenter - $ci->$cellcenter,$area.n);
+    real localH = dot($facecenter - $ci->$cellcenter,$area.n);
     if(localH < $ref->$spaceH)
       $ref->$spaceH = localH;
   }
@@ -729,19 +729,19 @@ namespace flowPsi {
     }
   };
 
-  $type turboHDB param<vector<pair<int,double> > > ;
+  $type turboHDB param<vector<pair<int,real> > > ;
 
   
   $rule unit(turboHDB),constraint(UNIVERSE) {
-    $turboHDB = vector<pair<int,double> >() ;
+    $turboHDB = vector<pair<int,real> >() ;
   }
 
 
   $rule apply(turboHDB<-spaceH,turboBCPartner)[flowPsi::AppendOp] {
-    $turboHDB.push_back(pair<int,double>($turboBCPartner,$spaceH)) ;
+    $turboHDB.push_back(pair<int,real>($turboBCPartner,$spaceH)) ;
   }
 
-  $type spaceHP store<double>;
+  $type spaceHP store<real>;
   
   $rule pointwise(spaceHP<-turboHDB,turboBCID) {
     int sz = $turboHDB.size() ;
@@ -754,7 +754,7 @@ namespace flowPsi {
 
   // spaceH2 is per face (just copy spaceH to each interface face)
   // this is done as a hack to simplify later programming
-  $type spaceH2 store<double>;
+  $type spaceH2 store<real>;
   $rule pointwise(spaceH2 <- ref->spaceHP),constraint(turboInterface_BC) {
     $spaceH2 = 0.25*$ref->$spaceHP;
   }
@@ -1175,8 +1175,8 @@ namespace flowPsi {
     struct WalkTopoAux {
       Loci::Entity cell;        // the cell to move to
       Loci::Entity face;        // the face that has been crossed
-      double dt;
-      WalkTopoAux(const Loci::Entity& c,const Loci::Entity& f,double d):
+      real dt;
+      WalkTopoAux(const Loci::Entity& c,const Loci::Entity& f,real d):
         cell(c),face(f),dt(d) {}
       bool
       operator<(const WalkTopoAux& wta) const {
@@ -1203,7 +1203,7 @@ namespace flowPsi {
     // this version does not track face crossing history
     bool walk_point(const TurboPoint& p,
                     bool c,
-                    double dot_threshold,
+                    real dot_threshold,
                     const_multiMap& face2node,
                     Loci::const_store<vec3d>& pos,
                     const_Map& cl, const_Map& cr,
@@ -1260,7 +1260,7 @@ namespace flowPsi {
           v2 = normal;
         }
 
-        double dt = dot(v1,v2);
+        real dt = dot(v1,v2);
         if(dt < -dot_threshold) {
           walk = true;
           walk_aux.push_back(WalkTopoAux(cl[f],fg,dt));
@@ -1300,7 +1300,7 @@ namespace flowPsi {
           v2 = -1.0 * normal ;
         }
         
-        double dt = dot(v1,v2);
+        real dt = dot(v1,v2);
         if(dt < -dot_threshold) {
           walk = true;
           walk_aux.push_back(WalkTopoAux(cr[f],fg,dt));
@@ -1317,7 +1317,7 @@ namespace flowPsi {
     // this version tracks face crossing history
     bool walk_point_wht(const TurboPoint& p,
                         bool c,
-                        double dot_threshold,
+                        real dot_threshold,
                         const_multiMap& face2node,
                         Loci::const_store<vec3d>& pos,
                         const_Map& cl, const_Map& cr,
@@ -1378,7 +1378,7 @@ namespace flowPsi {
           v2 = normal ;
         }
         
-        double dt = dot(v1,v2);
+        real dt = dot(v1,v2);
         if(dt < -dot_threshold) {
           walk = true;
           walk_aux.push_back(WalkTopoAux(cl[f],fg,dt));
@@ -1422,7 +1422,7 @@ namespace flowPsi {
           v2 = -1.0 * normal ;
         }
         
-        double dt = dot(v1,v2);
+        real dt = dot(v1,v2);
         if(dt < -dot_threshold) {
           walk = true;
           walk_aux.push_back(WalkTopoAux(cr[f],fg,dt));
@@ -1448,7 +1448,7 @@ namespace flowPsi {
     move_points(list<TurboPoint>& to_locate,
                 list<TurboPoint>& located,
                 bool c,         // use cylindrical coordinate or not
-                double dot_threshold,
+                real dot_threshold,
                 const_multiMap& face2node,
                 Loci::const_store<vec3d>& pos,
                 const_Map& cl, const_Map& cr,
@@ -1650,7 +1650,7 @@ namespace flowPsi {
                        const_Map& cl, const_Map& cr,
                        const_multiMap& upper,
                        const_multiMap& lower,                       
-                       double dot_threshold,
+                       real dot_threshold,
                        int face_history_tracing_start,
                        int max_walking_step_warning) {
       Loci::fact_db* factsP = Loci::exec_current_fact_db;
@@ -1716,12 +1716,12 @@ namespace flowPsi {
   /////////////////////////////////////////////////////////////////////
 
   // here is a rule that computes the face normal flip factor
-  $type facenormal_flip store<vector<double> >;
+  $type facenormal_flip store<vector<real> >;
   $rule pointwise(facenormal_flip <- cellcenter,
                   lower->facecenter, lower->area,
                   upper->facecenter, upper->area,
                   boundary_map->facecenter, boundary_map->area) {
-    vector<double>& fv = $facenormal_flip;
+    vector<real>& fv = $facenormal_flip;
     int fsz = $lower.size();
     for(int i=0;i<fsz;++i) {
       vec3d fn = $lower[i]->$area.n;
@@ -1931,11 +1931,11 @@ namespace flowPsi {
 	cpos[i] = norm_cylind(cpos[i]-orig) ;
 
       vec3d nodesum(0,0,0);
-      double lensum = 0;
+      real lensum = 0;
       for(int i=0;i<nn-1;++i) {
 	vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
 	vec3d edge = (cpos[i]-cpos[i+1]);
-	double len = sqrt(dot(edge,edge));
+	real len = sqrt(dot(edge,edge));
 	nodesum += len*mid;
 	nodesum = nodesum;
 	lensum += len;
@@ -1943,7 +1943,7 @@ namespace flowPsi {
       // last edge
       vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
       vec3d edge = cpos[0]-cpos[nn-1];
-      double len = sqrt(dot(edge,edge));
+      real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
       nodesum = nodesum;
       lensum += len;
@@ -1955,11 +1955,11 @@ namespace flowPsi {
 	cpos[i] = $face2node[i]->$pos ;
 
       vec3d nodesum(0,0,0);
-      double lensum = 0;
+      real lensum = 0;
       for(int i=0;i<nn-1;++i) {
 	vec3d mid = 0.5*(cpos[i]+cpos[i+1]);
 	vec3d edge = (cpos[i]-cpos[i+1]);
-	double len = sqrt(dot(edge,edge));
+	real len = sqrt(dot(edge,edge));
 	nodesum += len*mid;
 	nodesum = nodesum;
 	lensum += len;
@@ -1967,7 +1967,7 @@ namespace flowPsi {
       // last edge
       vec3d mid = 0.5*(cpos[0]+cpos[nn-1]);
       vec3d edge = cpos[0]-cpos[nn-1];
-      double len = sqrt(dot(edge,edge));
+      real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
       nodesum = nodesum;
       lensum += len;
@@ -2150,12 +2150,12 @@ namespace flowPsi {
 	  deltas[cnt] = $cellcenter[$cl[$lower[cc][i]]]-center ;
 	  cnt++ ;
 	}
-	vector<double> wts(sz) ;
+	vector<real> wts(sz) ;
 	for(int i=0;i<sz;++i) {
 	  wts[i] = 1./norm(deltas[i]) ;
 	  deltas[i] *= wts[i] ;
 	}
-	double uwindfactor = 0.75 ;
+	real uwindfactor = 0.75 ;
 	wts[0] *= uwindfactor ;
 	deltas[0] *= uwindfactor ;
 	vector<vect3d> wout(sz) ;
@@ -2173,8 +2173,8 @@ namespace flowPsi {
 
   } ;
   // rules for interpolation
-  $type interpolateTurboScalar(X) store<double>;
-  $type X store<double>;
+  $type interpolateTurboScalar(X) store<real>;
+  $type X store<real>;
   $rule pointwise(interpolateTurboScalar(X){n,it} <-
                   turboInterpWeights{n,it},facecenter{n,it},
                   ci{n,it}->cellcenter{n,it},
@@ -2183,7 +2183,7 @@ namespace flowPsi {
                   ci{n,it}->X{n,it}, turboPt1_located{n,it}),
     constraint(turboInterface_BC),option(disable_threading), prelude
   {
-    store<double> s1;
+    store<real> s1;
 
     const list<TurboPoint>& pts1 = *$turboPt1_located{n,it};
 
@@ -2198,7 +2198,7 @@ namespace flowPsi {
 
     entitySet dom = entitySet(seq);
 
-    store<double> Xsend ;
+    store<real> Xsend ;
     Xsend.allocate(dom) ;
     FORALL(dom,ii) {
       Xsend[ii] = $X{n,it}[$ci{n,it}[ii]] ;
@@ -2207,7 +2207,7 @@ namespace flowPsi {
     vector<Loci::storeRepP> in(1), out(1);
     in[0] = Xsend.Rep();
     get_remote_stores(in,out,p1_pull_comm) ;
-    store<double> Xrecv ;
+    store<real> Xrecv ;
     Xrecv.setRep(out[0]) ;
     
     store<vector<vect3d> > wgts ;
@@ -2224,33 +2224,33 @@ namespace flowPsi {
       int lsz = $lower{n,it}[cc].size() ;
 
       real Xc = $X{n,it}[cc] ;
-      double maxX = max(Xc,Xrecv[id]) ;
-      double minX = min(Xc,Xrecv[id]) ;
+      real maxX = max(Xc,Xrecv[id]) ;
+      real minX = min(Xc,Xrecv[id]) ;
       vect3d gradX  = wgts[id][0]*(Xrecv[id]-Xc) ;
       int cnt = 1 ;
 
       for(int i=0;i<usz;++i) {
-	double Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]] ;
+	real Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]] ;
 	gradX += wgts[id][cnt]*(Xu-Xc) ;
 	maxX = max(maxX,Xu) ;
 	minX = min(minX,Xu) ;
 	cnt++ ;
       }
       for(int i=0;i<lsz;++i) {
-	double Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]] ;
+	real Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]] ;
 	gradX += wgts[id][cnt]*(Xl-Xc) ;
 	maxX = max(maxX,Xl) ;
 	minX = min(minX,Xl) ;
 	cnt++ ;
       }
       vect3d ccenter = $cellcenter{n,it}[cc] ;
-      double Xi = $X{n,it}[cc] + dot(gradX,fcenter[id]-ccenter) ;
+      real Xi = $X{n,it}[cc] + dot(gradX,fcenter[id]-ccenter) ;
 
       s1[id] = max(minX,min(maxX,Xi)) ;
 
     }
     // the push s1 the face partition
-    store<double> s1f ;
+    store<real> s1f ;
     //    vector<Loci::storeRepP> in(1), out(1);
     in[0] = s1.Rep();
     out[0] = 0 ;
@@ -2316,28 +2316,28 @@ namespace flowPsi {
       int lsz = $lower{n,it}[cc].size() ;
 
       for(int v=0;v<3;++v) {
-	double Xc = $X{n,it}[cc][v] ;
-	double maxX = max(Xc,Xrecv[id][v]) ;
-	double minX = min(Xc,Xrecv[id][v]) ;
+	real Xc = $X{n,it}[cc][v] ;
+	real maxX = max(Xc,Xrecv[id][v]) ;
+	real minX = min(Xc,Xrecv[id][v]) ;
 	vect3d gradX  = wgts[id][0]*(Xrecv[id][v]-Xc) ;
 	int cnt = 1 ;
 
 	for(int i=0;i<usz;++i) {
-	  double Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]][v] ;
+	  real Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]][v] ;
 	  gradX += wgts[id][cnt]*(Xu-Xc) ;
 	  maxX = max(maxX,Xu) ;
 	  minX = min(minX,Xu) ;
 	  cnt++ ;
 	}
 	for(int i=0;i<lsz;++i) {
-	  double Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]][v] ;
+	  real Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]][v] ;
 	  gradX += wgts[id][cnt]*(Xl-Xc) ;
 	  maxX = max(maxX,Xl) ;
 	  minX = min(minX,Xl) ;
 	  cnt++ ;
 	}
 	vect3d ccenter = $cellcenter{n,it}[cc] ;
-	double Xi = $X{n,it}[cc][v] + dot(gradX,fcenter[id]-ccenter) ;
+	real Xi = $X{n,it}[cc][v] + dot(gradX,fcenter[id]-ccenter) ;
 	s1[id][v] = max(minX,min(maxX,Xi)) ;
       }
     }

@@ -132,7 +132,7 @@ namespace flowPsi {
     real k_coeff=$spalart.k_coeff ;
     real S_t=$S_tilda_lim ;
     real denom=k_coeff*k_coeff*$sa_dist_noslip*$sa_dist_noslip ;
-    double rclip = 10 ;
+    real rclip = 10 ;
     if(S_t < $nuTilde/(rclip*denom))
       $rcoeff = rclip ;
     else
@@ -198,28 +198,28 @@ namespace flowPsi {
   }
 
   // Get nu tilde from turbulent nu
-  double find_nu_tilde(const double nu_turb, const double cv1, const double nu_lam) {
+  real find_nu_tilde(const real nu_turb, const real cv1, const real nu_lam) {
     // solve chi_turb*(chi^3+cv1^3)-chi^4 = 0
     // find chi using newton iteration
-    double chi_turb = nu_turb/nu_lam ;
+    real chi_turb = nu_turb/nu_lam ;
     if(chi_turb> 350) { // At this point nu_tilde will effectively be nu_turb
       return nu_turb ;
     }
-    double cv13 = cv1*cv1*cv1 ;
+    real cv13 = cv1*cv1*cv1 ;
     const int MAX_ITER=100 ;
-    double eps = 1e-8 ;
+    real eps = 1e-8 ;
     int i ;
     // Initial guess is turbulent value
-    double chi = max(chi_turb,1.0) ;
+    real chi = max(chi_turb,1.0) ;
     for( i=0;i<MAX_ITER;++i) {
-      double chi3 = chi*chi*chi ;
-      double f = chi_turb*(chi3+cv13)-chi3*chi ;
+      real chi3 = chi*chi*chi ;
+      real f = chi_turb*(chi3+cv13)-chi3*chi ;
       if(fabs(f)<eps*chi_turb)
         break ;
-      double fp = 3*chi_turb*chi*chi-4.*chi3 ;
-      double dchi = -f/fp ;
+      real fp = 3*chi_turb*chi*chi-4.*chi3 ;
+      real dchi = -f/fp ;
       // limit change so that chi does not overshoot
-      double scale = min(1.0,.5*chi/(fabs(dchi)+1e-30)) ;
+      real scale = min(1.0,.5*chi/(fabs(dchi)+1e-30)) ;
       chi += dchi*scale ;
     }
     if(i == MAX_ITER) {
@@ -284,7 +284,7 @@ namespace flowPsi {
   // Destruction Jacobian
   $type rpcoeff store<real> ;
   $rule pointwise(rpcoeff<-nuTilde,S_tilda_lim,xcoeff,mu,rho,fv2,sa_dist_noslip,spalart) {
-    double rclip = 9e6 ;
+    real rclip = 9e6 ;
     real S_t=$S_tilda_lim ;
     real k_coeff=$spalart.k_coeff ;
     real denom=k_coeff*k_coeff*$sa_dist_noslip*$sa_dist_noslip ;

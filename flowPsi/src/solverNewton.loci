@@ -95,12 +95,12 @@ namespace flowPsi {
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
     const real dp = $dfluid{n,it}[4] ;
     real alpha = 1.0 ;
-    double relax = 0.8 ;
+    real relax = 0.8 ;
     const real Tstar = $temperature{n,it} ;
     const real Tn = $temperature{n} ;
 
 
-    double dTlim = (relax*(2*Tn-Tstar))/2.0 ;
+    real dTlim = (relax*(2*Tn-Tstar))/2.0 ;
     
     alpha = min(alpha,dTlim/max(fabs(dT),1e-30)) ;
 
@@ -108,7 +108,7 @@ namespace flowPsi {
     const real peps = $localPBias{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
 
-    double dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
+    real dplim = (1+peps)*relax*(pgnp1+$Pambient)/2.0 ;
     alpha = min(alpha,dplim/max(fabs(dp),1e-30)) ;
     alpha = ($iblank{n,it}>1)?0.0:alpha ;
     $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;

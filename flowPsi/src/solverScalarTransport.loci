@@ -412,14 +412,14 @@ namespace flowPsi {
   $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
     constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
-    double factor = -$X_rhodot ; 
+    real factor = -$X_rhodot ; 
     $X_srcJ += factor ;
   }  
 
   $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
      constraint(geom_cells,timeStepAccurate,X,C),
      parametric(scalarTransportP(X,C)) {
-     double factor = -2.*$X_rhodot ; 
+     real factor = -2.*$X_rhodot ; 
      $X_srcJ += factor ;
   }
 
@@ -555,7 +555,7 @@ namespace flowPsi {
   }
 
   // Residue Output
-  $type X_residual param<double> ;
+  $type X_residual param<real> ;
   $rule unit(X_residual),constraint(geom_cells,C),
     parametric(scalarTransportP(X,C)) {
     $X_residual = 0 ;
@@ -574,9 +574,9 @@ namespace flowPsi {
 
   $rule apply(X_residual<-X_resid,vol,grid_vol_iblank)[Loci::Summation],constraint(geom_cells,C),
     parametric(scalarTransportP(X,C)) {
-    double weight = $vol/$grid_vol_iblank ;
-    double rvol = 1./$vol ;
-    double sq0 = (rvol*$X_resid)*(rvol*$X_resid) ;
+    real weight = $vol/$grid_vol_iblank ;
+    real rvol = 1./$vol ;
+    real sq0 = (rvol*$X_resid)*(rvol*$X_resid) ;
     
     join($X_residual,weight*sq0) ;
   } 
@@ -930,14 +930,14 @@ namespace flowPsi {
   $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
     constraint(geom_cells,X,timeStepSteadyState,C),
     parametric(scalarTransport(X,C)) {
-    double factor = -$X_rhodot ; 
+    real factor = -$X_rhodot ; 
     $X_srcJ += factor ;
   }  
 
   $rule apply(X_srcJ<-X_rhodot)[Loci::Summation],
      constraint(geom_cells,timeStepAccurate,X,C),
      parametric(scalarTransport(X,C)) {
-     double factor = -2.*$X_rhodot ; 
+     real factor = -2.*$X_rhodot ; 
      $X_srcJ += factor ;
   }
 
@@ -1073,7 +1073,7 @@ namespace flowPsi {
   }
 
   // Residue Output
-  $type X_residual param<double> ;
+  $type X_residual param<real> ;
   $rule unit(X_residual),constraint(geom_cells,C),
     parametric(scalarTransport(X,C)) {
     $X_residual = 0 ;
@@ -1092,9 +1092,9 @@ namespace flowPsi {
 
   $rule apply(X_residual<-X_resid,vol,grid_vol_iblank)[Loci::Summation],constraint(geom_cells,C),
     parametric(scalarTransport(X,C)) {
-    double weight = $vol/$grid_vol_iblank ;
-    double rvol = 1./$vol ;
-    double sq0 = (rvol*$X_resid)*(rvol*$X_resid) ;
+    real weight = $vol/$grid_vol_iblank ;
+    real rvol = 1./$vol ;
+    real sq0 = (rvol*$X_resid)*(rvol*$X_resid) ;
     
     join($X_residual,weight*sq0) ;
   } 

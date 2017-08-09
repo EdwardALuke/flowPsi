@@ -198,8 +198,8 @@ namespace flowPsi {
     }
   }
 
-  $type rhon store<double> ;
-  $type rhonp1 store<double> ;
+  $type rhon store<real> ;
+  $type rhonp1 store<real> ;
   $type un store<vect3d> ;
   
   // Density at n timestep
@@ -279,33 +279,32 @@ namespace flowPsi {
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
         dqdqstar[i][j] = 0 ;
-    for(int i=0;i<5;++i)
-      dqdqstar[i][i] = 1.0 ;
-    const real Pcoef = 2.0/(1+$localPBias)-1.0 ;
+
+    const real Pcoef = 2.0/(1+$localPBias) ;
     const real srhonp1 = sqrt($rhonp1) ;
     const real srhon = sqrt($rhon) ;
-    const real ucoef = 0.5*srhon/($rhonp1*srhonp1) ;
-    const real ucoef2 = srhon/srhonp1 ;
+    const real ucoef   = (srhonp1+srhon)/srhonp1 ;
 
     // derivative of harmonic mean formula
     const real tfactor = 1./(2*$Tn-$temperature) ;
-    const real dTdTs = ($Tn + $Tn*$temperature*tfactor)*tfactor ;
+    const real dTdTs = 2.*$Tn*$Tn*tfactor*tfactor ;
     const real drdt = -dTdTs*rho/$temperature ;
     const real drdp = Pcoef*rho/($gagePressure+$Pambient) ;
 
     dqdqstar[0][0] =  dTdTs ;
-    dqdqstar[4][4] += Pcoef ;
+    dqdqstar[1][1] = ucoef ;
+    dqdqstar[2][2] = ucoef ;
+    dqdqstar[3][3] = ucoef ;
+    dqdqstar[4][4] = Pcoef ;
     
-    dqdqstar[1][0] += ucoef*drdt*($un.x-$u.x) ;
-    dqdqstar[2][0] += ucoef*drdt*($un.y-$u.y) ;
-    dqdqstar[3][0] += ucoef*drdt*($un.z-$u.z) ;
-    dqdqstar[1][4] += ucoef*drdp*($un.x-$u.x) ;
-    dqdqstar[2][4] += ucoef*drdp*($un.y-$u.y) ;
-    dqdqstar[3][4] += ucoef*drdp*($un.z-$u.z) ;
-    dqdqstar[1][1] += ucoef2 ;
-    dqdqstar[2][2] += ucoef2 ;
-    dqdqstar[3][3] += ucoef2 ;
-    
+    const real ucoef2 = 0.5*srhon/(srhonp1*srhonp1*srhonp1) ;
+    dqdqstar[1][0] += ucoef2*drdt*($un.x-$u.x) ;
+    dqdqstar[2][0] += ucoef2*drdt*($un.y-$u.y) ;
+    dqdqstar[3][0] += ucoef2*drdt*($un.z-$u.z) ;
+    dqdqstar[1][4] += ucoef2*drdp*($un.x-$u.x) ;
+    dqdqstar[2][4] += ucoef2*drdp*($un.y-$u.y) ;
+    dqdqstar[3][4] += ucoef2*drdp*($un.z-$u.z) ;
+
     real coef = $vol/$dtau ;
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)

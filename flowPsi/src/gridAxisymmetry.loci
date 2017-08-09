@@ -67,9 +67,9 @@ namespace flowPsi {
     const int pi=4 ;
     const int ti=0 ;
 
-    double v = $u.y ;
-    double w = $u.z ;
-    double w2 = w*w ;
+    real v = $u.y ;
+    real w = $u.z ;
+    real w2 = w*w ;
     real rp = $rho/($Pambient+$gagePressure) ;
     real rt = -$rho/$temperature ;
     $srcJ[mi+1][pi]   += $axi_dyda*(1.+w2*rp) ;

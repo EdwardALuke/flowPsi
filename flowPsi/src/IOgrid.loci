@@ -34,7 +34,7 @@ using std::vector ;
 
 namespace flowPsi {
 
-  void dump_pos(const sequence &seq,const_store<vector3d<double> > &pos,
+  void dump_pos(const sequence &seq,const_store<vector3d<real> > &pos,
                 string plot_postfix, string modelName) {
     ostringstream oss ;
 
@@ -173,7 +173,7 @@ namespace flowPsi {
   register_rule<output_grid_topology> register_output_grid_topology ;
 
   class output_grid_positions_topo: public pointwise_rule {
-    const_store<vector3d<double> > pos ;
+    const_store<vector3d<real> > pos ;
     const_param<string> plot_postfix ;
     const_param<string> modelName ;
     param<bool> OUTPUT ;
@@ -204,7 +204,7 @@ namespace flowPsi {
 
   
   class output_grid_positions: public pointwise_rule {
-    const_store<vector3d<double> > pos ;
+    const_store<vector3d<real> > pos ;
     const_param<string> plot_postfix ;
     const_param<string> modelName ;
     const_param<int> hasMeshMotion ;
@@ -296,7 +296,7 @@ namespace flowPsi {
 
 
 class output_restart_grid: public pointwise_rule {
-    const_store<vector3d<double> > pos ;
+    const_store<vector3d<real> > pos ;
     const_param<string> restart_directory ;
     const_param<string> restart_postfix ;
     const_param<string> modelName ;

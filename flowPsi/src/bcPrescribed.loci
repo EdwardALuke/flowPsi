@@ -297,12 +297,12 @@ namespace flowPsi {
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         
         
-        double dist = 1e30 ;
+        real dist = 1e30 ;
         sequence sgroup = sequence(bci->second) ; 
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
           vect3d fcenter = facecenter[*si] ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<double> w ;
+          vector<real> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
@@ -442,12 +442,12 @@ namespace flowPsi {
 
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         
-        double dist = 1e30;
+        real dist = 1e30;
         sequence sgroup = sequence(bci->second) ; 
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
           vect3d fcenter = facecenter[*si] ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<double> w ;
+          vector<real> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
@@ -535,11 +535,11 @@ namespace flowPsi {
 
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         sequence sgroup = sequence(bci->second) ; 
-        double dist = 1e30 ;
+        real dist = 1e30 ;
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
           vect3d fcenter = facecenter[*si] ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<double> w ;
+          vector<real> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
@@ -621,11 +621,11 @@ namespace flowPsi {
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         sequence sgroup = sequence(bci->second) ; 
 
-        double dist = 1e30 ;
+        real dist = 1e30 ;
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
           vect3d fcenter = facecenter[*si] ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<double> w ;
+          vector<real> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values

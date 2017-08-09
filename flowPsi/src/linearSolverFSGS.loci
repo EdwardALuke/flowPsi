@@ -30,6 +30,9 @@ $include "flowPsi.lh"
 
 // Scalar solver using modified line gauss seidel method
 namespace FGSI {
+  using flowPsi::real ;
+  using flowPsi::realF ;
+  using flowPsi::real_fj ;
   using std::vector ;
   using std::sort ;
   using std::swap ;
@@ -37,7 +40,6 @@ namespace FGSI {
   using std::endl ;
   using std::cerr ;
   
-  typedef double real ;
   // Scalar solve
   $type X_B store<real> ;
   $type X_D store<real> ;
@@ -144,9 +146,9 @@ namespace FGSI {
   vector<matrixStructure> matrixInfo ;
 
   struct scalarMatrixData {
-    vector<double> B ;
-    vector<double> D ;
-    vector<double> F ;
+    vector<real> B ;
+    vector<real> D ;
+    vector<real> F ;
   } ;
 
   $type FSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
@@ -604,9 +606,9 @@ namespace FGSI {
   $rule blackbox(FSGSscalarMatrix(X)<-FSGSmatrixTopology,
 		 X_B,X_D,upper->X_U,lower->X_L), prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
-    vector<double> B(matrix.eql2g.size()); 
-    vector<double> D(matrix.eql2g.size()); 
-    vector<double> F(matrix.outerCLR.size()); 
+    vector<real> B(matrix.eql2g.size()); 
+    vector<real> D(matrix.eql2g.size()); 
+    vector<real> F(matrix.outerCLR.size()); 
     
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
@@ -624,15 +626,15 @@ namespace FGSI {
 
     // Preprocess lines (recompute diagonal term)
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      double *L = &F[matrix.lineData[l].Lstart] ;
-      double *U = &F[matrix.lineData[l].Ustart] ;
-      double *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
+      real *L = &F[matrix.lineData[l].Lstart] ;
+      real *U = &F[matrix.lineData[l].Ustart] ;
+      real *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
       int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
       //      D[0] = 1./(D[0]<0.0?min(D[0],-1e-30):max(D[0],1e-30)) ;
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
-        double Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
+        real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
         Dp[i] = 1./(Dt<0.0?min(Dt,-1e-30):max(Dt,1e-30)) ;
       }
     }
@@ -652,12 +654,12 @@ namespace FGSI {
                  prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
     // Copy in x to our cache optimal ordering
-    vector<double> x1(matrix.eql2g.size(),0.0);
+    vector<real> x1(matrix.eql2g.size(),0.0);
 
-    double * X = &x1[0] ;
-    vector<double> rhs(matrix.mxlinelen) ;
-    vector<double> send_data(matrix.send_entitiesl.size()) ;
-    vector<double> recv_data(matrix.recv_entitiesl.size()) ;
+    real * X = &x1[0] ;
+    vector<real> rhs(matrix.mxlinelen) ;
+    vector<real> send_data(matrix.send_entitiesl.size()) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
     
@@ -700,11 +702,11 @@ namespace FGSI {
       
       // Forward sweep
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const double *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const double *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const double *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const double *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const double *F = &$FSGSscalarMatrix(X)->F[0] ;
+	const real *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$FSGSscalarMatrix(X)->F[0] ;
 
 	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
 
@@ -721,7 +723,7 @@ namespace FGSI {
 	}
       
 
-	double *restrict x = &X[eqb] ;
+	real *restrict x = &X[eqb] ;
 	// now solve line
 	// forward solve 
 	x[0] = rhs[0] ;
@@ -738,11 +740,11 @@ namespace FGSI {
 
       // Backward sweep
       for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const double *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const double *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const double *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const double *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const double *F = &$FSGSscalarMatrix(X)->F[0] ;
+	const real *L = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$FSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$FSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$FSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$FSGSscalarMatrix(X)->F[0] ;
 
 	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
 
@@ -758,7 +760,7 @@ namespace FGSI {
 	  rhs[matrix.outerCLR[i].first-eqb] -= X[matrix.outerCLR[i].second]*F[i] ;
 	}
 
-	double *restrict x = &X[eqb] ;
+	real *restrict x = &X[eqb] ;
 	// now solve line
 	// forward solve 
 	x[0] = rhs[0] ;
@@ -781,7 +783,6 @@ namespace FGSI {
   } ;
     
 
-  typedef float real_fj ;
   // Blocked version
   $type X_B storeVec<real_fj> ;
   $type X_D storeMat<real_fj> ;
@@ -1103,8 +1104,8 @@ namespace FGSI {
     struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
     int vs = $FSGSblockedMatrix(X)->vs ;
     $FSGSBlockedSSolve(X).setVecSize(vs) ;
-    vector<double> x1(matrix.eql2g.size()*vs,0.0) ;
-    double *X = &x1[0] ;
+    vector<real> x1(matrix.eql2g.size()*vs,0.0) ;
+    real *X = &x1[0] ;
 
     const real_fj *B = &($FSGSblockedMatrix(X)->B[0]) ;
     const real_fj *F = &($FSGSblockedMatrix(X)->F[0]) ;
@@ -1113,8 +1114,8 @@ namespace FGSI {
     const pivot_type *pivot = &($FSGSblockedMatrix(X)->pivot[0]) ;
     int neq = matrix.lineData.size() ;
 
-    vector<double> send_data(matrix.send_entitiesl.size()*vs) ;
-    vector<double> recv_data(matrix.recv_entitiesl.size()*vs) ;
+    vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
     int num_iter = *$gauss_seidel_iter ;

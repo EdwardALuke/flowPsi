@@ -214,7 +214,7 @@ namespace flowPsi {
     const real coeft = T/(p*gm1) ;
     const real coeft2 = T*$Rtilde*gm1 ;
     const real rvol = 1./$vol ;
-    double factor = rvol*(q*$src[0]-$u.x*$src[1]-$u.y*$src[2]-$u.z*$src[3]+
+    real factor = rvol*(q*$src[0]-$u.x*$src[1]-$u.y*$src[2]-$u.z*$src[3]+
 			  $src[4]) ;
     const real trate = coeft*(factor - coeft2*$src[0]) ;
     dt = min(dt,$urelax*T/(fabs(trate)+1e-30)) ;
@@ -233,7 +233,7 @@ namespace flowPsi {
     inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepSteadyState) ,prelude {} ;
 
   
-  $type timePressureBiasControl param<double> ;
+  $type timePressureBiasControl param<real> ;
   $rule default(timePressureBiasControl) {
     $timePressureBiasControl = 0.0 ;
   }
@@ -241,8 +241,8 @@ namespace flowPsi {
   // Compute local pressure bias using cfl
   $rule pointwise(localPBias<-cflpdt,dtmax,timePressureBiasControl),
     constraint(geom_cells,timeStepAccurate) {
-    double cfl = $cflpdt*$dtmax ;
-    double factor = min(1.0,max(0.0,0.1*(cfl-1.))) ;
+    real cfl = $cflpdt*$dtmax ;
+    real factor = min(1.0,max(0.0,0.1*(cfl-1.))) ;
     $localPBias = max($timePressureBiasControl,pow(factor,0.7)) ;
   }
   
