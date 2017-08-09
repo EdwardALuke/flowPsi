@@ -145,9 +145,9 @@ namespace flowPsi {
     vector<coord3df> pnts(npnts) ;
     vector<int> pnt_id (npnts) ;
     for(int i=0;i<npnts;++i) {
-      pnts[i][0] = loc[i].x ;
-      pnts[i][1] = loc[i].y ;
-      pnts[i][2] = loc[i].z ;
+      pnts[i][0] = realToFloat(loc[i].x) ;
+      pnts[i][1] = realToFloat(loc[i].y) ;
+      pnts[i][2] = realToFloat(loc[i].z) ;
       pnt_id[i] = i ;
     }
 

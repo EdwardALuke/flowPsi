@@ -910,7 +910,7 @@ namespace flowPsi {
         f = df->l2g[*ei];
       }
       int bcid = fbcid[*ei] ;
-      vector3d<float> pt=p1 ;
+      vector3d<float> pt=realToFloat(p1) ;
       int cell = kd_list[bcid]->find_closest(pt) ;
       //      cout << "cell = " << cell << endl ;
       seed_list.push_back(TurboPoint(0,p1,cell,f,bcid));
@@ -1868,7 +1868,7 @@ namespace flowPsi {
 	pair<pair<int,int>,vector3d<float> > info ;
 	info.first.first = partner ;
 	info.first.second = cell ;
-	info.second = cpt ;
+	info.second = realToFloat(cpt) ;
 	initDBLocal.push_back(info) ;
       }
       // Gather together the initDB

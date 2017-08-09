@@ -123,7 +123,7 @@ namespace flowPsi {
       us_n_int += dot(ah,xp-xm);
     }
     // Get grid velocity at face by dividing by face area
-    $us_n{n,it} = .25*us_n_int/(3.*max<real>($area{n,it}.sada,1e-30)*$dtmax) ;
+    $us_n{n,it} = .25*us_n_int/(3.*max<real>($area{n,it}.sada,1e-30)*real($dtmax)) ;
   }
 
   $rule pointwise(axi::moving::us_n{n,it}<-dtmax,face2node->(pos{n},pos{n,it}),area{n,it}),
@@ -153,7 +153,7 @@ namespace flowPsi {
     wc_prev *= .5/lensum_prev ;
     wc_next *= .5/lensum_next ;
     
-    $us_n{n,it} = dot(wc_next-wc_prev,$area{n,it}.n)/$dtmax ;
+    $us_n{n,it} = dot(wc_next-wc_prev,$area{n,it}.n)/real($dtmax) ;
   }
 
   // Compute absolute grid velocity for viscous walls

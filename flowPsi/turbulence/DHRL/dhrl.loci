@@ -352,7 +352,7 @@ namespace flowPsi {
   $rule pointwise(dhrl::wallLaw::k_rhs{n,it}<-vol{n,it},dtmax{n,it},k_src{n,it},
                   k{n},k{n,it},rho_avg{n,it}),
     constraint(k_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
-    real factor = $vol{n,it}/$dtmax{n,it} ;
+    real factor = $vol{n,it}/real($dtmax{n,it}) ;
     
     real rn = $rho_avg{n,it} ;
 
@@ -363,7 +363,7 @@ namespace flowPsi {
   $rule pointwise(dhrl::wallLaw::w_rhs{n,it}<-vol{n,it},dtmax{n,it},w_src{n,it},
                   w{n},w{n,it},rho_avg{n,it}),
     constraint(w_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
-    real factor = $vol{n,it}/$dtmax{n,it} ;
+    real factor = $vol{n,it}/real($dtmax{n,it}) ;
     
     real rn = $rho_avg{n,it} ;
 

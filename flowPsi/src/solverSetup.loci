@@ -145,7 +145,7 @@ namespace flowPsi {
     constraint(timeStepAccurate,cflpdt) {
     std::pair<real,real> CFL ;
     if($iblank < 2) {
-      CFL.first = $cflpdt*$dtmax ;
+      CFL.first = $cflpdt*real($dtmax) ;
       CFL.second = CFL.first ;
       join($cfl,CFL) ;
     }

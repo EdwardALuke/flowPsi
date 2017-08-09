@@ -30,9 +30,19 @@ $include "flowPsi.lh"
 //#define JACOBI
 // Scalar solver using modified line gauss seidel method
 namespace LGSI {
+#ifdef USE_AUTODIFF
+#ifdef AUTODIFF2ND
+#define LSGS_TYPE Loci::MPI_FADD2
+#else
+#define LSGS_TYPE Loci::MPI_FADD 
+#endif
+#else	
+#define LSGS_TYPE MPI_DOUBLE
+#endif
   using flowPsi::real ;
   using flowPsi::real_fj ;
   using flowPsi::realF ;
+  using Loci::realToDouble ;
   using std::vector ;
   using std::sort ;
   using std::swap ;
@@ -48,8 +58,8 @@ namespace LGSI {
   $type LSGSConnectivity(X) store<realF> ;
 
   $type LSGSRelaxation param<real> ;
-  $type LSGSAbsTol param<real> ;
-  $type LSGSRelTol param<real> ;
+  $type LSGSAbsTol param<double> ;
+  $type LSGSRelTol param<double> ;
   $type LSGSMaxIter param<int> ;
 
   $rule default(LSGSRelaxation) {
@@ -409,7 +419,7 @@ namespace LGSI {
         const int usz = $upper[ii].size() ;
         const int msz = lsz+usz ;
         vector<int> cmap(msz) ;
-        vector<float> cval(msz) ;
+        vector<realF> cval(msz) ;
         for(int i=0;i<lsz;++i) {
           cval[i] = $LSGSConnectivity(X)[$lower[ii][i]] ;
           cmap[i] = toeqn[$cl[$lower[ii][i]]] ;
@@ -1029,7 +1039,7 @@ namespace LGSI {
         int re = matrix.recv_offsets[i+1] ;
         int rsz = re-rs ;
         int p = matrix.recv_processors[i] ;
-        MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
                   MPI_COMM_WORLD,&requests[i]) ;
       }
       for(size_t i=0;i<matrix.send_processors.size();++i) {
@@ -1037,7 +1047,7 @@ namespace LGSI {
         int se = matrix.send_offsets[i+1] ;
         int ssz = se-ss ;
         int p = matrix.send_processors[i] ;
-        MPI_Send(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD) ;
+        MPI_Send(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD) ;
       }
       MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
       // copy recieved data 
@@ -1130,13 +1140,13 @@ namespace LGSI {
         send_data[i] = X[matrix.send_entitiesl[i]] ;
 
       // Relax update and compute current estimate for residual
-      real residl = 0 ;
+      double residl = 0 ;
       for(int i=0;i<matrix.nmyeqn;++i) {
         X[i] = w*X[i] + (1.-w)*xt[i] ;
-	real r = X[i]-xt[i] ;
+	double r = realToDouble(X[i]-xt[i]) ;
 	residl += r*r ;
       }
-      real resid = 0 ;
+      double resid = 0 ;
       MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
       resid = sqrt(resid) ;
       if(0 == iter)
@@ -1571,7 +1581,7 @@ namespace LGSI {
           int re = matrix.recv_offsets[i+1]*vs ;
           int rsz = re-rs ;
           int p = matrix.recv_processors[i] ;
-          MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+          MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
                     MPI_COMM_WORLD,&requests[i]) ;
         }
 
@@ -1582,7 +1592,7 @@ namespace LGSI {
           int se = matrix.send_offsets[i+1]*vs ;
           int ssz = se-ss ;
           int p = matrix.send_processors[i] ;
-          MPI_Isend(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD,
+          MPI_Isend(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD,
                     &requests[i+rpsz]) ;
         }
         MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
@@ -1668,7 +1678,7 @@ namespace LGSI {
         int re = matrix.recv_offsets[i+1]*vs ;
         int rsz = re-rs ;
         int p = matrix.recv_processors[i] ;
-        MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
                   MPI_COMM_WORLD,&requests[i]) ;
       }
 
@@ -1679,15 +1689,15 @@ namespace LGSI {
         int se = matrix.send_offsets[i+1]*vs ;
         int ssz = se-ss ;
         int p = matrix.send_processors[i] ;
-        MPI_Isend(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD,
+        MPI_Isend(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD,
                   &requests[i+rpsz]) ;
       }
 
       // Compute residual
-      real residl = 0 ;
+      double residl = 0 ;
       for(int i=0;i<matrix.nmyeqn*vs;++i) {
 	X[i] = w*X[i] + (1.-w)*xt[i] ;
-	real r = X[i]-xt[i] ;
+	double r = realToDouble(X[i]-xt[i]) ;
 	residl += r*r ;
       }
 
@@ -1743,7 +1753,7 @@ namespace LGSI {
       }
 
       // Check residual
-      real resid = 0 ;
+      double resid = 0 ;
       MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
       resid = sqrt(resid) ;
       if(0 == iter)

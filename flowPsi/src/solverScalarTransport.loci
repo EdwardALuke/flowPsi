@@ -458,7 +458,7 @@ namespace flowPsi {
                    X{n},X{n,it},X_np1{n,it},rhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,C),
     parametric(scalarTransportP(X,C)) {
-     const real factor = $vol{n,it}/$dtmax{n,it} ;
+     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
     
      const real rn = $rhon{n,it} ;
      $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
@@ -977,7 +977,7 @@ namespace flowPsi {
                    X{n},X{n,it},X_np1{n,it},rhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,C),
     parametric(scalarTransport(X,C)) {
-     const real factor = $vol{n,it}/$dtmax{n,it} ;
+     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
     
      const real rn = $rhon{n,it} ;
      $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;

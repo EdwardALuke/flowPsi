@@ -34,7 +34,7 @@ using std::vector ;
 
 namespace flowPsi {
 
-  void dump_pos(const sequence &seq,const_store<vector3d<real> > &pos,
+  void dump_pos(const sequence &seq,const_store<vector3d<double> > &pos,
                 string plot_postfix, string modelName) {
     ostringstream oss ;
 
@@ -58,6 +58,69 @@ namespace flowPsi {
 
    Loci::hdf5CloseFile(file_id) ;
   }
+
+  void dump_pos(const sequence &seq,const_store<vector3d<Loci::FADd> > &pos,
+                string plot_postfix, string modelName) {
+    ostringstream oss ;
+
+    if(plot_postfix != "") 
+      oss << "output/grid_pos." << plot_postfix << "_" << modelName ;
+    else
+      oss << "output/grid_pos." << modelName ;
+      
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   store<vector3d<double> > pcopy ;
+   entitySet dom = pos.domain() ;
+   pcopy.allocate(dom) ;
+   FORALL(dom,ii) {
+     pcopy[ii] = realToDouble(pos[ii]) ;
+   } ENDFORALL ;
+   Loci::writeContainer(file_id,"pos",pcopy.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+
+  void dump_pos(const sequence &seq,const_store<vector3d<Loci::FAD2d> > &pos,
+                string plot_postfix, string modelName) {
+    ostringstream oss ;
+
+    if(plot_postfix != "") 
+      oss << "output/grid_pos." << plot_postfix << "_" << modelName ;
+    else
+      oss << "output/grid_pos." << modelName ;
+      
+    string filename = oss.str() ;
+
+#ifdef VERBOSE
+    if(Loci::MPI_rank == 0)
+      cout << "writing file " << filename << endl ;
+#endif
+
+
+   hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+                                        H5P_DEFAULT, H5P_DEFAULT) ;
+
+   store<vector3d<double> > pcopy ;
+   entitySet dom = pos.domain() ;
+   pcopy.allocate(dom) ;
+   FORALL(dom,ii) {
+     pcopy[ii] = realToDouble(pos[ii]) ;
+   } ENDFORALL ;
+   Loci::writeContainer(file_id,"pos",pcopy.Rep()) ;
+
+   Loci::hdf5CloseFile(file_id) ;
+  }
+  
 
   $type output_topo param<bool> ;
   $type ncycle param<int> ;

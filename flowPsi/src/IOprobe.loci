@@ -50,12 +50,12 @@ namespace flowPsi {
   }
   
   struct probe_values {
-    real distance ;
-    vect3d position ;
-    vect3d velocity ;
-    real gagepressure ;
-    real temperature ;
-    probe_values() { distance = 1e30 ; position=vect3d(0,0,0) ;
+    double distance ;
+    vector3d<double> position ;
+    vector3d<double> velocity ;
+    double gagepressure ;
+    double temperature ;
+    probe_values() { distance = 1e30 ; position=vector3d<double>(0,0,0) ;
       velocity = position; ;gagepressure=0;temperature=0;}
   } ;
 
@@ -91,7 +91,7 @@ namespace Loci {
         sz += 9  ;
       return sz ;
     }
-    void getState(flowPsi::real *buf, int &size) {
+    void getState(double *buf, int &size) {
       size = getSize() ;
       size_t p=0 ;
 
@@ -109,10 +109,10 @@ namespace Loci {
         buf[p++] = ref[i].temperature ;
       }
     }
-    void setState(flowPsi::real *buf, int size) {
+    void setState(double *buf, int size) {
       ref.clear() ;
       int p = 0 ;
-      int sz = int(realToDouble(buf[p++])) ;
+      int sz = int(buf[p++]) ;
       ref.reserve(sz) ;
       for(int i=0;i<sz;++i) {
         flowPsi::probe_values pv ;
@@ -132,27 +132,27 @@ namespace Loci {
     
   template <> struct data_schema_traits<std::vector<flowPsi::probe_values> > {
     typedef USER_DEFINED_CONVERTER Schema_Converter ;
-    typedef flowPsi::real Converter_Base_Type ;
+    typedef double Converter_Base_Type ;
     typedef probeSchemaConverter Converter_Type ;
   } ;
 }
 
 namespace flowPsi {
 
-  $type probecenter store<vect3d> ;
+  $type probecenter store<vector3d<double> > ;
 
   $rule pointwise(probecenter{n,it}<-cellcenter),constraint(geom_cells{n,it}) {
-    $probecenter{n,it} = $cellcenter ;
+    $probecenter{n,it} = realToDouble($cellcenter) ;
   }
     
-  $type probePos param<std::vector<vect3d> > ;
+  $type probePos param<std::vector<vector3d<double> > > ;
 
   $rule singleton(probePos<-probe) {
     options_list::option_namelist l = $probe.getOptionNameList() ;
-    std::vector<vect3d> pposlist ;
+    std::vector<vector3d<double> > pposlist ;
     for(options_list::option_namelist::const_iterator li=l.begin();
 	li!=l.end();++li) {
-      vect3d val=vect3d(0.,0.,0.) ;
+      vector3d<double> val=vector3d<double>(0.,0.,0.) ;
       $probe.getOptionUnits(li->c_str(),"m",val) ;
       pposlist.push_back(val) ;
     }
@@ -182,15 +182,15 @@ namespace flowPsi {
     fatal($probePos.size() != psz) ;
     
     for(size_t i=0; i<psz ;++i) {
-      const vect3d dr = $probecenter-$probePos[i] ;
-      const real dist = dot(dr,dr) ;
+      const vector3d<double> dr = $probecenter-$probePos[i] ;
+      const double dist = dot(dr,dr) ;
       if(dist < $probeList[i].distance) {
 	probe_values pv ;
 	pv.distance = dist ;
 	pv.position = $probecenter ;
-	pv.velocity = $u ;
-	pv.gagepressure = $gagePressure ;
-	pv.temperature = $temperature ;
+	pv.velocity = realToDouble($u) ;
+	pv.gagepressure = realToDouble($gagePressure) ;
+	pv.temperature = realToDouble($temperature) ;
 	$probeList[i] = pv ;
       }
     }
@@ -314,7 +314,7 @@ namespace flowPsi {
 
   register_rule<output_probe> register_output_probe ;
 
-  $type probePosFile param<std::vector<vect3d> > ;
+  $type probePosFile param<std::vector<vector3d<double> > > ;
   $type probeListFile param<std::string> ;
   $rule optional(probeListFile) {
   }
@@ -326,13 +326,13 @@ namespace flowPsi {
       if(file.fail()) {
 	cerr << "unable to open probeListFile '" << filename
 	     << "'" << endl ;
-	std::vector<vect3d> plist(1) ;
-	plist[0] = vect3d(0,0,0) ;
+	std::vector<vector3d<double> > plist(1) ;
+	plist[0] = vector3d<double>(0,0,0) ;
 	$probePosFile=plist ;
       } else {
 	int npnts = 0 ;
 	file >> npnts ;
-	std::vector<vect3d> plist(npnts) ;
+	std::vector<vector3d<double> > plist(npnts) ;
 	for(int i=0;i<npnts;++i) {
 	  file >> plist[i].x >> plist[i].y >> plist[i].z ;
 	}
@@ -344,7 +344,7 @@ namespace flowPsi {
     MPI_Bcast(&pfile_size,1,MPI_INT,0,MPI_COMM_WORLD) ;
     // allocate space on high numbered processors
     if(Loci::MPI_rank != 0) {
-      std::vector<vect3d> plist(pfile_size) ;
+      std::vector<vector3d<double> > plist(pfile_size) ;
       $probePosFile = plist ;
     }
     //broadcast points
@@ -355,10 +355,10 @@ namespace flowPsi {
 
   $rule pointwise(probePosFileIndex<-probePosFile,cellcenter) {
     size_t psz = $probePosFile.size() ;
-    real mindist = 1e30 ;
+    double mindist = 1e30 ;
     for(size_t i=0; i<psz ;++i) {
-      const vect3d dr = $probePosFile[i]-$cellcenter ;
-      const real dist = dot(dr,dr) ;
+      const vector3d<double> dr = $probePosFile[i]-realToDouble($cellcenter) ;
+      const double dist = dot(dr,dr) ;
       if(dist < mindist) {
 	$probePosFileIndex = i ;
 	mindist = dist ;
@@ -385,16 +385,16 @@ namespace flowPsi {
   [min_probe_list] {
     fatal($probePosFile.size() != $probeListData.size()) ;
     int lsz = $lower.size() ;
-    real tmax = $temperature ;
-    real tmin = tmax ;
-    real pgmax = $gagePressure ;
-    real pgmin = pgmax ;
-    vect3d umax = $u ;
-    vect3d umin = umax ;
+    double tmax = realToDouble($temperature) ;
+    double tmin = tmax ;
+    double pgmax = realToDouble($gagePressure) ;
+    double pgmin = pgmax ;
+    vector3d<double> umax = realToDouble($u) ;
+    vector3d<double> umin = umax ;
     for(int j=0;j<lsz;++j) {
-      real t = $lower[j]->$cl->$temperature ;
-      real pg = $lower[j]->$cl->$gagePressure ;
-      vect3d ut = $lower[j]->$cl->$u ;
+      double t = realToDouble($lower[j]->$cl->$temperature) ;
+      double pg = realToDouble($lower[j]->$cl->$gagePressure) ;
+      vector3d<double> ut = realToDouble($lower[j]->$cl->$u) ;
       tmax = max(tmax,t) ;
       tmin = min(tmin,t) ;
       pgmax = max(pgmax,pg) ;
@@ -408,9 +408,9 @@ namespace flowPsi {
     }
     const int usz = $upper.size() ;
     for(int j=0;j<usz;++j) {
-      real t = $upper[j]->$cr->$temperature ;
-      real pg = $upper[j]->$cr->$gagePressure ;
-      vect3d ut = $upper[j]->$cr->$u ;
+      double t = realToDouble($upper[j]->$cr->$temperature) ;
+      double pg = realToDouble($upper[j]->$cr->$gagePressure) ;
+      vector3d<double> ut = realToDouble($upper[j]->$cr->$u) ;
       tmax = max(tmax,t) ;
       tmin = min(tmin,t) ;
       pgmax = max(pgmax,pg) ;
@@ -424,9 +424,9 @@ namespace flowPsi {
     }
     int bsz = $boundary_map.size() ;
     for(int j=0;j<bsz;++j) {
-      real t = $boundary_map[j]->$temperature_f ;
-      real pg = $boundary_map[j]->$gagePressure_f ;
-      vect3d ut = $boundary_map[j]->$u_f ;
+      double t = realToDouble($boundary_map[j]->$temperature_f) ;
+      double pg = realToDouble($boundary_map[j]->$gagePressure_f) ;
+      vector3d<double> ut = realToDouble($boundary_map[j]->$u_f) ;
       tmax = max(tmax,t) ;
       tmin = min(tmin,t) ;
       pgmax = max(pgmax,pg) ;
@@ -440,19 +440,23 @@ namespace flowPsi {
     }
 
     int i= $probePosFileIndex ;
-    const vect3d dr = $probePosFile[i]-$cellcenter ;
-    const real dist = dot(dr,dr) ;
+   
+    const vect3d ppos = vect3d($probePosFile[i].x,
+			       $probePosFile[i].y,
+			       $probePosFile[i].z) ;
+    const vect3d dr = ppos-$cellcenter ;
+    const double dist = realToDouble(dot(dr,dr)) ;
     if(dist < $probeListData[i].distance) {
-      real ti = max(min($temperature+dot($grads(temperature),dr),
+      double ti = max(min(realToDouble($temperature+dot($grads(temperature),dr)),
 			tmax),tmin) ;
-      real pgi = max(min($gagePressure+dot($grads(gagePressure),dr),
+      double pgi = max(min(realToDouble($gagePressure+dot($grads(gagePressure),dr)),
 			 pgmax),pgmin) ;
-      vect3d ui ;
-      ui.x = max(min($u.x+dot($gradv3d(u).x,dr),
-		     umax.x),umin.x) ;
-      ui.y = max(min($u.y+dot($gradv3d(u).y,dr),
+      vector3d<double> ui ;
+      ui.x = max(min(realToDouble($u.x+dot($gradv3d(u).x,dr)),
+		     umax.x),umin.x) ;	
+      ui.y = max(min(realToDouble($u.y+dot($gradv3d(u).y,dr)),
 		     umax.y),umin.y) ;
-      ui.z = max(min($u.z+dot($gradv3d(u).z,dr),
+      ui.z = max(min(realToDouble($u.z+dot($gradv3d(u).z,dr)),
 		     umax.z),umin.z) ;
       probe_values pv ;
       pv.distance = dist ;

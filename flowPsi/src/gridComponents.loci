@@ -300,7 +300,7 @@ namespace flowPsi {
  
   $rule apply(componentMotionData<-componentRotationAxis_X,componentRotationCenter_X,componentRotationSpeed_X,componentName_X,dtmax,stime)[Loci::NullOp],
     constraint(componentRotation_X),parametric(volumeTag(X)), prelude {
-    real t = *$stime + *$dtmax ;
+    real t = *$stime + real(*$dtmax) ;
     
     const real angle = *$componentRotationSpeed_X*t ;
     Quaternion rotation(*$componentRotationAxis_X,angle) ;
@@ -620,7 +620,7 @@ namespace flowPsi {
 
   $rule apply(componentMotionData<-prescribedMotion_X,prescribedCG_X,componentName_X,dtmax,stime)[Loci::NullOp],
     constraint(componentPrescribed_X),parametric(volumeTag(X)), prelude {
-    real t = *$stime + *$dtmax ;
+    real t = *$stime + real(*$dtmax) ;
     vect3d cg_new ;
     Quaternion q ;
     $prescribedMotion_X->getMotion(cg_new,q,t) ;
@@ -674,7 +674,9 @@ namespace flowPsi {
   $rule apply(face2node->surfaceNodeNormal<-area)[Loci::Summation],constraint(AllWallBCs) {
     vect3d n = $area.n ;
     real a = 1.0; //$area.sada ;
-    vector3d<float> an(a*n.x,a*n.y,a*n.z) ;
+    vector3d<float> an(realToFloat(a*n.x),
+		       realToFloat(a*n.y),
+		       realToFloat(a*n.z)) ;
     int sz = $face2node.size() ;
     for(int i=0;i<sz;++i)
       join($face2node[i]->$surfaceNodeNormal,an) ;
@@ -695,7 +697,7 @@ namespace flowPsi {
       vect3d pi = $face2node[i]->$pos ;
       for(int j=0;j<sz;++j)
         if(i!=j) {
-          vector3d<float> dpj = $face2node[j]->$pos-pi ;
+          vector3d<float> dpj = realToFloat($face2node[j]->$pos-pi) ;
           dpj *= 1./norm(dpj) ;
           join($face2node[i]->$surfaceNodeAngle,dot(n,dpj)) ;
         }
@@ -703,7 +705,7 @@ namespace flowPsi {
   }
 
 
-  $type stencilSize2 param<real> ;
+  $type stencilSize2 param<double> ;
   $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
 
   $type crossComponentDist_node store<float> ;
@@ -715,10 +717,10 @@ namespace flowPsi {
   $type distanceFieldGradient store<vector3d<float> > ;
 
   $rule pointwise(distanceFieldGradient<-pos,node2surf->(pos,surfaceNodeNormal)) {
-    vector3d<float> dv = $pos-$node2surf->$pos ;
-    real ldv = max(norm(dv),1e-30f) ;
+    vector3d<float> dv = realToFloat($pos-$node2surf->$pos) ;
+    float ldv = max(norm(dv),1e-30f) ;
     vector3d<float> sn = -1.*$node2surf->$surfaceNodeNormal ;
-    real lsn = max(norm(sn),1e-30f) ;
+    float lsn = max(norm(sn),1e-30f) ;
     $distanceFieldGradient = (ldv< 1e-10)?((1./lsn)*sn):((1./ldv)*dv) ;
   }
   // Here we will try to find the closest point using a bounding box search
@@ -759,12 +761,12 @@ namespace flowPsi {
       $crossComponentID_node[nd] = -1 ; // No component by default
       $crossComponentDist_node[nd] = 1e30 ;
       $crossComponentDistGrad_node[nd] = vector3d<float>(0,0,0) ;
-      bbox_set[id][0] = min(bbox_set[id][0],float($pos[nd].x-delta)) ;
-      bbox_set[id][1] = max(bbox_set[id][1],float($pos[nd].x+delta)) ;
-      bbox_set[id][2] = min(bbox_set[id][2],float($pos[nd].y-delta)) ;
-      bbox_set[id][3] = max(bbox_set[id][3],float($pos[nd].y+delta)) ;
-      bbox_set[id][4] = min(bbox_set[id][4],float($pos[nd].z-delta)) ;
-      bbox_set[id][5] = max(bbox_set[id][5],float($pos[nd].z+delta)) ;
+      bbox_set[id][0] = min(bbox_set[id][0],realToFloat($pos[nd].x-delta)) ;
+      bbox_set[id][1] = max(bbox_set[id][1],realToFloat($pos[nd].x+delta)) ;
+      bbox_set[id][2] = min(bbox_set[id][2],realToFloat($pos[nd].y-delta)) ;
+      bbox_set[id][3] = max(bbox_set[id][3],realToFloat($pos[nd].y+delta)) ;
+      bbox_set[id][4] = min(bbox_set[id][4],realToFloat($pos[nd].z-delta)) ;
+      bbox_set[id][5] = max(bbox_set[id][5],realToFloat($pos[nd].z+delta)) ;
     } ENDFORALL ;
     int p = Loci::MPI_processes ;
 
@@ -892,10 +894,10 @@ for(int i=0;i<p;i++) {
 
       for(int j=0;j<sz;++j) {
 	int nd = send_set[i][j] ;
-	recv_pnts[recv_off[i]+j][0] = $pos[nd].x ;
-	recv_pnts[recv_off[i]+j][1] = $pos[nd].y ;
-	recv_pnts[recv_off[i]+j][2] = $pos[nd].z ;
-	float dist = norm($pos[nd]-$pos[$node2surf[nd]]) ;
+	recv_pnts[recv_off[i]+j][0] = realToFloat($pos[nd].x) ;
+	recv_pnts[recv_off[i]+j][1] = realToFloat($pos[nd].y) ;
+	recv_pnts[recv_off[i]+j][2] = realToFloat($pos[nd].z) ;
+	float dist = realToFloat(norm($pos[nd]-$pos[$node2surf[nd]])) ;
 	recv_pnts[recv_off[i]+j][3] = dist ;
 	vector3d<float> ncorrect = $distanceFieldGradient[nd] ;
 	recv_pnts[recv_off[i]+j][4] = ncorrect.x ;
@@ -910,10 +912,10 @@ for(int i=0;i<p;i++) {
 
       for(int j=0;j<sz;++j) {
 	int nd = send_set[i][j] ;
-	send_buf[j][0] = $pos[nd].x ;
-	send_buf[j][1] = $pos[nd].y ;
-	send_buf[j][2] = $pos[nd].z ;
-	float dist = norm($pos[nd]-$pos[$node2surf[nd]]) ;
+	send_buf[j][0] = realToFloat($pos[nd].x) ;
+	send_buf[j][1] = realToFloat($pos[nd].y) ;
+	send_buf[j][2] = realToFloat($pos[nd].z) ;
+	float dist = realToFloat(norm($pos[nd]-$pos[$node2surf[nd]])) ;
 	send_buf[j][3] = dist ;
 	vector3d<float> ncorrect = $distanceFieldGradient[nd] ;
 	send_buf[j][4] = ncorrect.x ;
@@ -974,11 +976,13 @@ if(req_queue.size() > 0 || self_send) {
   real rmin2 = delta*delta ;
   FORALL(dom,nd) {
     int id = $componentID_node[nd] ;
-    Loci::kdTree::coord3d p($pos[nd].x,$pos[nd].y,$pos[nd].z) ;
+    Loci::kdTree::coord3d p(realToFloat($pos[nd].x),
+			    realToFloat($pos[nd].y),
+			    realToFloat($pos[nd].z)) ;
     float nearest_dist = 1e30 ;
     for(int i=0;i<nc;++i) {
       if(id != i) {
-	real rmin = rmin2 ;
+	double rmin = realToDouble(rmin2) ;
 	int pi = -1 ;
 	// If no geometry is defined, then by default the geometry
 	// is everything.  Otherwise check to see if it is in geometry
@@ -998,18 +1002,18 @@ if(req_queue.size() > 0 || self_send) {
 	  real d = (dn > -epsdist && dn < epsdist)?epsdist:dn ;
 	  real priority = (*$componentPriorityList)[i] ;
 	  real dp = d*priority ;
-	  if($crossComponentID_node[nd] < 0 || nearest_dist > dp) {
-	    nearest_dist = dp ;
+	  if($crossComponentID_node[nd] < 0 || nearest_dist > realToFloat(dp)) {
+	    nearest_dist = realToFloat(dp) ;
 	    $crossComponentID_node[nd] = i ;
-	    $crossComponentDist_node[nd] = d ;
-	    $crossComponentDistGrad_node[nd] = n ;
+	    $crossComponentDist_node[nd] = realToFloat(d) ;
+	    $crossComponentDistGrad_node[nd] = realToFloat(n) ;
 	  }
 	} else {
 	  if(inGeom) {
 	    nearest_dist = -1e30 ;
 	    $crossComponentDist_node[nd] = -1e30 ;
 	    $crossComponentID_node[nd] = i ;
-	    $crossComponentDistGrad_node[nd] = vect3d(0,0,0) ;
+	    $crossComponentDistGrad_node[nd] = vector3d<float>(0,0,0) ;
 	  }
 	}
       }
@@ -1471,7 +1475,7 @@ if(req_queue.size() > 0 || self_send) {
   //
 
 
-  $type interpolateMinStencilSize param<real> ;
+  $type interpolateMinStencilSize param<double> ;
 
   $rule unit(stencilSize2<-interpolateMinStencilSize) {
     $stencilSize2 = $interpolateMinStencilSize*$interpolateMinStencilSize ;
@@ -1479,8 +1483,8 @@ if(req_queue.size() > 0 || self_send) {
 
   $rule apply(stencilSize2<-facecenter,ci->cellcenter,face2node->pos)
   [Loci::Maximum],constraint(interface_BC) {
-    vect3d d1 = $facecenter-$ci->$cellcenter ;
-    real md = 4.*dot(d1,d1) ;
+    vector3d<double> d1 = realToDouble($facecenter-$ci->$cellcenter) ;
+    double md = 4.*dot(d1,d1) ;
     join($stencilSize2,md) ;
   }
 
@@ -1493,10 +1497,10 @@ if(req_queue.size() > 0 || self_send) {
     for(int i=0;i<sz;++i)
       xsum += $face2node[i]->$xblank ;
     if(xsum > 0) {
-      vect3d d = $face2node[0]->$pos - $face2node[sz-1]->$pos ;
-      real len = dot(d,d) ;
+      vector3d<double> d = realToDouble($face2node[0]->$pos - $face2node[sz-1]->$pos) ;
+      double len = dot(d,d) ;
       for(int i=1;i<sz;++i) {
-        d = $face2node[i-1]->$pos - $face2node[i]->$pos ;
+        d = realToDouble($face2node[i-1]->$pos - $face2node[i]->$pos) ;
         len = max(len,dot(d,d)) ;
       }
       join($stencilSize2,len) ;
@@ -1580,8 +1584,8 @@ if(req_queue.size() > 0 || self_send) {
       if($crossComponentDist_node < 0 || $crossComponentID_node < 0)
         $yblank = 3 ;
       else {
-	float epsdist = $holeCuttingTolerance ;
-        float dist = norm($pos - $node2surf->$pos) ;
+	real epsdist = $holeCuttingTolerance ;
+        real dist = norm($pos - $node2surf->$pos) ;
         real d = priority*max(dist,epsdist) ;
 	real cross_priority = $componentPriorityList[$crossComponentID_node] ;
         if(d < cross_priority*$crossComponentDist_node) {
@@ -1807,8 +1811,8 @@ if(req_queue.size() > 0 || self_send) {
       vd = $face2node[i-1]->$pos-$face2node[i]->$pos ;
       max(d2,dot(vd,vd)) ;
     }
-    join($cl->$cellSize2,d2) ;
-    join($cr->$cellSize2,d2) ;
+    join($cl->$cellSize2,realToFloat(d2)) ;
+    join($cr->$cellSize2,realToFloat(d2)) ;
   }
 
 

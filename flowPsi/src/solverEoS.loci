@@ -43,7 +43,7 @@ namespace flowPsi {
   } 
   
   $rule singleton(Pambient<-p0) {
-    $Pambient = $p0 ;
+    $Pambient = real($p0) ;
   } 
 
   

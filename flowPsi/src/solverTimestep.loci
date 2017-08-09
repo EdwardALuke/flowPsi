@@ -96,7 +96,7 @@ namespace flowPsi {
   $rule singleton(timeStepSize<-dtmax,timeStepMode) {
     $timeStepSize = 0 ;
     if($timeStepMode!="steady") {
-      $timeStepSize = $dtmax ;
+      $timeStepSize = real($dtmax) ;
     }
   }
   	
@@ -241,8 +241,8 @@ namespace flowPsi {
   // Compute local pressure bias using cfl
   $rule pointwise(localPBias<-cflpdt,dtmax,timePressureBiasControl),
     constraint(geom_cells,timeStepAccurate) {
-    real cfl = $cflpdt*$dtmax ;
-    real factor = min<real>(1.0,max<real>(0.0,0.1*(cfl-1.))) ;
+    real cfl = $cflpdt*real($dtmax) ;
+    real factor = min<real>(1.0,max<real>(1e-40,0.1*(cfl-1.))) ;
     $localPBias = max<real>($timePressureBiasControl,pow(factor,0.7)) ;
   }
   
@@ -281,7 +281,7 @@ namespace flowPsi {
 
     const real e0n = $Rtilde*$temperature{n}/($gamma-1.) + .5*dot($u{n},$u{n}) ;
     const real e0np = $Rtilde*Tnp1/($gamma-1.) + .5*dot(unp1,unp1) ;
-    const real rdtvol = $vol{n,it}/$dtmax{n,it} ;
+    const real rdtvol = $vol{n,it}/real($dtmax{n,it}) ;
     $rhs{n,it}[0] = $src{n,it}[0] - (rhonp-rhon)*rdtvol ;
     $rhs{n,it}[1] = $src{n,it}[1] - (rhonp*unp1.x - rhon*$u{n}.x)*rdtvol ;
     $rhs{n,it}[2] = $src{n,it}[2] - (rhonp*unp1.y - rhon*$u{n}.y)*rdtvol ;

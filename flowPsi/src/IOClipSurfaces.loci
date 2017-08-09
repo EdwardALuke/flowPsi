@@ -213,7 +213,7 @@ namespace flowPsi {
     std::vector<vector3d<float> > vlist(domain.size()) ;
     int cnt = 0 ;
     FORALL(domain,ii) {
-      vlist[cnt]= $pos{n,it}[ii] ;
+      vlist[cnt]= realToFloat($pos{n,it}[ii]) ;
       cnt++ ;
     } ENDFORALL ;
     hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
@@ -294,7 +294,7 @@ namespace flowPsi {
     std::vector<float> vlist(set.size()) ;
     int cnt = 0 ;
     FORALL(set,ii) {
-      vlist[cnt]= var[ii] ;
+      vlist[cnt]= realToFloat(var[ii]) ;
       cnt++ ;
     } ENDFORALL ;
     hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
@@ -336,7 +336,7 @@ namespace flowPsi {
     std::vector<vector3d<float> > vlist(set.size()) ;
     int cnt = 0 ;
     FORALL(set,ii) {
-      vlist[cnt]= var[ii] ;
+      vlist[cnt]= realToFloat(var[ii]) ;
       cnt++ ;
     } ENDFORALL ;
     hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,

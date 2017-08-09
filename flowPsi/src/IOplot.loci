@@ -318,7 +318,9 @@ namespace flowPsi {
 
   $rule singleton(OUTPUT<-plot_postfix,modelName,Pambient),conditional(do_plot),
     option(disable_threading) {
-    solver_dump_var(seq,$*Pambient.Rep(),$plot_postfix,$modelName,"par","Pambient") ;
+    param<double> Pambient_copy ;
+    *Pambient_copy = realToDouble($Pambient) ;
+    solver_dump_var(seq,Pambient_copy.Rep(),$plot_postfix,$modelName,"par","Pambient") ;
   }
 
   $rule singleton(do_boundary_plot{n,it}<-ncycle{n,it},plot_freq,lastNewton{n,it}) {

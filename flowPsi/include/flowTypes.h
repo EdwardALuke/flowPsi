@@ -259,8 +259,8 @@ namespace Loci {
 
 
 namespace flowPsi {
-  inline real get_val_in_units(std::istream &s, const char *units) {
-    real val ;
+  inline double get_val_in_units(std::istream &s, const char *units) {
+    double val ;
     s >> val ;
     while(s.peek() == ' ' || s.peek() == '\t')
       s.get() ;

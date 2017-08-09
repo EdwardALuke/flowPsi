@@ -13,7 +13,7 @@ namespace flowPsi {
   extern void broadcast_storeRep(Loci::storeRepP rep) ;
   
   struct stencil_info {
-    std::vector<Loci::Array<double,4> > weights ;
+    std::vector<Loci::Array<real,4> > weights ;
     std::vector<Loci::Array<int ,4> > stencils ;
     std::vector<int> send_info, req_sizes, snd_sizes ;
     Loci::storeRepP slookup ;

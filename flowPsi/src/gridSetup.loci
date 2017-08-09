@@ -424,8 +424,8 @@ namespace flowPsi {
     entitySet face_dom = face2node.domain() ;
     
     // Compute facecenter
-    store<vect3d> pos_static(facts.get_variable("pos")) ;
-    dstore<vect3d> pos ;
+    store<vector3d<double> > pos_static(facts.get_variable("pos")) ;
+    dstore<vector3d<double> > pos ;
     
     // Copy static pos we currently have to dynamic pos
     FORALL(pos_static.domain(), pi) {
@@ -445,42 +445,42 @@ namespace flowPsi {
     } 
 
     // Now compute facecenter for all faces we own
-    dstore<vect3d> facecenter ;
-    dstore<real> area ;
+    dstore<vector3d<double> > facecenter ;
+    dstore<double> area ;
     FORALL(face_dom,fc) {
-      vect3d nodesum(0.0,0.0,0.0) ;
-      real lensum = 0 ;
+      vector3d<double>  nodesum(0.0,0.0,0.0) ;
+      double lensum = 0 ;
       int fsz = face2node[fc].size() ;
 
       for(int id = 0; id < fsz; ++id) {
         const int nd1 = id ;
         const int nd2 = (id+1 == fsz)?0:(id+1) ;
-        const vect3d p1 = pos[face2node[fc][nd1]] ;
-        const vect3d p2 = pos[face2node[fc][nd2]] ;
+        const vector3d<double>  p1 = pos[face2node[fc][nd1]] ;
+        const vector3d<double>  p2 = pos[face2node[fc][nd2]] ;
         
-	const vect3d edge_loc = 0.5*(p1 + p2) ;
-	const vect3d edge_vec = p1-p2 ;
-	real len = norm(edge_vec) ;
+	const vector3d<double>  edge_loc = 0.5*(p1 + p2) ;
+	const vector3d<double>  edge_vec = p1-p2 ;
+	double len = norm(edge_vec) ;
 	nodesum += len*edge_loc ;
 	lensum += len ;
       }
 
-      vect3d center =  nodesum/lensum ;
+      vector3d<double>  center =  nodesum/lensum ;
       facecenter[fc] = center ;
 
-      vect3d sum(0,0,0) ;
+      vector3d<double>  sum(0,0,0) ;
       for(int id = 0; id < fsz; ++id) {
         const int nd1 = id ;
         const int nd2 = (id+1 == fsz)?0:(id+1) ;
-        const vect3d p1 = pos[face2node[fc][nd1]] ;
-        const vect3d p2 = pos[face2node[fc][nd2]] ;
+        const vector3d<double>  p1 = pos[face2node[fc][nd1]] ;
+        const vector3d<double>  p2 = pos[face2node[fc][nd2]] ;
         sum += cross(p1-center,p2-center) ;
       }
       area[fc] = .5*norm(sum) ;
     } ENDFORALL ;
 
     // Release pos memory
-    pos.setRep(dstore<vect3d>().Rep()) ;
+    pos.setRep(dstore<vector3d<double> >().Rep()) ;
 
     // Now compute cell center as average of face centers
     multiMap upper(facts.get_fact("upper")) ;
@@ -503,11 +503,11 @@ namespace flowPsi {
       fill_clone(areaRep, face_out, init_ptn) ;
     }
 
-    store<vect3d> cellcenter ;
+    store<vector3d<double> > cellcenter ;
     cellcenter.allocate(*geom_cells) ;
     FORALL(*geom_cells,cc) {
-      vect3d nodesum(0.0,0.0,0.0) ;
-      real areasum = 0 ;
+      vector3d<double>  nodesum(0.0,0.0,0.0) ;
+      double areasum = 0 ;
       for(Entity *id = upper.begin(cc); id != upper.end(cc); ++id) {
         double w = area[*id] ;
         nodesum += facecenter[*id]*w ;
@@ -691,7 +691,7 @@ namespace flowPsi {
     MapRepP mp = MapRepP(sp->getRep()) ;
     entitySet nodeSet = mp->image(bfaces) ;
 
-    store<vect3d> pos ;
+    store<vector3d<double> > pos ;
 
     pos = facts.get_variable("pos") ;
     entitySet dom = pos.domain() ;

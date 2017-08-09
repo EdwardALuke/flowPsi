@@ -30,6 +30,15 @@ $include "flowPsi.lh"
 
 // Scalar solver using modified line gauss seidel method
 namespace FGSI {
+#ifdef USE_AUTODIFF
+#ifdef AUTODIFF2ND
+#define FSGS_TYPE Loci::MPI_FADD2
+#else
+#define FSGS_TYPE Loci::MPI_FADD 
+#endif
+#else	
+#define FSGS_TYPE MPI_DOUBLE
+#endif
   using flowPsi::real ;
   using flowPsi::realF ;
   using flowPsi::real_fj ;
@@ -682,7 +691,7 @@ namespace FGSI {
 	  int re = matrix.recv_offsets[i+1] ;
 	  int rsz = re-rs ;
 	  int p = matrix.recv_processors[i] ;
-	  MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+	  MPI_Irecv(&recv_data[rs],rsz,FSGS_TYPE,p,99,
 		    MPI_COMM_WORLD,&requests[i]) ;
 	}
 	for(size_t i=0;i<matrix.send_processors.size();++i) {
@@ -690,7 +699,7 @@ namespace FGSI {
 	  int se = matrix.send_offsets[i+1] ;
 	  int ssz = se-ss ;
 	  int p = matrix.send_processors[i] ;
-	  MPI_Send(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD) ;
+	  MPI_Send(&send_data[ss],ssz,FSGS_TYPE,p,99,MPI_COMM_WORLD) ;
 	}
 	MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
 	// copy recieved data 
@@ -1138,7 +1147,7 @@ namespace FGSI {
 	int re = matrix.recv_offsets[i+1]*vs ;
 	int rsz = re-rs ;
 	int p = matrix.recv_processors[i] ;
-	MPI_Irecv(&recv_data[rs],rsz,MPI_DOUBLE,p,99,
+	MPI_Irecv(&recv_data[rs],rsz,FSGS_TYPE,p,99,
 		  MPI_COMM_WORLD,&requests[i]) ;
       }
 
@@ -1147,7 +1156,7 @@ namespace FGSI {
 	int se = matrix.send_offsets[i+1]*vs ;
 	int ssz = se-ss ;
 	int p = matrix.send_processors[i] ;
-	MPI_Send(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD) ;
+	MPI_Send(&send_data[ss],ssz,FSGS_TYPE,p,99,MPI_COMM_WORLD) ;
       }
       MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
       // copy recieved data 

@@ -301,6 +301,9 @@ param<std::string> gradStencil ;
     constraint FLOWPSI ;
     FLOWPSI = ~EMPTY ;
     facts.create_fact("FLOWPSI",FLOWPSI) ;  
+#ifdef USE_AUTODIFF
+    setupPosAutoDiff(facts) ;
+#endif
   }
 }
 
