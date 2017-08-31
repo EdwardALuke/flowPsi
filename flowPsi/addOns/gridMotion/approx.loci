@@ -75,13 +75,13 @@ $rule apply(face2node->minEdgeLength<-face2node->pos)[Loci::Minimum] {
 }
 
 $rule apply(face2node->minEdgeLength<-area,cl->vol)[Loci::Minimum] {
-  float len = $cl->$vol/$area.sada ;
+  float len = $cl->$vol/max<real>($area.sada,1e-30) ;
   int fsz = $face2node.size() ;
   for(int i=0;i<fsz;++i)
     join($face2node[i]->$minEdgeLength,len) ;
 }
 $rule apply(face2node->minEdgeLength<-area,cr->vol)[Loci::Minimum] {
-  float len = $cr->$vol/$area.sada ;
+  float len = $cr->$vol/max<real>($area.sada,1e-30) ;
   int fsz = $face2node.size() ;
   for(int i=0;i<fsz;++i)
     join($face2node[i]->$minEdgeLength,len) ;
