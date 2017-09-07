@@ -2,6 +2,7 @@
 #define READGRID_H
 
 #include <Loci.h>
+#include <flowTypes.h>
 
 namespace flowPsi {
   void read_grid(fact_db &facts, const rule_db &rdb, const char *filename,

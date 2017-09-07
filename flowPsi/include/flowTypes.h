@@ -12,6 +12,13 @@
 #include <Tools/parse.h>
 #include <Tools/unit_type.h>
 
+#ifdef LOCI_V5
+namespace Loci {
+  typedef gfact_db fact_db ;
+}
+using Loci::fact_db ;
+#endif
+
 namespace flowPsi {
   
   typedef Loci::real_t real ;
