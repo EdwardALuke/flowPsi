@@ -45,6 +45,14 @@ using Loci::real_t;
   typedef Loci::kdTree::coordinate3d<double> coord3df ;
 #endif
 
+#ifdef LOCI_V5
+namespace Loci {
+  typedef gfact_db fact_db ;
+}
+using Loci::fact_db ;
+#endif
+
+
 namespace Loci {
   void create_ci_map(fact_db &facts) ;
  entitySet dist_collect_entitySet(entitySet inSet, const vector<entitySet> &ptn) ;
