@@ -13,10 +13,15 @@
 #include <Tools/unit_type.h>
 
 #ifdef LOCI_V5
+#include <gLoci.h>
 namespace Loci {
   typedef gfact_db fact_db ;
 }
 using Loci::fact_db ;
+
+using Loci::gKeySpaceP ;
+using Loci::GEMPTY ;
+using Loci::gParam ;
 #endif
 
 namespace flowPsi {
