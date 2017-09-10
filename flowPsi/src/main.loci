@@ -45,12 +45,6 @@ using Loci::variable ;
 using Loci::MPI_processes ;
 using Loci::MPI_rank ;
 
-#ifdef LOCI_V5
-namespace Loci {
-  void copy_facts(gfact_db& gfacts);
-}
-#endif
-
 namespace flowPsi {
   
   gridPostList::gridPostListEnt *gridPostList::postlist = 0 ;
@@ -506,9 +500,6 @@ int main(int ac, char *av[]) {
   // Create execution schedule that derives the variable named 'solution'
   // from the database of facts using the rule database rdb.
 
-#ifdef LOCI_V5
-  Loci::copy_facts(facts) ;
-#endif
   if(!Loci::makeQuery(rdb,facts,query)) {
     cerr << "query failed!" << endl ;
     Loci::Abort() ;
