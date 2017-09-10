@@ -13,7 +13,7 @@
 #include <Tools/unit_type.h>
 
 #ifdef LOCI_V5
-#include <gLoci.h>
+
 namespace Loci {
   typedef gfact_db fact_db ;
 }

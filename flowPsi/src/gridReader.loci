@@ -28,6 +28,9 @@
 
 #include <map>
 
+#ifdef LOCI_V5
+#include <GLoci.h>
+#endif
 
 using std::map ;
 using std::string ;
@@ -62,6 +65,7 @@ namespace Loci {
 namespace flowPsi {
 
 #ifdef LOCI_V5
+
   void read_grid(fact_db &facts, const rule_db &rdb, const char *filename,
                  bool dryrun) {
     gKeySpaceP universe_space = gKeySpace::get_space("UniverseSpace", "");
@@ -92,6 +96,30 @@ namespace flowPsi {
       err.Print(cerr) ;
       cerr << "aborted reading \"" << filename << ".vars\"" << endl ;
       Loci::Abort() ;
+    }
+
+    // Dump out parameters from fact database
+    if(Loci::MPI_rank == 0 ) {
+      char buf[512] ;
+      bzero(buf,512) ;
+      snprintf(buf,511,"output/grun_info1") ;
+      ofstream db_file(buf) ;
+      if(!db_file.fail()) {
+        using namespace Loci ;
+        db_file << "facts = {" << endl ;
+        variableSet ext_facts = facts.get_extensional_facts() ;
+        for(variableSet::const_iterator vi=ext_facts.begin();
+            vi!=ext_facts.end();++vi) {
+          gStoreRepP sp = facts.get_gvariable(*vi) ;
+          if(sp != 0) {
+            if(sp->RepType() == GPARAMETER) {
+              db_file << *vi << ": " ;
+              sp->Print(db_file) ;
+            }
+          }
+        }
+        db_file << "}" << endl ;
+      }
     }
 
     gParam<flowPsi::list_input> plot_output ;
