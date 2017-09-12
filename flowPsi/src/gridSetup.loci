@@ -432,7 +432,7 @@ namespace flowPsi {
 
 #ifdef LOCI_V5
 
-  Loci::gStoreRepP  find_mind(Loci::gEntitySet boundary_faces, gfact_db &facts) {
+  Loci::gStoreRepP  find_mind(Loci::gEntitySet boundary_faces, fact_db &facts) {
     using namespace Loci ;
     using std::map ;
     gStore<vect3d> pos ;
@@ -601,7 +601,7 @@ namespace flowPsi {
   }
 
 
-  void find_mind_surf(gfact_db &facts) {
+  void find_mind_surf(fact_db &facts) {
     using namespace Loci ; 
     using std::map ;
     gStoreRepP sp = facts.get_gvariable("componentGeometry") ;
@@ -630,7 +630,7 @@ namespace flowPsi {
     facts.create_gfact("min_cell2face",mp, cell_space, face_space) ;
   }
 
-  void find_mind_surf_node(gfact_db &facts) {
+  void find_mind_surf_node(fact_db &facts) {
     using namespace Loci ;
     using std::map ;
     gStoreRepP sp = facts.get_gvariable("componentGeometry") ;
@@ -783,7 +783,7 @@ namespace flowPsi {
     facts.create_gfact("node2surf",min_node2surf, node_space, node_space) ;
   }    
     
-  void  find_mind_noslip(gfact_db &facts) {
+  void  find_mind_noslip(fact_db &facts) {
     using namespace Loci ;
     using std::map ;
           

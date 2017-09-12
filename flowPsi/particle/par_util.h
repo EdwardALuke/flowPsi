@@ -47,13 +47,6 @@ namespace Loci {
                            std::vector<int>&, MPI_Comm) ;
 }
 
-#ifdef LOCI_V5
-namespace Loci {
-  typedef gfact_db fact_db ;
-}
-using Loci::fact_db ;
-#endif
-
 namespace lagrangianP {
 
   // this function transposes the passed in vector<entitySet>

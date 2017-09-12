@@ -50,12 +50,6 @@ using std::endl ;
 using std::cerr ;
 using std::vector ;
 using std::ios ;
-#ifdef LOCI_V5
-namespace Loci {
-  typedef gfact_db fact_db ;
-}
-using Loci::fact_db ;
-#endif
 
 typedef vector3d<double> vect3d ;
 
