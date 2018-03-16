@@ -59,6 +59,17 @@ namespace flowPsi {
   $rule apply(meanCount_ic<-dtmax)[priority_joiner],prelude { 
   } ;
   
+  $rule optional(meanCountReset) {
+    $meanCountReset = -1 ;
+  }
+  $rule apply(meanCount_ic<-meanCountReset)[priority_joiner], prelude {
+    if (*$meanCountReset > 0.) {
+      std::pair<int,real> count(2,0) ;
+      count.second = max<real>(*$meanCountReset,1.) ;
+      join(*$meanCount_ic,count) ;
+    }
+  } ;
+
   $rule apply(meanCount_ic<-icfile,modelName)[priority_joiner], 
     option(disable_threading),prelude {
     
@@ -122,7 +133,7 @@ namespace flowPsi {
   $rule singleton(meanCount{n,it=0}<-meanCount{n},meanFreq,useExponentialMean) {
     $meanCount{n,it=0} = $meanCount{n}+1.0 ;
     if($useExponentialMean)
-      $meanCount{n,it=0} = min<real>(double($meanFreq),$meanCount{n,it=0}) ;
+      $meanCount{n,it=0} = min<real>(real($meanFreq),$meanCount{n,it=0}) ;
   }
 
   
@@ -591,10 +602,14 @@ namespace flowPsi {
   $rule pointwise(scalarM2Cell_X{n,it+1}<-scalarM2(X){n,it}),inplace(scalarM2Cell_X{n,it+1}|scalarM2(X){n,it}),
     parametric(scalarM2(X)),prelude { } ;
 
-  $rule pointwise(scalarM2Cell_X{n+1}<-scalarM2Cell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarM2Cell_X{n+1}|scalarM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(scalarM2Cell_X{n+1}<-scalarM2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(scalarM2Cell_X{n+1}|scalarM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
     parametric(scalarM2(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarM2Cell_X{n+1} = 0 ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $scalarM2Cell_X{n+1} *= (mc-1.0)/mc ;
     }
   } 
   $rule pointwise(scalarVariance(X){n,it}<-scalarM2(X){n,it},meanCount{n,it}) {
@@ -685,10 +700,14 @@ namespace flowPsi {
   $rule pointwise(scalarM2Face_X{n,it+1}<-scalarM2_f(X){n,it}),inplace(scalarM2Face_X{n,it+1}|scalarM2_f(X){n,it}),
     parametric(scalarM2_f(X)),prelude { } ;
 
-  $rule pointwise(scalarM2Face_X{n+1}<-scalarM2Face_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarM2Face_X{n+1}|scalarM2Face_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(scalarM2Face_X{n+1}<-scalarM2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(scalarM2Face_X{n+1}|scalarM2Face_X{n,it}),conditional(newtonFinished{n,it}),
     parametric(scalarM2_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarM2Face_X{n+1} = 0 ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $scalarM2Face_X{n+1} *= (mc-1.0)/mc ;
     }
   }
 
@@ -953,10 +972,14 @@ namespace flowPsi {
    $rule pointwise(vect3dM2Cell_X{n,it+1}<-vect3dM2(X){n,it}),inplace(vect3dM2Cell_X{n,it+1}|vect3dM2(X){n,it}),
      parametric(vect3dM2(X)),prelude { } ;
 
-  $rule pointwise(vect3dM2Cell_X{n+1}<-vect3dM2Cell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Cell_X{n+1}|vect3dM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(vect3dM2Cell_X{n+1}<-vect3dM2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Cell_X{n+1}|vect3dM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
      parametric(vect3dM2(X)) {
      if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
        $vect3dM2Cell_X{n+1} = vect3d(0,0,0) ;
+     }
+     real mc = $meanCount{n,it} ;
+     if($useExponentialMean && mc == $meanFreq) {
+       $vect3dM2Cell_X{n+1} *= (mc-1.0)/mc ;
      }
    } 
    $rule pointwise(vect3dVariance(X){n,it}<-vect3dM2(X){n,it},meanCount{n,it}) {
@@ -1053,10 +1076,14 @@ namespace flowPsi {
    $rule pointwise(vect3dM2Face_X{n,it+1}<-vect3dM2_f(X){n,it}),inplace(vect3dM2Face_X{n,it+1}|vect3dM2_f(X){n,it}),
      parametric(vect3dM2_f(X)),prelude { } ;
 
-  $rule pointwise(vect3dM2Face_X{n+1}<-vect3dM2Face_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Face_X{n+1}|vect3dM2Face_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(vect3dM2Face_X{n+1}<-vect3dM2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Face_X{n+1}|vect3dM2Face_X{n,it}),conditional(newtonFinished{n,it}),
      parametric(vect3dM2_f(X)) {
      if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
        $vect3dM2Face_X{n+1} = vect3d(0,0,0) ;
+     }
+     real mc = $meanCount{n,it} ;
+     if($useExponentialMean && mc == $meanFreq) {
+       $vect3dM2Face_X{n+1} *= (mc-1.0)/mc ;
      }
    }
 
@@ -1148,10 +1175,14 @@ namespace flowPsi {
    $rule pointwise(vect3dMX2Cell_X{n,it+1}<-vect3dMX2(X){n,it}),inplace(vect3dMX2Cell_X{n,it+1}|vect3dMX2(X){n,it}),
      parametric(vect3dMX2(X)),prelude { } ;
 
-  $rule pointwise(vect3dMX2Cell_X{n+1}<-vect3dMX2Cell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Cell_X{n+1}|vect3dMX2Cell_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(vect3dMX2Cell_X{n+1}<-vect3dMX2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Cell_X{n+1}|vect3dMX2Cell_X{n,it}),conditional(newtonFinished{n,it}),
      parametric(vect3dMX2(X)) {
      if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
        $vect3dMX2Cell_X{n+1} = vect3d(0,0,0) ;
+     }
+     real mc = $meanCount{n,it} ;
+     if($useExponentialMean && mc == $meanFreq) {
+       $vect3dMX2Cell_X{n+1} *= (mc-1.0)/mc ;
      }
    } 
    $rule pointwise(vect3dCoVariance(X){n,it}<-vect3dMX2(X){n,it},meanCount{n,it}) {
@@ -1246,10 +1277,14 @@ namespace flowPsi {
    $rule pointwise(vect3dMX2Face_X{n,it+1}<-vect3dMX2_f(X){n,it}),inplace(vect3dMX2Face_X{n,it+1}|vect3dMX2_f(X){n,it}),
      parametric(vect3dMX2_f(X)),prelude { } ;
 
-  $rule pointwise(vect3dMX2Face_X{n+1}<-vect3dMX2Face_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Face_X{n+1}|vect3dMX2Face_X{n,it}),conditional(newtonFinished{n,it}),
+  $rule pointwise(vect3dMX2Face_X{n+1}<-vect3dMX2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Face_X{n+1}|vect3dMX2Face_X{n,it}),conditional(newtonFinished{n,it}),
      parametric(vect3dMX2_f(X)) {
      if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
        $vect3dMX2Face_X{n+1} = vect3d(0,0,0) ;
+     }
+     real mc = $meanCount{n,it} ;
+     if($useExponentialMean && mc == $meanFreq) {
+       $vect3dMX2Face_X{n+1} *= (mc-1.0)/mc ;
      }
   }
 

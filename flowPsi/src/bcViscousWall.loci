@@ -239,11 +239,9 @@ namespace flowPsi {
 
 
   // Define viscous wall bcs
-  $type AllViscousBCs store<bool> ;
   $rule pointwise(AllViscousBCs),constraint(viscousWall_BC) {} 
   $rule pointwise(AllViscousBCs),constraint(wallLaw_BC) {}
 
-  $type AllWallBCs store<bool> ;
   $rule pointwise(AllWallBCs), constraint(AllViscousBCs) {}
   $rule pointwise(AllWallBCs), constraint(impermeable_BC) {}
   $rule pointwise(AllWallBCs), constraint(reflecting_BC) {}

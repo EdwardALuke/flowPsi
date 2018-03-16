@@ -30,9 +30,6 @@ namespace flowPsi {
     $flowRegime = "not-set" ;
   }
 
-  $type LaminarSimulation Constraint ;
-  $type TurbulentSimulation Constraint ;
-  $type ViscousSimulation Constraint ;
   $rule constraint(LaminarSimulation,TurbulentSimulation,ViscousSimulation<-
 		   flowRegime) {
     $LaminarSimulation = EMPTY ;

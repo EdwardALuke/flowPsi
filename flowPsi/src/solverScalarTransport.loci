@@ -91,6 +91,9 @@ namespace flowPsi {
     $cl->$X_rhodot -= $X_mdot_f ;
   }
 
+  $type X store<real> ;
+  $type C Constraint ;
+
   $rule pointwise(inviscid_flux(X)<-X_mdot_f,lefts(X),rights(X)),
     constraint((cl,cr)->X) {
     real Xval = ($X_mdot_f <0.0)?($rights(X)):($lefts(X)) ;
@@ -295,12 +298,6 @@ namespace flowPsi {
     $X_next = max<real>($X_next,1e-15) ;
   }
   
-  $rule pointwise(X_next<-X),
-    constraint(X,X_dq,time_frozen,C), 
-    parametric(scalarTransportP(X,C)) {
-    $X_next = $X ;
-  }
-
   $rule pointwise(X_n{n,it+1}<-X_next{n,it},X_dq{n,it}),
     constraint(geom_cells{n,it},C{n,it}),
     parametric(scalarTransportP(X,C)) {
@@ -403,7 +400,7 @@ namespace flowPsi {
     $X_src -= $X*$X_rhodot ;
   }
   $rule apply(X_src<-X_rhodot,X_np1)[Loci::Summation],
-    constraint(geom_cells,X,implicit_scheme,timeStepAccurate,C),
+    constraint(geom_cells,X,timeStepAccurate,C),
     parametric(scalarTransportP(X,C)) {
     $X_src -= $X_np1*$X_rhodot ;
    }
@@ -496,11 +493,6 @@ namespace flowPsi {
   $rule pointwise(X_dq<-petscScalarSolve(X)),
     constraint(geom_cells,fluidLinearSolverPETSC,C),
     inplace(X_dq|petscScalarSolve(X)), 
-    parametric(scalarTransportP(X,C)),prelude {} ;
-
-  $rule pointwise(X_dq<-petscScalarSolve(X)),
-    constraint(geom_cells,fluidLinearSolverGMRES,C),
-    inplace(X_dq|petscScalarSolve(X)),
     parametric(scalarTransportP(X,C)),prelude {} ;
 
   $rule pointwise(X_L<-X_fjp,(cl,cr)->iblank), inplace(X_L|X_fjp),
@@ -814,12 +806,6 @@ namespace flowPsi {
     $X_next = $X + $X_dq ;
   }
   
-  $rule pointwise(X_next<-X),
-    constraint(X,X_dq,time_frozen,C), 
-    parametric(scalarTransport(X,C)) {
-    $X_next = $X ;
-  }
-
   $rule pointwise(X_n{n,it+1}<-X_next{n,it},X_dq{n,it}),
     constraint(geom_cells{n,it},C{n,it}),
     parametric(scalarTransport(X,C)) {
@@ -922,7 +908,7 @@ namespace flowPsi {
     $X_src -= $X*$X_rhodot ;
   }
   $rule apply(X_src<-X_rhodot,X_np1)[Loci::Summation],
-    constraint(geom_cells,X,implicit_scheme,timeStepAccurate,C),
+    constraint(geom_cells,X,timeStepAccurate,C),
     parametric(scalarTransport(X,C)) {
     $X_src -= $X_np1*$X_rhodot ;
    }
@@ -1017,10 +1003,6 @@ namespace flowPsi {
     inplace(X_dq|petscScalarSolve(X)), 
     parametric(scalarTransport(X,C)),prelude {} ;
 
-  $rule pointwise(X_dq<-petscScalarSolve(X)),
-    constraint(geom_cells,fluidLinearSolverGMRES,C),
-    inplace(X_dq|petscScalarSolve(X)),
-    parametric(scalarTransport(X,C)),prelude {} ;
 
   $rule pointwise(X_L<-X_fjp,(cl,cr)->iblank), inplace(X_L|X_fjp),
     parametric(scalarTransport(X,C)) {

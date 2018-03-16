@@ -48,13 +48,6 @@ $include "flowPsi.lh"
 
 namespace flowPsi {
 
-  $type min_cell2face Map ;
-  
-  $type componentMotion param<options_list> ;
-  $type componentHierarchy param<options_list> ;
-  $type componentGeometry param<options_list> ;
-  $type componentPriority param<options_list> ;
-
   $rule optional(componentMotion),
     comments("Specify motions of individual mesh components") {
   }
@@ -291,7 +284,6 @@ namespace flowPsi {
   }
   
   
-  $type componentNodes_X store<bool> ;
 
   $rule pointwise(face2node->componentNodes_X),constraint(cl->volumeTag(X)),parametric(volumeTag(X)) {} 
   $rule pointwise(face2node->right::componentNodes_X),constraint(cr->volumeTag(X)),parametric(volumeTag(X)) {} 

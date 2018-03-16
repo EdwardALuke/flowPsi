@@ -133,19 +133,16 @@ namespace flowPsi {
     $firstPlotBC_X{n=0} = true ;
   }
   $rule singleton(firstPlotBC_X{n,it=0}<-firstPlotBC_X{n}),
-    constraint(implicit_scheme),
     parametric(boundaryName(X)){
     $firstPlotBC_X{n,it=0} = $firstPlotBC_X{n} ;
   }
   $type doPlotBC_X param<bool> ;
   $rule singleton(firstPlotBC_X{n,it+1}<-firstPlotBC_X{n,it},doPlotBC_X{n,it}),
-    constraint(implicit_scheme),
     parametric(boundaryName(X)){
     $firstPlotBC_X{n,it+1} = $firstPlotBC_X{n,it} && !$doPlotBC_X{n,it} ;
   }
 
   $rule singleton(firstPlotBC_X{n+1}<-firstPlotBC_X{n,it}),conditional(newtonFinished{n,it}),
-    constraint(implicit_scheme),
     parametric(boundaryName(X)){
     $firstPlotBC_X{n+1} = $firstPlotBC_X{n,it} ;
   }
@@ -225,6 +222,7 @@ namespace flowPsi {
 
   
   $type plotSwitchNodes(X) store<int> ;
+  $type plotVar_X Constraint ;
   $rule pointwise(face2node->plotSwitchNodes(X)),constraint(ref->(plotVar_X)) {
   }
   

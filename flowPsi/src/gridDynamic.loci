@@ -40,8 +40,6 @@ namespace flowPsi {
 //    $iblank = 0 ;
 //  }
 
-  $type movingMesh store<bool> ;
-  
   // Moving Mesh because of moving components
   $rule pointwise(movingMesh),constraint(componentMotion) {
     $movingMesh = true ;

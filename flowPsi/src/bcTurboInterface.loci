@@ -2079,7 +2079,7 @@ namespace flowPsi {
     prelude {};
 
   $rule blackbox(turboPt1Init{n+1} <-turboPt1{n,it},turboSurfaces),
-    conditional(newton_finished{n,it}),
+    conditional(newtonFinished{n,it}),
     inplace(turboPt1Init{n+1}|turboPt1{n,it}), prelude {};
 
  

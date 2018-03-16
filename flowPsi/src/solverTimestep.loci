@@ -55,8 +55,6 @@ namespace flowPsi {
     }
   }
 
-  $type timeStepSteadyState Constraint ;
-  $type timeStepAccurate Constraint ;
   $rule constraint(timeStepSteadyState,timeStepAccurate<-timeStepMode) {
     $timeStepSteadyState = ~EMPTY ;
     $timeStepAccurate = EMPTY ;

@@ -258,7 +258,7 @@ namespace flowPsi {
   $type prescribe_turb_ref store<vec<2> > ;
   $type prescribe_turbulence store<vec<2> > ;
 
-  $rule pointwise(absolute::prescribe_turb_ref<-prescribe_turbulence),constraint(ref->absolute_frame,prescribe_turbulence) {
+  $rule pointwise(absolute::prescribe_turb_ref<-prescribe_turbulence),constraint(ref->absoluteFrame_BCoption,prescribe_turbulence) {
     $prescribe_turb_ref = $prescribe_turbulence ;
   }
   $rule pointwise(prescribe_turb_ref{n,it}<-prescribe_turbulence),constraint(ci{n,it}->u{n,it},prescribe_turbulence) {

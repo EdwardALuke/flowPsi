@@ -36,8 +36,6 @@ namespace flowPsi {
   $type SGSDinv(X) storeMat<real_fj> ;
   $type X_pivot storeVec<pivot_type> ;
 
-  $type gauss_seidel_iter param<int> ;
-  
   $rule default(gauss_seidel_iter) {
     $gauss_seidel_iter = 6 ;
   }
@@ -311,6 +309,7 @@ namespace flowPsi {
     constraint(geom_cells),
     inplace(SGSBlockedSSolve(X){igs+1}|SGSBlockedSSolve_backward(X){igs}) {}
 
+  $type $igs param<int> ;
   // provides the condition under which gauss seidel
   // iteration is terminated
   $rule singleton(gseidel_finished(X)<-$igs,gauss_seidel_iter),
