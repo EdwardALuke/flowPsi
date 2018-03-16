@@ -224,6 +224,7 @@ $type gravityAccel param<flowPsi::vect3d> ;
 // Solver averaging types
 $type meanFreq param<int> ;
 $type meanCount param<flowPsi::real> ;
+$type meanCountReset param<flowPsi::real> ;
 $type meanCount_ic param<pair<int,flowPsi::real> > ;
 $type scalarMean(X) store<flowPsi::real> ;
 $type scalarMean_f(X) store<flowPsi::real> ;
@@ -266,4 +267,84 @@ $type vect3dFavreCoVarBase_f(X) store<flowPsi::vect3d> ;
 
 $type scalarTransportP(X,C) store<flowPsi::real> ;
 $type scalarTransport(X,C) store<flowPsi::real> ;
+
+$type timeStepSteadyState Constraint ;
+$type timeStepAccurate Constraint ;
+
+$type LaminarSimulation Constraint ;
+$type TurbulentSimulation Constraint ;
+$type ViscousSimulation Constraint ;
+
+
+$type fluidLinearSolverSGS Constraint ;
+$type fluidLinearSolverFSGS Constraint ;
+$type fluidLinearSolverLSGS Constraint ;
+$type fluidLinearSolverPETSC Constraint ;
+
+$type wallLaw_BC Constraint ;
+$type viscousWall_BC Constraint ;
+$type symmetry_BC Constraint ;
+$type impermeable_BC Constraint ;
+$type reflecting_BC Constraint ;
+$type interface_BC Constraint ;
+$type turboInterface_BC Constraint ;
+$type fixedMass_BC Constraint ;
+$type fixedMassOutflow_BC Constraint ;
+$type isentropicInflow_BC Constraint ;
+$type extrapolate_BC Constraint ;
+$type supersonicOutflow_BC Constraint ;
+$type outflow_BC Constraint ;
+$type supersonicInflow_BC Constraint ;
+$type farfield_BC Constraint ;
+$type inflow_BC Constraint ;
+
+$type plotFreq_BCoption Constraint ;
+$type qwall_BCoption Constraint ;
+$type prescribed_qwall_BCoption Constraint ;
+$type Twall_BCoption Constraint ;
+$type adiabatic_BCoption Constraint ;
+$type Uwall_BCoption Constraint ;
+$type stationary_BCoption Constraint ;
+$type absoluteFrame_BCoption Constraint ;
+$type normal_BCoption Constraint ;
+$type angVel_BCoption Constraint ;
+$type rotAxis_BCoption Constraint ;
+$type rotCenter_BCoption Constraint ;
+$type rotSpeed_BCoption Constraint ;
+$type flowDir_BCoption Constraint ;
+$type prescribed_BCoption Constraint ;
+$type T_BCoption Constraint ;
+$type T0_BCoption Constraint ;
+$type p_BCoption Constraint ;
+$type pMean_BCoption Constraint ;
+$type p0_BCoption Constraint ;
+$type rho_BCoption Constraint ;
+$type massFlux_BCoption Constraint ;
+$type mdot_BCoption Constraint ;
+$type swirlAngle_BCoption Constraint ;
+$type swirlCenter_BCoption Constraint ;
+$type swirlAxis_BCoption Constraint ;
+$type momentCenter_BCoption Constraint ;
+$type M_BCoption Constraint ;
+$type u_BCoption Constraint ;
+$type v_BCoption Constraint ;
+$type name_BCoption Constraint ;
+
+$type AllViscousBCs store<bool> ;
+$type AllWallBCs store<bool> ;
+
+$type componentMotion param<options_list> ;
+$type componentHierarchy param<options_list> ;
+$type componentGeometry param<options_list> ;
+$type componentPriority param<options_list> ;
+$type componentNodes_X store<bool> ;
+
+$type movingMesh store<bool> ;
+$type coriolis param<coriolis_options> ;
+$type gauss_seidel_iter param<int> ;
+  
+
+
+
+
 
