@@ -656,14 +656,7 @@ namespace lagrangianP {
     $particle_wall_bc = 2 ;
   }
 
-  $rule pointwise(input::default::particle_wall_bc),constraint(ref->poolwall_BCoption) {
-    $particle_wall_bc = 4 ;
-  }
   
-  $rule pointwise(input::default::particle_wall_bc),constraint(ref->erodewall_BCoption) {
-    $particle_wall_bc = 5 ;
-  }
-
   // interpolated boundary condtion
   
   class BC_prescribedParticle_compute : public pointwise_rule {

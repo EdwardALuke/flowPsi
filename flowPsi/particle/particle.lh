@@ -79,3 +79,21 @@ $type icfile param<std::string> ;
 $type modelName param<std::string> ;
 $type ncycle param<int> ;
 $type refresh_cell_space param<bool> ;
+
+$type particleType_BCoption Constraint ;
+$type particleSizes_BCoption Constraint ;
+$type particleVelocityRatio_BCoption Constraint ;
+$type particleSpeed_BCoption Constraint ;
+$type particleMassLoading_BCoption Constraint ;
+$type particleMassFlux_BCoption Constraint ;
+$type particleInjectDensity_BCoption Constraint ;
+$type parcelInjectionRate_BCoption Constraint ;
+$type stickwall_BCoption Constraint ;
+$type bouncewall_BCoption Constraint ;
+
+$type symmetry_BC Constraint ;
+$type reflecting_BC Constraint ;
+$type turboInterface_BC Constraint ;
+$type interface_BC Constraint ;
+
+$type movingMesh store<bool> ;

@@ -85,12 +85,12 @@ namespace flowPsi {
 // Rules to set the grid speed terms to zero for steady state cases
 //--------------------------------------------------------------------
 $rule pointwise( priority::moving::us ),
-  constraint( movingMesh, local_timestep ) {
+  constraint( movingMesh, timeStepSteadyState ) {
   $us = vect3d(0.0,0.0,0.0) ;
 }
 //--------------------------------------------------------------------
 $rule pointwise( priority::moving::us_n ),
-  constraint( movingMesh, local_timestep ) {
+  constraint( movingMesh, timeStepSteadyState ) {
   $us_n = 0. ;
 }
 

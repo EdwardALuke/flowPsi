@@ -20,6 +20,7 @@
 //#############################################################################
 #include <Loci.h>
 $include "FVM.lh"
+$include "gridMover.lh"
 #include <iostream>
 using std::cerr ;
 using std::cout ;
@@ -130,18 +131,6 @@ constraint(movingBoundaryNodes) {
 $rule pointwise(fixed::prescribedMotionNodes),
 constraint(fixedBoundaryNodes) {
   $prescribedMotionNodes = true ;
-}
-//------------------------------------------------------------------
-$type numParticipatingBoundaryNodes          param<size_t>;
-//------------------------------------------------------------------
-$rule unit( numParticipatingBoundaryNodes ),
-constraint( UNIVERSE ) {
-  $numParticipatingBoundaryNodes = 0;
-}
-//------------------------------------------------------------------
-$rule apply( numParticipatingBoundaryNodes <- pos )[Loci::Summation],
-constraint( participatingBoundaryNodes ) {
-  $numParticipatingBoundaryNodes++;
 }
 
 //------------------------------------------------------------------

@@ -92,6 +92,7 @@ namespace flowPsi {
     $sst_srcw += $rwGeneralSrc(cellcenter)*$vol ;
   }
 
+  $type mms_BCoption Constraint ;
   // provide boundary values for gagePressure
   $rule pointwise(gagePressure_f<-mmsPressure(facecenter),Pambient),
   constraint(ref->mms_BCoption) {

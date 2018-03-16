@@ -395,6 +395,8 @@ $rule singleton(defScale{n} <- $n{n}, deformationScaleFactor{n}, stop_iter{n}) {
 //	cout << "defScale{" << $$n{n} << "} = " << $defScale{n} << endl;
 }
 
+$type deform_BCoption Constraint ;
+
 $rule pointwise( face2node->deformNodes <- face2node->pos ),
 		constraint( ref->deform_BCoption ),
 		prelude {

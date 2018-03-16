@@ -61,6 +61,8 @@ using Loci::StringError ;
 
 
 namespace lagrangianP {
+  $type PARTICLE_HISTOGRAM_OUTPUT Constraint ;
+  $type NO_PARTICLE_HISTOGRAM_OUTPUT Constraint ;
   
   using std::ostringstream ;
   using std::istringstream ;
@@ -1550,8 +1552,6 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
 
   register_rule<get_particle_bin> register_get_particle_bin ;
 
-  $type PARTICLE_HISTOGRAM_OUTPUT Constraint ;
-  $type NO_PARTICLE_HISTOGRAM_OUTPUT Constraint ;
 
   $rule constraint(PARTICLE_HISTOGRAM_OUTPUT,
 		   NO_PARTICLE_HISTOGRAM_OUTPUT<-particle_histogram_bins) {

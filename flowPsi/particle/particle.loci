@@ -124,6 +124,8 @@ namespace lagrangianP {
   // to their correct position.
   /////////////////////////////////////////////////////////////
 
+  $type LagrangianTurbophoresis Constraint ;
+  $type turbulentScattering param<int> ;
 
   $type considerMeshMotion param<int> ;
   $rule unit(considerMeshMotion),constraint(UNIVERSE) {
@@ -1725,7 +1727,6 @@ namespace lagrangianP {
     $turbulentParticleScattering = "" ;
   }
 
-  $type turbulentScattering param<int> ;
   $rule singleton(turbulentScattering<-turbulentParticleScattering) {
     $turbulentScattering = 1 ;
     if($turbulentParticleScattering != "on") {

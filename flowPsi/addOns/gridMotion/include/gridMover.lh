@@ -68,3 +68,29 @@ $type nodeDataCollection_X              param< vector<NodeData> >;
 $type rot_angle                         store<float> ;
 $type volumeChangeRatio                 store<real> ;
 //--------------------------------------------------------------------
+
+$type constrainedMotion_BCoption Constraint ;
+$type moving_BCoption Constraint ;
+$type fixed_BCoption Constraint ;
+$type constrainedMotion_BCoption Constraint ;
+$type farfieldDeform_BCoption Constraint ;
+
+$type prescribedMotionNodes store<bool> ;
+$type fixedBoundaryNodes              store<bool>;
+$type constrainedBoundaryNodes        store<bool> ;
+$type specifiedDisplacementNodes store<bool> ;
+$type participatingNodes                 store<bool> ;
+$type boundaryNodes                     store<bool>;
+$type movingBoundaryNodes             store<bool>;
+$type fixedBoundaryFaces              store<bool>;
+$type movingBoundaryFaces              store<bool>;
+$type meshComponentNodes_X store<bool> ;
+$type useVariableAlpha                  Constraint;
+$type useConstantAlpha                  Constraint;
+$type GM_timeLaggedCouplingMode Constraint ;
+$type GM_nonLinearCouplingMode      Constraint ;
+
+
+$type gridDeformationXSymmetry          Constraint ;
+$type gridDeformationYSymmetry          Constraint ;
+$type gridDeformationZSymmetry          Constraint ;

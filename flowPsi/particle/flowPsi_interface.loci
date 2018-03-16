@@ -323,6 +323,8 @@ namespace lagrangianP {
 
   $type IC store<float> ;
   $type COLLECT store<float> ;
+  $type CONSTRAINT Constraint ;
+
   $rule pointwise(timeHistoryScalar(COLLECT,IC,CONSTRAINT){n=0}<-IC),
     constraint(CONSTRAINT) {
     $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n=0} = $IC ;
