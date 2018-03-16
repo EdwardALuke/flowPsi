@@ -64,3 +64,5 @@ $type temp_wlaw store<flowPsi::real> ;
 $type wall_law_nut store<flowPsi::real> ;
 $type tau_wall store<flowPsi::vect3d> ;
 $type q_wall store<flowPsi::real> ;
+
+$type MS_LG_3D Constraint ;

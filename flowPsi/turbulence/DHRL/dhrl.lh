@@ -30,3 +30,10 @@
   $type prod_rans store<real> ;
   $type prod_les store<real> ;
 
+  $type NOT_MS_SST_BSL_KW Constraint ;
+  $type total_production Constraint ;
+  $type shear_production Constraint ;
+  $type vorticity_production Constraint ;
+  $type vortex_preserving_production Constraint ;
+  $type shear_production Constraint ;
+

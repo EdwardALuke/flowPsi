@@ -223,7 +223,6 @@ namespace flowPsi {
                                pow($ci->$dist_noslip,2)) ;
   }
 
-  $type RoughWallBC store<bool> ;
   $rule pointwise(RoughWallBC),constraint(viscousWall_BC,ref->ks_BCoption) {}
 
   $type ks_BC store<real> ;

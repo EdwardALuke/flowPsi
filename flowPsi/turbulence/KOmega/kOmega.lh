@@ -95,3 +95,13 @@ $type tau_wall   store<flowPsi::vect3d> ;
 $type q_wall     store<flowPsi::real> ;
 $type wall_cells store<char> ;
 $type nonAdiabaticWall store<char> ;
+
+$type ks_BCoption Constraint ;
+$type RoughWallBC store<bool> ;
+
+$type SST_BSL_KW Constraint ;
+$type MS_SST_BSL_KW Constraint ;
+$type MS_SST_BSL_KW_OLD Constraint ;
+
+
+$type Wilcox08Model Constraint ;
