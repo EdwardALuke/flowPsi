@@ -1,11 +1,27 @@
-  // Average varaiables
+  // Variable declarations
+  $type multi_scale param<std::string> ; // Turn DHRL on/off
+  $type DHRL_SST_BSL_KW Constraint ;
+
+  $type dhrl_source_terms param<std::string> ; // Turn DHRL source terms on/off
+  $type DHRL_SRC Constraint ;
+
+  $type dhrl_modified_alpha param<std::string> ; // Use modified alpha form
+  $type DHRL_ALPHA_MOD Constraint ;
+
+  $type dhrl_energy_alpha param<std::string> ; // Use separate blending parameter for energy equation
+  $type DHRL_ALPHA_ENERGY Constraint ;
+
+  $type ransFluxBlendMomentum param<real> ; // Weight mean versus instantaneous gradients to be used
+  $type ransFluxBlendEnergy param<real> ;   // in RANS flux terms. 0 = pure instantaneous, 1 = pure mean (default)
+
+// Average varaiables
   $type mu_avg store<real> ;
   $type mu_avg_f store<real> ;
   $type rho_avg store<real> ;
   $type rho_avg_f store<real> ;
   $type u_avg store<vect3d> ;
   $type u_avg_f store<vect3d> ;
-  $type strainRate_avg store<real> ;
+  $type strainRateMag_avg store<real> ;
   $type vort_avg store<vect3d> ;
   $type vortMag_avg store<real> ;
   $type divu_avg store<real> ;
@@ -21,6 +37,9 @@
   $type gamma_dhrl_f store<real> ;
   $type s_ratio store<real> ;
   $type s_ratio_f store<real> ;
+  $type sij_sij store<real> ;
+  $type sij_sij_avg store<real> ;
+
   $type tmu_rans_eff_f store<real> ;
   $type tmu_rans_f store<real> ;
   $type tau_rans store<symmetricTensor> ;
@@ -29,11 +48,68 @@
   $type prod_les store<real> ;
   $type prod_rans store<real> ;
   $type prod_les store<real> ;
+  $type hflux_scalar_les store<real> ;
+  $type hflux_scalar_rans store<real> ;
+  $type hflux_scalar_sgs store<real> ;
+  $type cp_avg store<real> ;
+  $type cput_avg store<vect3d> ;
+  $type scalar_mdot_avg store<real> ;
+  $type alpha_energy_dhrl store<real> ; // DHRL blending parameter (energy)
+  $type alpha_star_energy_dhrl store<real> ;
+  $type alpha_energy_dhrl_f store<real> ;
+  $type vis_flux_rans store<vect3d> ; // RANS component viscous flux contributions ...
+  $type vis_energy_flux_rans store<real> ;
+  $type heat_flux_rans store<real> ;
+  $type turbulent_transport param<turbulent_transport> ; 
+  $type tau_rans store<symmetricTensor> ;
+  $type tmu_rans_eff_f store<real> ;
+  $type kcond_rans_eff_f store<real> ;
+
+  $type tmu_rans_f store<real> ;
+  $type kcond_rans_f store<real> ;
+
+  $type SSTModel Constraint ; // RANS model variables
+  $type BSLModel Constraint ;
+  $type KWModel Constraint ;
+  $type SST_BSL_KW Constraint ;
+  $type SST_BSL Constraint ;
+  $type Wilcox98Model Constraint ;
+  $type Wilcox08Model Constraint ;
+  $type k_src store<real> ;
+  $type k_srcJ store<real> ;
+  $type w_src store<real> ;
+  $type w_srcJ store<real> ;
+  $type tmu_rans store<real> ;
+  $type kcond_rans store<real> ;
+  $type tmu_clip param<real> ;
+  $type bF3 store<real> ;
+  $type k_rhs store<real> ;
+  $type w_rhs store<real> ;
+  $type k_mdot_f store<real> ;
+  $type w_mdot_f store<real> ;
+  $type laplace_k store<real> ;
+  $type div_w_grad_k store<real> ;
+  $type crossDiffusionTerm store<real> ;
+  $type limitw store<real> ;
+  $type crossDiffusionCorrection param<real> ;
+  $type chiw store<real> ;
+  $type hellstenCorrection param<string> ;
+  $type k_nu_f store<real> ;
+  $type w_nu_f store<real> ;
+  $type D_w store<real> ;
+  $type Dk_Corr store<real> ;
+  $type Dw_Corr store<real> ;
+  $type Dk_Corr_avg store<real> ;
+  $type Dw_Corr_avg store<real> ;
+  $type wilcox_Mto param<real> ;
+  $type wilcox_xi param<real> ;
+  $type wilcox_om param<real> ;
+  $type Cvor param<real> ;
+  $type Kprod_clip param<real> ;
 
   $type NOT_MS_SST_BSL_KW Constraint ;
   $type total_production Constraint ;
-  $type shear_production Constraint ;
   $type vorticity_production Constraint ;
   $type vortex_preserving_production Constraint ;
   $type shear_production Constraint ;
-
+  

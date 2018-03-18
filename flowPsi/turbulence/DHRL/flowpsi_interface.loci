@@ -38,61 +38,208 @@ $include "dhrl.lh"
 
 namespace flowPsi {
 
-  $type dhrl_source_terms param<std::string> ;
-  $rule default(dhrl_source_terms) {
-    $dhrl_source_terms = "on" ;
-  }
-  $type DHRL_SRC Constraint ;
-  $rule constraint(DHRL_SRC<-dhrl_source_terms) {
-    $DHRL_SRC = EMPTY ;
-    if($dhrl_source_terms == "on") {
-      $DHRL_SRC = $*dhrl_source_terms.domain() ;
-    } else if($dhrl_source_terms == "off") {
-      $DHRL_SRC = EMPTY ;
-    } else {
-      cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
-      $DHRL_SRC = $*dhrl_source_terms.domain() ;
-    }
-  }
+  $type enthalpy_avg store<real> ;
+  $type cput store<vect3d> ;
+  $type cp_avg store<real> ; // Favre-averaged specific heat
+  $type cput_avg store<vect3d> ;
+
+  $type kcond_rans_eff_f store<real> ;
+  $type kcond_rans store<real> ;
+  $type kcond_rans_f store<real> ;
+  $type turbulent_transport param<turbulent_transport> ; 
 
 
-  // Implement viscous terms based on averaged quantities
-  $type vflux_rans store<Loci::Array<flowPsi::real,4> > ;
+  $type vis_flux_rans store<vect3d> ; // RANS component viscous flux contributions ...
+  $type vis_energy_flux_rans store<real> ;
+  $type heat_flux_rans store<real> ;
 
-  //Add viscous flux at face fc to cl[fc] cells.
-  $rule apply(cl->src<-vflux_rans)[Loci::Summation],
-    constraint(cl->geom_cells,ViscousSimulation) {
-    for(int i=0;i<4;++i)
-      $cl->$src[i+1] += $vflux_rans[i] ;
+  $type ransFluxBlendMomentum param<real> ; // Weight mean versus instantaneous gradients to be used
+  $type ransFluxBlendEnergy param<real> ;   // in RANS flux terms. 0 = pure instantaneous, 1 = pure mean (default)
+
+
+  $rule pointwise(enthalpy_avg<-Cp,scalarFavreMean(temperature)) {
+    $enthalpy_avg = $Cp*$scalarFavreMean(temperature) ;
   }
 
-  //add viscous flux at face fc to cr[fc] cells
-  $rule apply(cr->src<-vflux_rans)[Loci::Summation], 
-    constraint(cr->geom_cells,ViscousSimulation) {
-    for(int i=0;i<4;++i)
-      $cr->$src[i+1] -= $vflux_rans[i] ;
+  $rule pointwise(cput<-Cp,u,temperature) {
+    $cput = $Cp*$u*$temperature ;
   }
 
-  $rule pointwise(vflux_rans<-turbulentPrandtlNumber,area,tau_rans,u_f,
-                  grads_f(temp_avg),tmu_rans_eff_f,Cp,rho_f,rho_avg_f),
-    constraint(no_symmetry_BC) {
+  $rule pointwise(cput_avg<-vect3dFavreMean(cput),u_avg,enthalpy_avg) {
+    $cput_avg = $vect3dFavreMean(cput) - $u_avg*$enthalpy_avg ;
+  }
 
+  $rule pointwise(cp_avg<-Cp) {
+    $cp_avg = $Cp ;
+  }
+
+  // Implement RANS terms in governing equations 
+
+  //Add RANS flux at face fc to cl[fc] cells
+  $rule apply(cl->src<-vis_flux_rans,vis_energy_flux_rans,heat_flux_rans)[Loci::Summation],
+    constraint(cl->geom_cells,no_symmetry_BC,DHRL_SST_BSL_KW,DHRL_SRC) {
+    const int mi = 1 ;
+    const int ei = 4;
+
+    $cl->$src[mi+0] += $vis_flux_rans[0] ;
+    $cl->$src[mi+1] += $vis_flux_rans[1] ;
+    $cl->$src[mi+2] += $vis_flux_rans[2] ;
+    $cl->$src[ei] += $vis_energy_flux_rans + $heat_flux_rans ;
+  }
+  //Add RANS flux at face fc to cr[fc] cells
+  $rule apply(cr->src<-vis_flux_rans,vis_energy_flux_rans,heat_flux_rans)[Loci::Summation],
+    constraint(cr->geom_cells,no_symmetry_BC,DHRL_SST_BSL_KW,DHRL_SRC) {
+
+    const int mi = 1 ;
+    const int ei = 4 ;
+
+    $cr->$src[mi+0] -= $vis_flux_rans[0] ;
+    $cr->$src[mi+1] -= $vis_flux_rans[1] ;
+    $cr->$src[mi+2] -= $vis_flux_rans[2] ;
+    $cr->$src[ei] -= $vis_energy_flux_rans + $heat_flux_rans ;
+  }
+
+  //   //compute analytical viscous flux Jacobian at interior faces based on
+  //   //thin layer linear approximation of gradients
+  // Include contribution to Jacobian from instantaneous part of RANS flux
+  $rule apply(fjm<-u_f,vis_flux_rans,area,tmu_rans_eff_f,ransFluxBlendMomentum,
+              kcond_rans_eff_f,ransFluxBlendEnergy,cr->u,(cr,cl)->cellcenter,us_n)[Loci::Summation],
+    constraint(vis_flux_rans,(cr,cl)->vol) {
+    const int mi=1 ;
+    const int ei=4 ;
+    const int ru=mi+0 ;
+    const int rv=mi+1 ;
+    const int rw=mi+2 ;
     const vect3d an=$area.n ;
     const real sada=$area.sada ;
+    const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
+    const real coef = $tmu_rans_eff_f*(1.-$ransFluxBlendMomentum)*sada/dist ;
+    const real third = 1.0/3.0 ;
+    $fjm[ru][ru] -= coef*(1.0 + an.x*an.x*third) ;
+    $fjm[ru][rv] -= coef*an.x*an.y*third ;
+    $fjm[ru][rw] -= coef*an.x*an.z*third ;
 
-    $vflux_rans[0] = ($tau_rans.xx*an.x +$tau_rans.xy*an.y
-		      +$tau_rans.xz*an.z)*sada ;
-    $vflux_rans[1] = ($tau_rans.xy*an.x +$tau_rans.yy*an.y
-		      +$tau_rans.yz*an.z)*sada ;
-    $vflux_rans[2] = ($tau_rans.xz*an.x +$tau_rans.yz*an.y
-		      +$tau_rans.zz*an.z)*sada ;
-    //total work done by viscous shear (tau_rans),including heat dissipation
-    //and deformation work
-    $vflux_rans[3] = ($u_f.x*$vflux_rans[0]+$u_f.y*$vflux_rans[1]+
-		      $u_f.z*$vflux_rans[2]) ;
-    //conduction term in the energy part of viscous flux
-    const real Prt = $turbulentPrandtlNumber ;
-    real conduction = sada*dot($grads_f(temp_avg),an)*$tmu_rans_eff_f*$Cp/Prt ;
-    $vflux_rans[3] += conduction ;
+    $fjm[rv][ru] -= coef*an.y*an.x*third ;
+    $fjm[rv][rv] -= coef*(1.0+an.y*an.y*third) ;
+    $fjm[rv][rw] -= coef*an.y*an.z*third ;
+
+    $fjm[rw][ru] -= coef*an.z*an.x*third ;
+    $fjm[rw][rv] -= coef*an.z*an.y*third ;
+    $fjm[rw][rw] -= coef*(1.0 + an.z*an.z*third) ;
+
+    $fjm[ei][ru] -= $u_f.x*coef*(1.0 + an.x*an.x*third) ;
+    $fjm[ei][ru] -= $u_f.y*coef*an.y*an.x*third ;
+    $fjm[ei][ru] -= $u_f.z*coef*an.z*an.x*third ;
+
+    $fjm[ei][rv] -= $u_f.x*coef*an.x*an.y*third ;
+    $fjm[ei][rv] -= $u_f.y*coef*(1.0 + an.y*an.y*third) ;
+    $fjm[ei][rv] -= $u_f.z*coef*an.z*an.y*third ;
+
+    $fjm[ei][rw] -= $u_f.x*coef*an.x*an.z*third ;
+    $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
+    $fjm[ei][rw] -= $u_f.z*coef*(1.0 + an.z*an.z*third) ;
+
+    $fjm[ei][ru] -= .5*$vis_flux_rans[0] ;
+    $fjm[ei][rv] -= .5*$vis_flux_rans[1] ;
+    $fjm[ei][rw] -= .5*$vis_flux_rans[2] ;
+      
+    const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
+    const real factor = total_k*sada/dist ;
+    $fjm[ei][0] -= factor ;
   }
+
+  $rule apply(fjp<-u_f,vis_flux_rans,area,tmu_rans_eff_f,ransFluxBlendMomentum,
+              kcond_rans_eff_f,ransFluxBlendEnergy,cl->u,(cr,cl)->cellcenter,us_n)[Loci::Summation],
+    constraint(vis_flux_rans,(cr,cl)->vol) {
+    const int mi=1 ;
+    const int ei=4 ;
+    const int ru=mi+0 ;
+    const int rv=mi+1 ;
+    const int rw=mi+2 ;
+    const vect3d an=$area.n ;
+    const real sada=$area.sada ;
+    const real dist=dot(an,$cr->$cellcenter-$cl->$cellcenter) ;
+    const real coef = $tmu_rans_eff_f*(1.-$ransFluxBlendMomentum)*sada/dist ;
+    const real third = 1.0/3.0 ;
+    $fjp[ru][ru] += coef*(1.0 + an.x*an.x*third) ;
+    $fjp[ru][rv] += coef*an.x*an.y*third ;
+    $fjp[ru][rw] += coef*an.x*an.z*third ;
+
+    $fjp[rv][ru] += coef*an.y*an.x*third ;
+    $fjp[rv][rv] += coef*(1.0 + an.y*an.y*third) ;
+    $fjp[rv][rw] += coef*an.y*an.z*third ;
+
+    $fjp[rw][ru] += coef*an.z*an.x*third ;
+    $fjp[rw][rv] += coef*an.z*an.y*third ;
+    $fjp[rw][rw] += coef*(1.0 + an.z*an.z*third) ;
+
+    $fjp[ei][ru] += $u_f.x*coef*(1.0 + an.x*an.x*third) ;
+    $fjp[ei][ru] += $u_f.y*coef*an.y*an.x*third ;
+    $fjp[ei][ru] += $u_f.z*coef*an.z*an.x*third ;
+
+    $fjp[ei][rv] += $u_f.x*coef*an.x*an.y*third ;
+    $fjp[ei][rv] += $u_f.y*coef*(1.0 + an.y*an.y*third) ;
+    $fjp[ei][rv] += $u_f.z*coef*an.z*an.y*third ;
+
+    $fjp[ei][rw] += $u_f.x*coef*an.x*an.z*third ;
+    $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*third ;
+    $fjp[ei][rw] += $u_f.z*coef*(1.0 + an.z*an.z*third) ;
+
+    $fjp[ei][ru] += 0.5*$vis_flux_rans[0] ;
+    $fjp[ei][rv] += 0.5*$vis_flux_rans[1] ;
+    $fjp[ei][rw] += 0.5*$vis_flux_rans[2] ;
+
+    const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
+    const real factor = total_k*sada/dist ;
+    $fjp[ei][0] += factor ;
+  }
+
+  $rule apply(ci->srcJ<-u_f,vis_flux_rans,us_n,
+              area,tmu_rans_eff_f,ransFluxBlendMomentum,facecenter,
+	      ci->cellcenter,ci->u,kcond_rans_eff_f,ransFluxBlendEnergy)[Loci::Summation], 
+    constraint(ci->geom_cells,vis_flux_rans) {
+    const int mi=1; 
+    const int ru=mi+0 ;
+    const int rv=mi+1 ;
+    const int rw=mi+2 ;
+    const int ei=4 ;
+    const vect3d an=$area.n ;
+    const real sada=$area.sada ;
+    const real dist= dot(an,$facecenter-$ci->$cellcenter) ;
+    real coef = $tmu_rans_eff_f*(1.-$ransFluxBlendMomentum)*sada/dist ;
+    real third = 1./3.0 ;
+    $ci->$srcJ[ru][ru] -= coef*(1.0+an.x*an.x*third) ;
+    $ci->$srcJ[ru][rv] -= coef*an.x*an.y*third ;
+    $ci->$srcJ[ru][rw] -= coef*an.x*an.z*third ;
+
+    $ci->$srcJ[rv][ru] -= coef*an.y*an.x*third ;
+    $ci->$srcJ[rv][rv] -= coef*(1.0+an.y*an.y*third) ;
+    $ci->$srcJ[rv][rw] -= coef*an.y*an.z*third ;
+
+    $ci->$srcJ[rw][ru] -= coef*an.z*an.x*third ;
+    $ci->$srcJ[rw][rv] -= coef*an.z*an.y*third ;
+    $ci->$srcJ[rw][rw] -= coef*(1.0+an.z*an.z*third) ;
+
+    $ci->$srcJ[ei][ru] -= $u_f.x*coef*(1.0+an.x*an.x*third) ;
+    $ci->$srcJ[ei][ru] -= $u_f.y*coef*an.y*an.x*third ;
+    $ci->$srcJ[ei][ru] -= $u_f.z*coef*an.z*an.x*third ;
+
+    $ci->$srcJ[ei][rv] -= $u_f.x*coef*an.x*an.y*third ;
+    $ci->$srcJ[ei][rv] -= $u_f.y*coef*(1.0+an.y*an.y*third) ;
+    $ci->$srcJ[ei][rv] -= $u_f.z*coef*an.z*an.y*third ;
+
+    $ci->$srcJ[ei][rw] -= $u_f.x*coef*an.x*an.z*third ;
+    $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
+    $ci->$srcJ[ei][rw] -= $u_f.z*coef*(1.0+an.z*an.z*third) ;
+
+    $ci->$srcJ[ei][ru] -= .5*$vis_flux_rans[0] ;
+    $ci->$srcJ[ei][rv] -= .5*$vis_flux_rans[1] ;
+    $ci->$srcJ[ei][rw] -= .5*$vis_flux_rans[2] ;
+
+    const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
+    const real factor = total_k*sada/dist ;
+    $ci->$srcJ[ei][0] -= factor ;
+  }
+
 }
+
