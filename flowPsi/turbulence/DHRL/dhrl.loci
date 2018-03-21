@@ -131,7 +131,13 @@ namespace flowPsi {
   // DHRL model version controls
   $rule constraint(DHRL_SST_BSL_KW<-multi_scale) {
     $DHRL_SST_BSL_KW = EMPTY ;
-    if($multi_scale == "DHRL") {$DHRL_SST_BSL_KW = $*multi_scale.domain() ;} 
+    if($multi_scale == "DHRL" || $multi_scale == "dhrl") { 
+      $DHRL_SST_BSL_KW = $*multi_scale.domain() ; 
+    } else {
+      $[Once] {
+	cerr << "Warning, 'multi_scale' not set to DHRL, DHRL terms not active!" << endl ;
+      }
+    }
   } 
 
   $rule default(dhrl_source_terms) {
@@ -143,9 +149,14 @@ namespace flowPsi {
       $DHRL_SRC = $*dhrl_source_terms.domain() ;
     } else if($dhrl_source_terms == "off") {
       $DHRL_SRC = EMPTY ;
+      $[Once] {
+	cout << "Note, DHRL source terms are disabled!"<< endl ;
+      }
     } else {
-      cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
-      $DHRL_SRC = $*dhrl_source_terms.domain() ;
+      $[Once] {
+	cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
+	$DHRL_SRC = $*dhrl_source_terms.domain() ;
+      }
     }
   }
 
@@ -550,7 +561,7 @@ namespace flowPsi {
   }
 
   // Modify newton iteration to use average density -- use Euler stepping for k and w
-  $rule pointwise(dhrl::k_rhs{n,it}<-vol{n,it},dtmax{n,it},k_src{n,it},
+  $rule pointwise(dhrl::wallLaw::k_rhs{n,it}<-vol{n,it},dtmax{n,it},k_src{n,it},
                   k{n},k{n,it},rho_avg{n,it}),
     constraint(k_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
     real factor = $vol{n,it}/real($dtmax{n,it}) ;
@@ -560,7 +571,7 @@ namespace flowPsi {
     $k_rhs{n,it} = factor*($k{n,it}-$k{n})*rn - $k_src{n,it} ;
   }
 
-  $rule pointwise(dhrl::w_rhs{n,it}<-vol{n,it},dtmax{n,it},w_src{n,it},
+  $rule pointwise(dhrl::wallLaw::w_rhs{n,it}<-vol{n,it},dtmax{n,it},w_src{n,it},
                   w{n},w{n,it},rho_avg{n,it}),
     constraint(w_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
     real factor = $vol{n,it}/real($dtmax{n,it}) ;
@@ -570,13 +581,13 @@ namespace flowPsi {
     $w_rhs{n,it} = factor*($w{n,it}-$w{n})*rn - $w_src{n,it} ;
   }
 
-  $rule pointwise(wallLaw::dhrl::wallLaw::k_rhs{n,it}<-vol{n,it}),constraint(wall_cells,SST_BSL_KW) {
+  $rule pointwise(wallLaw::dhrl::wallLaw::k_rhs{n,it}<-k_src{n,it}),constraint(wall_cells,DHRL_SST_BSL_KW) {
     $k_rhs{n,it} = 0 ;
   }
 
-  $rule pointwise(wallLaw::dhrl::wallLaw::w_rhs{n,it}<-vol{n,it}),constraint(wall_cells,SST_BSL_KW) {
+  $rule pointwise(wallLaw::dhrl::wallLaw::w_rhs{n,it}<-w_src{n,it}),constraint(wall_cells,DHRL_SST_BSL_KW) {
     $w_rhs{n,it} = 0 ;
-  } 
+  }
 
   // Modify RANS model convective terms to be based on averaged fluxes
   $rule pointwise(dhrl::k_mdot_f<-scalar_mdot_avg), constraint(DHRL_SST_BSL_KW,scalar_mdot_avg) {$k_mdot_f =  $scalar_mdot_avg ;}

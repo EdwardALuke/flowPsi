@@ -38,6 +38,12 @@ $include "dhrl.lh"
 
 namespace flowPsi {
 
+  $type tmuu_clip param<real> ;
+
+  $rule singleton(tmu_clip<-tmuu_clip) {
+    $tmu_clip = $tmuu_clip ;
+  }
+
   $type enthalpy_avg store<real> ;
   $type cput store<vect3d> ;
   $type cp_avg store<real> ; // Favre-averaged specific heat
