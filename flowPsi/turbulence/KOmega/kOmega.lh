@@ -20,10 +20,6 @@
 //#############################################################################
 
 
-$type muu               store<flowPsi::real> ;
-$type muu_f             store<flowPsi::real> ;
-$type tmuu              store<flowPsi::real> ;
-
 $type lam_tau_w         store<flowPsi::real> ;
 
 // K-omega turbulence models

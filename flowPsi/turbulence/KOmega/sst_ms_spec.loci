@@ -90,8 +90,8 @@ namespace flowPsi {
 
 //kolmogorov scale eta
   $type eta store<real> ;
-  $rule pointwise(eta<-k,w,muu,rho,sst1) {
-    const real nu3 = pow($muu/$rho,3) ;
+  $rule pointwise(eta<-k,w,mu,rho,sst1) {
+    const real nu3 = pow($mu/$rho,3) ;
     const real cmu = $sst1.betas ;
     const real eps = max(cmu*$k*$w,EPSILON) ;
     $eta = pow(nu3/eps,0.25) ;
@@ -99,8 +99,8 @@ namespace flowPsi {
 
 //taylor scale reynolds number
   $type rLambda store<real> ;
-  $rule  pointwise(rLambda<-k,w,muu,rho,sst1) {
-    const real nu = $muu/$rho ;
+  $rule  pointwise(rLambda<-k,w,mu,rho,sst1) {
+    const real nu = $mu/$rho ;
     const real cmu = $sst1.betas ;
     const real rel = $k/(cmu*$w*nu) ;
     $rLambda = max(pow(20.*rel/3.,0.5),EPSILON) ;
@@ -130,9 +130,9 @@ namespace flowPsi {
     $fd = ((x1<1.0) || (x2<-5.0))?1.0:min<real>(fit,1.0) ;
   }
 
-  $type sst_tmuu store<real> ;
-  $rule pointwise(ms::kw::tmuu<-sst_tmuu,fd),
+  $type sst_tmu store<real> ;
+  $rule pointwise(ms::kw::tmu<-sst_tmu,fd),
     constraint(kd,MS_SPECTRUM) {
-    $tmuu = $fd*$sst_tmuu ;
+    $tmu = $fd*$sst_tmu ;
   }
 }

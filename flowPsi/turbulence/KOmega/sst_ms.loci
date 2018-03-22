@@ -37,26 +37,26 @@ namespace flowPsi {
   $type MS_SST_BSL_KW_OLD Constraint ;
   
   $type LG store<real> ;
-  $type sst_tmuu store<real> ;
+  $type sst_tmu store<real> ;
   $type bF3 store<real> ;
-  $rule pointwise(sst_tmuu<-rho,k,w,sst1,bF2,bF3,strainRate) {
+  $rule pointwise(sst_tmu<-rho,k,w,sst1,bF2,bF3,strainRate) {
     const real S = $strainRate ;
-    $sst_tmuu = $rho*$sst1.a1*$k/max($sst1.a1*$w,S*$bF2*$bF3) ;
+    $sst_tmu = $rho*$sst1.a1*$k/max($sst1.a1*$w,S*$bF2*$bF3) ;
   }
 
-  $rule pointwise(wilcox08::sst_tmuu<-rho,k,w,sst1,strainRate,divu),
+  $rule pointwise(wilcox08::sst_tmu<-rho,k,w,sst1,strainRate,divu),
     constraint(k,w,Wilcox08Model) {
     const real clim = 7./8. ;
     const real S2 = $strainRate*$strainRate ;
     const real Sbar = S2 - 2./3.*$divu*$divu ;
     const real wbar = max($w,clim*sqrt(Sbar/$sst1.betas)) ;
-    $sst_tmuu = $rho*$k/(wbar+EPSILON) ;
+    $sst_tmu = $rho*$k/(wbar+EPSILON) ;
   }
 
   $type LT store<real> ;
-  $rule pointwise(LT<-sst1,fBetaS,sst_tmuu,vortMag,k,w,rho),
+  $rule pointwise(LT<-sst1,fBetaS,sst_tmu,vortMag,k,w,rho),
     constraint(k,w,MS_SST_BSL_KW) {
-    const real nut_rans = $sst_tmuu/$rho ;
+    const real nut_rans = $sst_tmu/$rho ;
     const real BetaS = $sst1.betas*$fBetaS ;
 
     $LT = max(6.0*sqrt(nut_rans/($vortMag+EPSILON)),
@@ -71,28 +71,28 @@ namespace flowPsi {
     $fd = (1.0+tanh(2.0*pi*(blending-0.5)))/2.0 ;
   }
 
-  $type les_tmuu store<real> ;
+  $type les_tmu store<real> ;
   $type C_LES_NN param<real> ;
 
   $rule default(C_LES_NN),comments("Nichols & Nelson LES coefficient") {
     $C_LES_NN = 0.0854 ;
   }
   
-  $rule pointwise(les_tmuu<-fd,LG,sst_tmuu,rho,k,C_LES_NN),
+  $rule pointwise(les_tmu<-fd,LG,sst_tmu,rho,k,C_LES_NN),
     constraint(k,fd,LG,MS_SST_BSL_KW) {
     const real k_les = $k*$fd ;
-    const real nut_rans = $sst_tmuu/$rho ;
-    $les_tmuu = $rho*min($C_LES_NN*$LG*sqrt(k_les),nut_rans) ;
+    const real nut_rans = $sst_tmu/$rho ;
+    $les_tmu = $rho*min($C_LES_NN*$LG*sqrt(k_les),nut_rans) ;
   }
 
-  $rule pointwise(ms::kw::tmuu<-les_tmuu,sst_tmuu,fd),
-    constraint(k,fd,sst_tmuu,MS_SST_BSL_KW) {
-    $tmuu = $fd*$sst_tmuu + (1.0-$fd)*$les_tmuu ;
+  $rule pointwise(ms::kw::tmu<-les_tmu,sst_tmu,fd),
+    constraint(k,fd,sst_tmu,MS_SST_BSL_KW) {
+    $tmu = $fd*$sst_tmu + (1.0-$fd)*$les_tmu ;
   }
-  $type kw_tmuu store<real> ;
-  $rule pointwise(ms::wilcox08::kw_tmuu<-les_tmuu,sst_tmuu,fd),
-    constraint(k,fd,sst_tmuu,MS_SST_BSL_KW_OLD) {
-    $kw_tmuu = $fd*$sst_tmuu + (1.0-$fd)*$les_tmuu ;
+  $type kw_tmu store<real> ;
+  $rule pointwise(ms::wilcox08::kw_tmu<-les_tmu,sst_tmu,fd),
+    constraint(k,fd,sst_tmu,MS_SST_BSL_KW_OLD) {
+    $kw_tmu = $fd*$sst_tmu + (1.0-$fd)*$les_tmu ;
   }
 
 }

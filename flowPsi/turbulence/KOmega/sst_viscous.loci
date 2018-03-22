@@ -138,9 +138,9 @@ namespace flowPsi {
     const vect3d n = $area.n ;
     
     $k_f = $prescribe_turb_ref[0] ;
-    real muut = $prescribe_turb_ref[1] ;
+    real mut = $prescribe_turb_ref[1] ;
     
-    $w_f = max<real>($k_f*$rho_f/(muut+1e-10),1e-10) ;
+    $w_f = max<real>($k_f*$rho_f/(mut+1e-10),1e-10) ;
     
     if(dot($u_f,n)+$us_n >= -0.0){ 
       $k_f = $ci->$k ;
@@ -148,10 +148,10 @@ namespace flowPsi {
     }
   } 
 
-  $rule pointwise(lam_tau_w<-gradv3d_f(u),muu_f,area),
+  $rule pointwise(lam_tau_w<-gradv3d_f(u),mu_f,area),
     constraint(viscousWall_BC){
     symmetricTensor tau ;
-    real mu_lam = $muu_f ;
+    real mu_lam = $mu_f ;
     
     real dudx = $gradv3d_f(u).x.x ;
     real dvdy = $gradv3d_f(u).y.y ;
@@ -179,10 +179,10 @@ namespace flowPsi {
     $lam_tau_w = sqrt(dot(tau_w,tau_w)) ;
   }
 
-  $rule pointwise(axi::lam_tau_w<-gradv3d_f(u),muu_f,area,u_f,facecenter),
+  $rule pointwise(axi::lam_tau_w<-gradv3d_f(u),mu_f,area,u_f,facecenter),
     constraint(viscousWall_BC,axisymmetricCoordinateModel,u_f) {
     symmetricTensor tau ;
-    real mu_lam = $muu_f ;
+    real mu_lam = $mu_f ;
 
     real y = $facecenter.y+1e-33 ;
     real v = $u_f.y ;
@@ -216,10 +216,10 @@ namespace flowPsi {
 
   // menter's k-omega wall bc
   $rule pointwise(viscousWall::prescribe::k_f,viscousWall::prescribe::w_f<-rho_f,
-                  sst1,ci->(muu,dist_noslip)),
+                  sst1,ci->(mu,dist_noslip)),
     constraint(viscousWall_BC,SST_BSL_KW) {
     $k_f = 0.0 ;
-    $w_f = 10.0*6.0*$ci->$muu/($rho_f*$sst1.beta*
+    $w_f = 10.0*6.0*$ci->$mu/($rho_f*$sst1.beta*
                                pow($ci->$dist_noslip,2)) ;
   }
 
@@ -237,16 +237,16 @@ namespace flowPsi {
   }
 
   $type ksp store<real> ;
-  $rule pointwise(ksp<-rho_f,lam_tau_w,ksRef,muu_f),
+  $rule pointwise(ksp<-rho_f,lam_tau_w,ksRef,mu_f),
     constraint(RoughWallBC,SST_BSL_KW) {
-    const real nu_w = $muu_f/$rho_f ;
+    const real nu_w = $mu_f/$rho_f ;
     const real tau_w = $lam_tau_w ;
     const real utau = sqrt(tau_w/$rho_f) ;
     $ksp = max<real>(utau*$ksRef/nu_w,1e-30) ;
   }
 
   $rule pointwise(rough::viscousWall::prescribe::k_f,rough::viscousWall::prescribe::w_f<-rho_f,
-                  lam_tau_w,ksp,muu_f),
+                  lam_tau_w,ksp,mu_f),
     constraint(RoughWallBC,SST_BSL_KW) {
     $k_f = 0.0 ;
 
@@ -255,7 +255,7 @@ namespace flowPsi {
     // SR is modified from original Wilcox formulation for slightly
     // better prediction of transitionally rough surfaces
 
-    const real nu_w = $muu_f/$rho_f ;
+    const real nu_w = $mu_f/$rho_f ;
     const real tau_w = $lam_tau_w ;
     const real utau = sqrt(tau_w/$rho_f) ;
     const real blend1 = exp((5.-$ksp)/1.4) ;
