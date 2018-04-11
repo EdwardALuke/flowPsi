@@ -350,8 +350,8 @@ namespace flowPsi {
   $rule pointwise(prod_sgs), constraint(geom_cells) {$prod_sgs = 0. ;} // MILES default
 
   $rule pointwise(alpha_star_dhrl<-prod_les,prod_rans,prod_sgs), constraint(prod_les) { 
-    const real denom = max($prod_rans-$prod_sgs,1.e-16) ; 
-    $alpha_star_dhrl = min(max($prod_les/denom,0.),1.) ; 
+    const real denom = max<real>($prod_rans-$prod_sgs,1.e-16) ; 
+    $alpha_star_dhrl = min<real>(max<real>($prod_les/denom,0.),1.) ; 
   }
 
   $rule pointwise(alpha_dhrl<-alpha_star_dhrl) { // Original DHRL formulation
@@ -381,7 +381,7 @@ namespace flowPsi {
     const real s23_avg = 0.5*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y) ;
     const real s_avg_2 = s11_avg*s11_avg+s22_avg*s22_avg+s33_avg*s33_avg
                        + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
-    const real denom = max(s_avg_2,0.09*$w*$w)+1.e-16 ; // Use SST estimate for large-eddy time scale in low strainrate regions
+    const real denom = max<real>(s_avg_2,0.09*$w*$w)+1.e-16 ; // Use SST estimate for large-eddy time scale in low strainrate regions
     $s_ratio = ($sij_sij_avg-s_avg_2)/denom ;
   }
 
@@ -415,8 +415,8 @@ namespace flowPsi {
   }
 
   $rule pointwise(separate::alpha_star_energy_dhrl<-hflux_scalar_les,hflux_scalar_rans,hflux_scalar_sgs), constraint(geom_cells,DHRL_ALPHA_ENERGY) {
-    const real denom = max($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ; 
-    $alpha_star_energy_dhrl = min(max($hflux_scalar_les/denom,0.),1.) ; 
+    const real denom = max<real>($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ; 
+    $alpha_star_energy_dhrl = min<real>(max<real>($hflux_scalar_les/denom,0.),1.) ; 
   }
 
   $rule pointwise(alpha_energy_dhrl<-alpha_star_energy_dhrl), constraint(geom_cells) { // Original (non-modified) alpha
@@ -772,7 +772,7 @@ namespace flowPsi {
   }
   $rule pointwise(dhrl::wilcox08::k_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmak_f),
     constraint(k_f,Wilcox08Model,DHRL_SST_BSL_KW) {
-    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmu_f = $rho_avg_f*$k_f/max<real>($w_f,1e-30) ;
     $k_nu_f=($mu_avg_f+kw_tmu_f*$sigmak_f) ;
   }
 #endif
@@ -786,7 +786,7 @@ namespace flowPsi {
 
   $rule pointwise(dhrl::wilcox08::w_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmae_f),
     constraint(w_f,Wilcox08Model,DHRL_SST_BSL_KW) {
-    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmu_f = $rho_avg_f*$k_f/max<real>($w_f,1e-30) ;
     $w_nu_f=($mu_avg_f+kw_tmu_f*$sigmae_f) ;
   }    
 #endif
@@ -836,7 +836,7 @@ namespace flowPsi {
   // Cross diffusion term approximate jacobian
   $rule apply(w_srcJ<-grads(k),grads(w),sst2,bF1,vol,w,rho,rho_avg)[Loci::Summation],
     constraint(SST_BSL,DHRL_SST_BSL_KW,vol) {
-    real crossterm = max(dot($grads(k),$grads(w)),0.) ;
+    real crossterm = max<real>(dot($grads(k),$grads(w)),0.) ;
     // Cross diffusion term limiting for small w
     //    const real cdtmp = *crossDiffusionCorrection ;
     //      const real cdlimit = crossterm<0?cdtmp:0.0 ;
@@ -864,7 +864,7 @@ namespace flowPsi {
     const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
-    const real fmt = max(Mt2-mt0*mt0,0.0) ;
+    const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
     // compressibility dissipation constant (adjusted from Sarkars original
     // value
     const real psi = $wilcox_xi ;
@@ -901,7 +901,7 @@ namespace flowPsi {
     constraint(DHRL_SST_BSL_KW,k,tmu_rans) {
     const real S = $strainRateMag_avg ;
     const real Omega = $vortMag_avg ;
-    $stress_scalar=max($tmu_rans*(S*Omega-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar=max<real>($tmu_rans*(S*Omega-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                        0.0) ;
   }
   
@@ -915,16 +915,16 @@ namespace flowPsi {
     constraint(vorticity_production,k,tmu_rans,DHRL_SST_BSL_KW) {
     const real O2 = $vortMag_avg*$vortMag_avg ;
     
-    $stress_scalar = max($tmu_rans*(O2-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar = max<real>($tmu_rans*(O2-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                          0.0) ;
   }    
 
   $rule pointwise(dhrl::vortex_correction::stress_scalar<-tmu_rans,rho_avg,k,divu_avg,
                   vortMag_avg,strainRateMag_avg,Cvor),
     constraint(vortex_preserving_production,k,tmu_rans,DHRL_SST_BSL_KW) {
-    const real O = max($vortMag_avg + $Cvor*(min($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
+    const real O = max<real>($vortMag_avg + $Cvor*(min($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
     const real S = $strainRateMag_avg ;
-    $stress_scalar = max($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar = max<real>($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                          0.0);
   }    
 
@@ -956,34 +956,6 @@ namespace flowPsi {
 
   // Output controls
 
-  $type tau_wall_mean store<vect3d> ;
-  $rule pointwise(tau_wall_mean<-gradv3d_f(u_avg),mu_avg_f,area), constraint(viscousWall_BC) {
-    symmetricTensor tauw ;
-    const vect3d an = $area.n ;
-    real mu = $mu_avg_f ;
-
-    real dudx = $gradv3d_f(u_avg).x.x ;
-    real dvdy = $gradv3d_f(u_avg).y.y ;
-    real dwdz = $gradv3d_f(u_avg).z.z ;
-    real dvdx = $gradv3d_f(u_avg).y.x ;
-    real dwdx = $gradv3d_f(u_avg).z.x ;
-    real dwdy = $gradv3d_f(u_avg).z.y ;
-    real dudy = $gradv3d_f(u_avg).x.y ;
-    real dudz = $gradv3d_f(u_avg).x.z ;
-    real dvdz = $gradv3d_f(u_avg).y.z ;
-
-    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
-    tauw.xx = 2.0*mu*(dudx-divm) ;
-    tauw.yy = 2.0*mu*(dvdy-divm) ;
-    tauw.zz = 2.0*mu*(dwdz-divm) ;
-    tauw.xy = mu*(dudy+dvdx) ;
-    tauw.xz = mu*(dudz+dwdx) ;
-    tauw.yz = mu*(dvdz+dwdy) ;
-
-    $tau_wall_mean.x = tauw.xx*an.x + tauw.xy*an.y + tauw.xz*an.z ;
-    $tau_wall_mean.y = tauw.xy*an.x + tauw.yy*an.y + tauw.yz*an.z ;
-    $tau_wall_mean.z = tauw.xz*an.x + tauw.yz*an.y + tauw.zz*an.z ;
-  }
 
 #ifdef OUTPUT_AVERAGES
   $type u_mean store<real> ;
@@ -1031,6 +1003,34 @@ namespace flowPsi {
   $rule pointwise(p_avg_f<-ci->p_avg) {
     $p_avg_f = $ci->$p_avg ;
   }  
+  $type tau_wall_mean store<vect3d> ;
+  $rule pointwise(tau_wall_mean<-gradv3d_f(u_avg),mu_avg_f,area), constraint(viscousWall_BC) {
+    symmetricTensor tauw ;
+    const vect3d an = $area.n ;
+    real mu = $mu_avg_f ;
+
+    real dudx = $gradv3d_f(u_avg).x.x ;
+    real dvdy = $gradv3d_f(u_avg).y.y ;
+    real dwdz = $gradv3d_f(u_avg).z.z ;
+    real dvdx = $gradv3d_f(u_avg).y.x ;
+    real dwdx = $gradv3d_f(u_avg).z.x ;
+    real dwdy = $gradv3d_f(u_avg).z.y ;
+    real dudy = $gradv3d_f(u_avg).x.y ;
+    real dudz = $gradv3d_f(u_avg).x.z ;
+    real dvdz = $gradv3d_f(u_avg).y.z ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    tauw.xx = 2.0*mu*(dudx-divm) ;
+    tauw.yy = 2.0*mu*(dvdy-divm) ;
+    tauw.zz = 2.0*mu*(dwdz-divm) ;
+    tauw.xy = mu*(dudy+dvdx) ;
+    tauw.xz = mu*(dudz+dwdx) ;
+    tauw.yz = mu*(dvdz+dwdy) ;
+
+    $tau_wall_mean.x = tauw.xx*an.x + tauw.xy*an.y + tauw.xz*an.z ;
+    $tau_wall_mean.y = tauw.xy*an.x + tauw.yy*an.y + tauw.yz*an.z ;
+    $tau_wall_mean.z = tauw.xz*an.x + tauw.yz*an.y + tauw.zz*an.z ;
+  }
 
 
   OUTPUT_SCALAR_ALWAYS("cell2node(u_mean)",u_mean) ;
@@ -1050,7 +1050,6 @@ namespace flowPsi {
   OUTPUT_SCALAR("cell2node(alpha_energy_dhrl)",alpha_energy_dhrl) ;
   OUTPUT_SCALAR("cell2node(alpha_mass_dhrl)",alpha_mass_dhrl) ;
   OUTPUT_SCALAR("cell2node(s_ratio)",s_ratio) ;
-  OUTPUT_BNDRY_VECTOR("tau_wall_mean",tau_wall_mean,"AllViscousBCs") ;
 #endif
 
 
