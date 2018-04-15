@@ -227,7 +227,7 @@ namespace flowPsi {
     const real peps = $localPBias{n,it} ;
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
     
-    $rhonp1{n,it} = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
+    $rhonp1{n,it} = max<real>((pgnp1+$Pambient)/($Rtilde*Tnp1),1e-15) ;
   }
   
   $type Tn store<real> ;

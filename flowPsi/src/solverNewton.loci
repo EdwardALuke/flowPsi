@@ -137,7 +137,7 @@ namespace flowPsi {
     const real pgnp1 = (2.*pgstar-(1.-peps)*$gagePressure{n})/(1+peps) ;
     
     const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
-    const real rhonp = (pgnp1+$Pambient)/($Rtilde*Tnp1) ;
+    const real rhonp = max<real>((pgnp1+$Pambient)/($Rtilde*Tnp1),1e-15) ;
 
     const real srhonp = sqrt(rhonp) ;
     const real srhon = sqrt(rhon) ;
