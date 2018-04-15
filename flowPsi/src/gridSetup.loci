@@ -340,7 +340,6 @@ namespace flowPsi {
       Loci::option_values ov = bc_info->getOption(bname) ;
       options_list::arg_list value_list ;
       string name ;
-      bool func = false ;
 
       switch(vt) {
       case Loci::NAME :
@@ -348,7 +347,6 @@ namespace flowPsi {
         bc_info->setOption(bname,name) ;
         break ;
       case Loci::FUNCTION:
-        func = true ;
         ov.get_value(name) ;
         ov.get_value(value_list) ;
         bc_info->setOption(bname,name,value_list) ;
