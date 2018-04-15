@@ -176,9 +176,9 @@ namespace flowPsi {
     
     const real pgf = 0.5*(pgl + pgr) ;
     // simple temperature averaging
-    const real tf = 0.5*(Tl+Tr) ;
+    // const real tf = 0.5*(Tl+Tr) ;
     // equivalent to density averaging
-    //    const real tf = Tl*Tr*(pgl+pgr+2*pambient)/((pgl+pambient)*Tr + (pgr+pambient)*Tl) ;
+    const real tf = Tl*Tr*(pgl+pgr+2*pambient)/((pgl+pambient)*Tr + (pgr+pambient)*Tl) ;
     // pressure biased temperature averaging
     //const real tf = ((pgl+pambient)*Tl+(pgr+pambient)*Tr)/(pgl+pgr+2.*pambient) ;
 
