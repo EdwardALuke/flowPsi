@@ -454,6 +454,15 @@ namespace LGSI {
       } ENDFORALL ;
 
       sort(couples.begin(),couples.end()) ;
+      // If there are multiple faces to a cell then we will have
+      // duplicate couples that will confuse the line search, so
+      // we remove them.
+      vector<pair<int,int> >::iterator di = unique(couples.begin(),couples.end()) ;
+      if(di != couples.end()) {
+	Loci::debugout << "duplicate couples detected in lsgs algorithm"
+		       << endl ;
+	couples.erase(di,couples.end()) ;
+      }
       vector<pair<int,int> > connections(nmyeqn) ;
       
       for(int i=0;i<nmyeqn;++i) {
