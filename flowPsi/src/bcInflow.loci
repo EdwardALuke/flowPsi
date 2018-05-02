@@ -330,7 +330,7 @@ namespace flowPsi {
 		   $Eta_pf) ;
       }
     } else {
-      if(uit < a0) { // Supersonic inflow
+      if(-uit > a0) { // Supersonic inflow
 	$gagePressure_f = $gagePressureRef ;
 	$temperature_f = $temperatureRef ;
 	$u_f = $uRef ;
