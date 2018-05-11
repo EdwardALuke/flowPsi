@@ -93,6 +93,99 @@ namespace Loci {
 void ORBPartition(const vector<vector3d<float> > &pnts,
                   vector<int> &procid,
                   MPI_Comm comm) ;
+#ifdef USE_AUTODIFF
+  void getStencilBoundingBox2(kdTree::KDTree<float>::bounds &bnd,
+			      double &delta,
+			      const kdTree::KDTree<float> &kd,
+			      const vector3d<double> pnts[],int start, int end) {
+    double deltain = delta ;
+    for(int d=0;d<3;++d) {
+      bnd.minc[d] = .25*std::numeric_limits<float>::max() ;
+      bnd.maxc[d] = -.25*std::numeric_limits<float>::max() ;
+    }
+
+    for(int i=start;i<end;++i) {
+      bnd.maxc[0] = max(bnd.maxc[0],realToFloat(pnts[i].x)) ;
+      bnd.maxc[1] = max(bnd.maxc[1],realToFloat(pnts[i].y)) ;
+      bnd.maxc[2] = max(bnd.maxc[2],realToFloat(pnts[i].z)) ;
+      bnd.minc[0] = min(bnd.minc[0],realToFloat(pnts[i].x)) ;
+      bnd.minc[1] = min(bnd.minc[1],realToFloat(pnts[i].y)) ;
+      bnd.minc[2] = min(bnd.minc[2],realToFloat(pnts[i].z)) ;
+    }
+    int npnts = collectPointsSizes(kd,bnd) ;
+
+    if(npnts == 0) {
+      // just estimate based on what we have on this processor
+      for(int i=start;i<end;++i) {
+	double rmin = 1e30 ;
+	kdTree::coord3df pt ;
+	pt[0] = realToFloat(pnts[i].x) ;
+	pt[1] = realToFloat(pnts[i].y) ;
+	pt[2] = realToFloat(pnts[i].z) ;
+
+	kd.find_closest(pt,rmin) ;
+	delta = max(delta,sqrt(rmin)) ;
+      }
+    } else {
+      // Compute a delta to expand the bounding box
+      double d1 = bnd.maxc[0]-bnd.minc[0] ;
+      double d2 = bnd.maxc[1]-bnd.minc[1] ;
+      double d3 = bnd.maxc[2]-bnd.minc[2] ;
+      if(d1<d2)
+	std::swap(d1,d2) ;
+      if(d1<d3)
+	std::swap(d1,d3) ;
+      if(d2<d3)
+	std::swap(d2,d3) ;
+      
+      // Compute mean distance
+      double rnpnts = 1./double(npnts) ;
+      double dist = max(max(d1*rnpnts,sqrt(d1*d2*rnpnts)),
+		      pow(d1*d2*d3*rnpnts,0.333333333)) ;
+
+      // Over estimate to try to get the distance required to find stencil pnts
+      //      dist *= 10 ;
+      dist *= 5 ;
+      dist = max(dist,delta) ;
+      delta = dist ;
+    }
+#ifdef VERBOSE
+    debugout << "BoundingBox2: dx=" << bnd.maxc[0]-bnd.minc[0]
+                   << ",dy=" << bnd.maxc[1]-bnd.minc[1]
+                   << ",dz=" << bnd.maxc[2]-bnd.minc[2]
+                   << ",delta="<< delta << endl ;
+#endif
+    for(int d=0;d<3;++d) {
+      bnd.maxc[d] += delta ;
+      bnd.minc[d] -= delta ;
+    }
+    int npnts2 = collectPointsSizes(kd,bnd) ;
+    
+    if(npnts2 > 1000000) {
+      double f = pow(double(npnts)/double(npnts2+1),0.33333) ;
+      
+#ifdef VERBOSE
+      debugout << "npnts2="<<npnts2 <<",f=" << f << endl ;
+#endif
+      for(int d=0;d<3;++d) {
+        bnd.maxc[d] -= (1.-f)*(delta-deltain) ;
+        bnd.minc[d] += (1.-f)*(delta-deltain) ;
+      }
+    }
+    double max_delta = 0 ;
+    for(int d=0;d<3;++d) {
+      max_delta = max(max_delta,double(bnd.maxc[d]-bnd.minc[d])) ;
+    }
+    max_delta *= 1e-3 ;
+    for(int d=0;d<3;++d) {
+      if(bnd.maxc[d]-bnd.minc[d] < max_delta) {
+        bnd.maxc[d] += max_delta ;
+        bnd.minc[d] -= max_delta ;
+      }
+    }
+    
+  }
+#endif
 }
 
 namespace flowPsi {
@@ -698,7 +791,6 @@ namespace flowPsi {
 
 
     vector<vector3d<double> > vecs(dom.size()) ;
-    vector<vector3d<real> > vecsr(dom.size()) ;
     int cnt = 0 ;
     FORALL(dom,cc) {
       vecs[cnt] = realToDouble(pnts[cc]) ;
@@ -739,7 +831,7 @@ namespace flowPsi {
       int end = start+sizes[b] ;
 	
       double dist = *interpolateMinStencilSize ;
-      getStencilBoundingBox2(bnd,dist,*(interp_data->kd),&vecsr[0],start,end) ;
+      getStencilBoundingBox2(bnd,dist,*(interp_data->kd),&vecs[0],start,end) ;
 
       using namespace Loci::kdTree ;
         
@@ -779,7 +871,7 @@ namespace flowPsi {
 
         // compute stencil weights
         vector<real> w  ;
-        stencil_weights(w,neighbors,loc,vecsr[ip]) ;
+        stencil_weights(w,neighbors,loc,vecs[ip]) ;
 
         int nsz = neighbors.size() ;
 
@@ -1090,7 +1182,6 @@ namespace flowPsi {
 
 
     vector<vect3d> vecs(dom.size()) ;
-    vector<vector3d<double> > vecsr(dom.size()) ;
     vector<vect3d> fcenter(dom.size()) ;
     vector<vect3d> fnormal(dom.size()) ;
     int cnt = 0 ;
@@ -1119,11 +1210,9 @@ namespace flowPsi {
       lid[i] = i ;
 
     vector<int> sizes ;
-    for(size_t i=0;i<vecs.size();++i)
-      vecsr[i] = realToDouble(vecs[i]) ;
 
     int splits = 20 ;
-    histogram_part(&vecsr[0],&lid[0],0,nlocs,5,sizes,splits) ;
+    histogram_part(&vecs[0],&lid[0],0,nlocs,5,sizes,splits) ;
     int sz = sizes.size() ;
     int szmx = sz;
     MPI_Allreduce(&sz,&szmx,1,MPI_INT,MPI_MAX,MPI_COMM_WORLD) ;
