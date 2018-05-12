@@ -9,12 +9,10 @@ to the correction.  The compressibility correction is implemented as a
 modification to the $\beta$ and $\beta^*$ destruction terms that
 appear in equations (\ref{kb-turb}) and (\ref{omega-turb}) such that
 the new constants are given by:
-\begin{equation}
-\beta^*_{corr} = \beta^*[1+\xi^*F(M_t)], 
-\end{equation}
-\begin{equation}
-\beta_{corr} = \beta-\beta^*\xi^* F(M_t),
-\end{equation}
+\begin{eqnarray}
+\beta^*_{corr}&=& \beta^*[1+\xi^*F(M_t)],\\
+\beta_{corr} &=& \beta-\beta^*\xi^* F(M_t),
+\end{eqnarray}
 where $F(M_t) = \max(M_t^2 - M^2_{t_0},0)$.  We recover Sarkar's
 original model by setting $\xi^* = 1$ and $M_{t_0} = 0$, and Wilcox's
 modification by setting $\xi^* = \frac{3}{2}$, and $M_{t_0} =

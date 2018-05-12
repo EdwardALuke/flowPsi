@@ -10,15 +10,11 @@ model.  To derive the DHRL approach, the instantaneous velocity
 ($u_i$) is decomposed into Favre-averaged $\overline{u}_i$ , resolved
 fluctuating ($u^{\prime\prime}$), and unresolved fluctuating
 ($u^\prime_i$) components, {\it i.e.}:
-\begin{equation}
-\overline{u}_i = <\hat{\rho} \tilde{u}_i>/<\hat{\rho}>
-\end{equation}
-\begin{equation}
-u^{\prime\prime}_i = \tilde{u}_i - \overline{u}_i
-\end{equation}
-\begin{equation}
-u^\prime_i = u_i - \tilde{u}_i
-\end{equation}
+\begin{eqnarray}
+\overline{u}_i &=& <\hat{\rho} \tilde{u}_i>/<\hat{\rho}>\\
+u^{\prime\prime}_i &=& \tilde{u}_i - \overline{u}_i\\
+u^\prime_i &=& u_i - \tilde{u}_i
+\end{eqnarray}
 Here the angle brackets denote Reynolds averaging.  For stationary flow, this is equivalent to an infinite-time average.
 
 The assumptions used in the derivation of the DHRL method are: (1)
@@ -30,14 +26,12 @@ $\hat{\rho}\widetilde{u^\prime_i u^\prime_j} = \beta
 \hat{\rho}\overline{u^{\prime}_i u^{\prime}_j}$, and (3) that model
 constants $\alpha$ and $\beta$ are complementary.  This yields the
 following blending method for RANS and LES stresses:
-\begin{equation}
-\tau_{ij} = \alpha \tau^{SGS}_{ij} + (1-\alpha)\tau^{RANS}_{ij},
+\begin{eqnarray}
 \label{eq:dhrlblend}
-\end{equation}
-\begin{equation}
-\alpha = \underbrace{-<\hat{\rho}> \overline{u^{\prime\prime}_i u^{\prime\prime}_j} \overline{S}_{ij}}_{\text{Resolved Production}}/ (\underbrace{\tau^{RANS}_{ij} \overline S_{ij}}_{\text{RANS Production}} - \underbrace{ \overline{\tau}^{SGS}_{ij} \overline{S}_{ij}}_{\text{Inhomogeneous Production}})
+\tau_{ij} &=& \alpha \tau^{SGS}_{ij} + (1-\alpha)\tau^{RANS}_{ij},\\
+\alpha &=& \underbrace{-<\hat{\rho}> \overline{u^{\prime\prime}_i u^{\prime\prime}_j} \overline{S}_{ij}}_{\text{Resolved Production}}/ \Bigg(\underbrace{\tau^{RANS}_{ij} \overline S_{ij}}_{\text{RANS Production}} - \underbrace{ \overline{\tau}^{SGS}_{ij} \overline{S}_{ij}}_{\text{Inhomogeneous Production}}\Bigg)
 \label{eq:dhrlswitch}
-\end{equation}
+\end{eqnarray}
 
 where $\tau^{SGS}_{ij}$ is the subgrid stress predicted by any
 candidate LES model (for MILES this is identically zero), and
@@ -77,13 +71,10 @@ terms are computed based solely on the Favre-averaged flowfield. For
 example, for a linear eddy viscosity model the turbulent stress and
 heat flux are computed as:
 
-\begin{equation}
-\tau^{RANS}_{ij} = \frac{2}{3} \rho k \delta_{ij} - \mu_T \left( \frac{\partial \overline{u}_i}{\partial x_j} + \frac{\partial \overline{u}_j}{\partial x_i} - \frac{2}{3} \frac{\partial \overline{u}_k}{\partial x_k} \delta_{ij}\right)
-\end{equation}
-
-\begin{equation}
-q^{RANS}_j = - k_T \frac{\partial \overline{T}}{\partial x_j}
-\end{equation}
+\begin{eqnarray}
+\tau^{RANS}_{ij} &=& \frac{2}{3} \rho k \delta_{ij} - \mu_T \left( \frac{\partial \overline{u}_i}{\partial x_j} + \frac{\partial \overline{u}_j}{\partial x_i} - \frac{2}{3} \frac{\partial \overline{u}_k}{\partial x_k} \delta_{ij}\right)\\
+q^{RANS}_j &=& - k_T \frac{\partial \overline{T}}{\partial x_j}
+\end{eqnarray}
 
 Similarly, all of the terms in the model transport equations for
 turbulence model dependent variables (e.g. $k$ and $\omega$) are

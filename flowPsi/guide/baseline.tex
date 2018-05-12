@@ -18,7 +18,7 @@ called baseline (BSL) model, by blending the $k-\epsilon$ and
 $k-\omega$ models\cite{Menter.94}.  It utilizes the $k-\omega$ model
 in the wall region and gradually switches to the $k-\epsilon$ model
 away from the wall.  To achieve this, the $k-\epsilon$ model is first
-transformed into a $k-\omega$ formulation, and an additional cross
+% transformed into a $k-\omega$ formulation, and an additional cross
 diffusion term is added (another diffusion term associated with
 turbulent kinetic energy is neglected in the formulation under certain
 assumptions\cite{WilcoxBook}). The original $k-\omega$ equations are
@@ -84,21 +84,23 @@ appropriate $k-\omega$ and $k-\epsilon$ constants, as follows:
 \label{constant}
 \end{equation}
 where the constants $\phi_1$ ($k-\omega$) are:
-\begin{multline}
-\sigma_{k1} = 0.5, \quad \sigma_{\omega 1} = 0.5,
+\begin{eqnarray}
+\nonumber
+\sigma_{k1} &=& 0.5, \quad \sigma_{\omega 1} = 0.5,
 \quad \beta_1 = 0.075,\\
- \beta^{\star} = 0.09, \quad \kappa = 0.41,
+ \beta^{\star} &=& 0.09, \quad \kappa = 0.41,
 \quad \gamma_1 = \beta_1/\beta^{\star} - \sigma_{\omega 1} \kappa^{2}/\sqrt
 {\beta^{\star}},
-\end{multline}
+\end{eqnarray}
 and the constants $\phi_2$ ($k-\epsilon$) are:
-\begin{multline}
-\sigma_{k2} = 1.0, \quad \sigma_{\omega 2} = 0.856,
+\begin{eqnarray}
+\nonumber
+\sigma_{k2} &=& 1.0, \quad \sigma_{\omega 2} = 0.856,
 \quad \beta_2 = 0.0828,\\
- \beta^{\star} = 0.09, \quad \kappa = 0.41,
+ \beta^{\star} &=& 0.09, \quad \kappa = 0.41,
 \quad \gamma_2 = \beta_2/\beta^{\star} - \sigma_{\omega 2} \kappa^{2}/\sqrt
 {\beta^{\star}}.
-\end{multline}
+\end{eqnarray}
 
 The blending function $F_{sbl}$ is defined as follows:
 
@@ -162,7 +164,8 @@ can be included into the system of governing equations,
 Eq.~(\ref{gov_integral}), by adding the
 following additional terms to the vectors $Q$, $F$, $F_v$, and $W$:
 
-\begin{multline}
+\begin{eqnarray}
+\nonumber
 Q =
 \begin{bmatrix}
 \rho k \\
@@ -189,5 +192,5 @@ W =\rho
 \sigma_{\omega 2} \frac{1}{\omega} \frac{\partial k}
 {\partial x_{j}} \frac{\partial \omega}{\partial x_{j}}\\
 \end{bmatrix}.
-\end{multline}
+\end{eqnarray}
 
