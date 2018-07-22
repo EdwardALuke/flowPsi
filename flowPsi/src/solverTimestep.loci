@@ -50,7 +50,7 @@ namespace flowPsi {
 
   $type timeStepScheme param<string> ;
   $rule default(timeStepScheme) { // Options here are BDF2 and KEC
-    $timeStepScheme = "KEC" ;
+    $timeStepScheme = "BDF2" ;
   }
   
   $rule singleton(timeSteppingMode<-timeStepMode) {  
@@ -331,7 +331,8 @@ namespace flowPsi {
   // Compute rhs of Newton step
   // Time accurate second order scheme using BDF2 time integration
   $rule pointwise(rhs{n,it}<-src{n,it},gagePressure{n-1},gagePressure{n},gagePressure{n,it},temperature{n-1},temperature{n},temperature{n,it},u{n-1},u{n},u{n,it},dtmax{n,it},dtau{n,it},vol{n,it},Pambient,Rtilde,gamma),
-    inplace(rhs{n,it}|src{n,it}),constraint(geom_cells,timeStepAccurate,timeStepSchemeBDF2) {
+    inplace(rhs{n,it}|src{n,it}),
+    constraint(geom_cells,timeStepAccurate,timeStepSchemeBDF2) {
     const real rhon = ($gagePressure{n}+$Pambient)/($Rtilde*$temperature{n}) ;
     const real rhonm1 = ($gagePressure{n-1}+$Pambient)/($Rtilde*$temperature{n-1}) ;
     const real rhonp1 = ($gagePressure{n,it}+$Pambient)/($Rtilde*$temperature{n,it}) ;

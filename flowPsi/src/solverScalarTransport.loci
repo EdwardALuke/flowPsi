@@ -317,7 +317,7 @@ namespace flowPsi {
                   restart_directory{n},restart_postfix{n},modelName{n},
 		  scalarTransportName_X),
     conditional(do_restart{n}),
-    constraint(geom_cells{n},C{n},timeStepSchemeBDF2), 
+    constraint(geom_cells{n},C{n},timeStepAccurate,timeStepSchemeBDF2), 
     parametric(scalarTransportP(X,C)),  prelude {
     if(*$ncycle{n} == 0)
       return ;
