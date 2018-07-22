@@ -26,6 +26,7 @@
 #include "Tools/stream.h"
 #include "inviscidFlux.h"
 #include "bcTools.h"
+#include "flowPsiIO.h"
 $include "flowPsi.lh"
 
 namespace flowPsi {
@@ -60,118 +61,145 @@ namespace flowPsi {
 
   register_BC<isentropic_check> register_isentropic_check ;
 
-  
-  void fixed_p0t0_bc (real &unb, real &ab, const real uni,
-                      const real ai, const real a0,
-                      const real gamma0) {
 
-    const real gm1 = gamma0-1. ;
-    const real rim = uni-2.*ai/gm1 ;
-
-    // Use quadratic equation to solve
-    real a = (2./gm1 + 1) ;
-    real b = (2.*rim) ;
-    real c = (0.5*gm1*rim*rim - a0*a0) ;
-    real D = b*b - 4.*a*c ;
-    if(D < 0) {
-      ab = a0 ;
-      unb = rim+2.*ab/gm1 ;
-      return ;
-    }
-    ab = (-b + sqrt(D))/(2.*a) ;
-    // limit soundspeed to stay sufficiently large
-    //    ab = max(ab,min(a0,ai)) ;
-    ab = max(ab,.25*a0) ;
-
-    unb = rim+2.*ab/gm1 ;
-
-    return ;
-    
-  }
-  
-  void total_pressure_bc_imp(real &pb,real &Tb, vect3d &ub,
-                             real T0, real p0, real gamma0, real a0,
-                             vect3d ui, real ai, real ti,
-                             vect3d n, vect3d rigid_u) {
-
-    const real gm1 = gamma0-1. ;
-    const real uit = dot(ui,n) ;
-    real unb = uit ;
-
-    real ab = a0 ;
-    fixed_p0t0_bc(unb,ab,uit,ai,a0,gamma0) ; //finds boundary normal velocity and speed of sound
-
-    ub = unb*n + rigid_u ;
-    real M = norm(ub)/ab ;
-    const real maxMach = 1.0 ; // Maximum Mach number allowed at boundary
-    if(M>maxMach) {
-      // If the flow becomes supersonic, then we need to stop getting
-      // information from inside the domain.  So instead of extrapolating
-      // velocity, we compute velocity from the isentropic conditions for
-      // choked (Mach 1) flow
-      M=maxMach ;
-      const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
-      const real ur2 = dot(rigid_u,rigid_u) ;
-      const real un = sqrt(max<real>(utot*utot-ur2,0.0)) ;
-      ub = un*n + rigid_u ;
-    }
-
-    Tb = T0/(1+.5*gm1*M*M) ;
-    pb = p0*pow(1.+.5*gm1*M*M,-gamma0/gm1) ;
-
-    // Isentropic inflow has a problem if the gas inside is too cold
-    // We detect if this is happening and if it does happen, we switch
-    // to a more robust way of imposing the isentropic conditions
-    real f = (Tb-ti)/max(ti,Tb)-.1 ;
-    if(f > 0) {
-      // Compute isentropic conditions assuming soundspeed stays the same
-      // as in the chamber (as a weighted average)
-      f = pow(f,.5) ;
-      ab = (1-f)*ab + f*a0 ;
-      unb = (1-f)*unb + f*uit ;
+  namespace  isentropic {
+    void solve3x3System(Array<real,3> &x, 
+			const Array<Array<real,3>,3> &A, 
+			const Array<real,3> &b) {
+      Array<Array<real,3>,3> Ainv ;
+      real det = (A[0][0]*A[1][1]*A[2][2] + 
+		  A[0][1]*A[1][2]*A[2][0] + 
+		  A[0][2]*A[1][0]*A[2][1] - 
+		  A[0][2]*A[1][1]*A[2][0] - 
+		  A[0][0]*A[1][2]*A[2][1] - 
+		  A[0][1]*A[1][0]*A[2][2]) ;
+      real rdet = 1./det ;
+      Ainv[0][0] = rdet*(A[1][1]*A[2][2]-A[1][2]*A[2][1]) ;
+      Ainv[1][0] = rdet*(A[1][2]*A[2][0]-A[1][0]*A[2][2]) ;
+      Ainv[2][0] = rdet*(A[1][0]*A[2][1]-A[1][1]*A[2][0]) ;
       
-      ub = unb*n + rigid_u ;
-      real M = norm(ub)/ab ;
-      if(M>maxMach) {
-        // If the flow becomes supersonic, then we need to stop getting
-        // information from inside the domain.  So instead of extrapolating
-        // velocity, we compute velocity from the isentropic conditions for
-        // choked (Mach 1) flow
-        M=maxMach ;
-        const real utot = M*a0/sqrt(1+.5*gm1*M*M) ;
-        const real ur2 = dot(rigid_u,rigid_u) ;
-        const real un = sqrt(max<real>(utot*utot-ur2,0.0)) ;
-        ub = un*n + rigid_u ;
+      Ainv[0][1] = rdet*(A[0][2]*A[2][1]-A[0][1]*A[2][2]) ;
+      Ainv[1][1] = rdet*(A[0][0]*A[2][2]-A[0][2]*A[2][0]) ;
+      Ainv[2][1] = rdet*(A[0][1]*A[2][0]-A[0][0]*A[2][1]) ;
+
+      Ainv[0][2] = rdet*(A[0][1]*A[1][2]-A[0][2]*A[1][1]) ;
+      Ainv[1][2] = rdet*(A[0][2]*A[1][0]-A[0][0]*A[1][2]) ;
+      Ainv[2][2] = rdet*(A[0][0]*A[1][1]-A[0][1]*A[1][0]) ;
+    
+      x[0] = Ainv[0][0]*b[0]+Ainv[0][1]*b[1]+Ainv[0][2]*b[2] ;
+      x[1] = Ainv[1][0]*b[0]+Ainv[1][1]*b[1]+Ainv[1][2]*b[2] ;
+      x[2] = Ainv[2][0]*b[0]+Ainv[2][1]*b[1]+Ainv[2][2]*b[2] ;  
+    }
+
+    // Isentropic solution using pt primitive riemann from flow
+    void isentropicSolve(real &pb, real &Tb, real &ub,
+			 const real uni, const real pi, const real Ti,
+			 const real p0, const real T0,
+			 const vect3d &flowdir,
+			 const vect3d &n,
+			 const real Beta,
+			 const real gamma,
+			 const real Rtilde) {
+
+      const real gm1 = gamma-1 ;
+      const real a1 = Rtilde*gamma/gm1 ;
+      const real h0 = a1*T0 ;
+      const real s0 = a1*log(T0)-Rtilde*log(p0) ;
+      const real a0 = sqrt(gamma*Rtilde*T0) ; 
+      const real Tim = min(Ti,T0) ;
+
+      const real ri = pi/(Rtilde*Tim) ;
+      const real ai2 = gamma*Rtilde*Tim ;
+
+      const real BM = Beta-1. ;
+      const real unia = min(uni,a0) ;
+      const real unil = (unia*dot(n,flowdir) <0)?-unia:unia ;
+      const real sigmai = sqrt(unil*unil*BM*BM+4.*Beta*ai2) ;
+      const real K3 = (2.*pi+ri*unil*(sigmai-BM*unil))/(2.*ri*sigmai) ;
+
+      pb=min(p0,pi) ;
+      Tb=min(T0,Ti) ;
+      ub = uni/dot(n,flowdir) ;
+      ub = min<real>(max<real>(ub,0.0),a0) ;
+      if(pi > p0) { 
+	ub = 0 ;
+	return ;
       }
+
+      for(int i=0;i<32;++i) {
+	Array<Array<real,3>,3> A ;
+	Array<real,3> b ;
+	const real sb = a1*log(Tb) - Rtilde*log(pb);
+	b[0] = s0-sb ;
+	A[0][0] = -Rtilde/pb; // dsb/dpb
+	A[0][1] = a1/Tb ;     // dsb/dTb
+	A[0][2] = 0 ;
+	b[1] = h0-(a1*Tb +.5*ub*ub) ;
+	const real rp = 1./(Rtilde*Tb) ;
+	const real rb = pb*rp ;
+	const real rt = -pb*rp*Rtilde*rp ;
+	const real rrho = 1./rb ;
+	const real dhdP = rrho*((Tb*rt)*rrho+1.0) ;
+	const real dhdT = a1 ;
+	const real ab2 = gamma*Rtilde*Tb ;
+	A[1][0] = dhdP ;
+	A[1][1] = dhdT ;
+	A[1][2] = ub ;
+	const real f = dot(n,flowdir) ;
+	const real unb = ub*f ;
+	const real sigmab = sqrt(unb*unb*BM*BM+4.*Beta*ab2) ;
+	const real K3b = (2.*pb+rb*unb*(sigmab-BM*unb))/(2.*rb*sigmab) ;
+	b[2] = K3-K3b ;
+
+
+	A[2][0] = (unb*(sigmab-BM*unb)*rp+2.)/(2.*rb*sigmab) - K3b*rp/rb ;
+	A[2][1] = (unb*(sigmab-BM*unb)*rt)/(2.*rb*sigmab) - K3b*rt/rb ;
+	const real dsigmadu = ub*BM*BM*f*f/sigmab ;
+	A[2][2] = ((f*(sigmab-BM*unb)+unb*(dsigmadu-BM*f))/(2.*sigmab) -
+		   K3b*dsigmadu/sigmab) ;
+
+	Array<real,3> x ;
       
-      Tb = T0/(1+.5*gm1*M*M) ;
-      pb = p0*pow(1.+.5*gm1*M*M,-gamma0/gm1) ;
-    }    
-    
-    
-    return ;
+	solve3x3System(x,A, b) ;
+      
+	real alpha = 1.0 ;
+	alpha = min(alpha,.75*pb/(max(-x[0],0.1*x[0])+1e-30)) ;
+	alpha = min(alpha,.75*Tb/(max(-x[1],0.1*x[1])+1e-30)) ;
+
+	pb += alpha*x[0] ;
+	Tb += alpha*x[1] ;
+	ub += alpha*x[2] ;
+	pb = min(pb,p0) ;
+	Tb = min(Tb,T0) ;
+	ub = min(sqrt(ab2),ub) ;
+	ub = max<real>(0,ub) ;
+	if(fabs(x[1]) < T0*1e-8 && fabs(x[0]) < p0*1e-8 && 
+	   fabs(x[2]) < a0*1e-7) {
+	  return ;
+	}
+      }
+      Loci::debugout << "isentropicInflow failed to converge!" << endl ;
+      BCErrorCode |= flowPsi::ISENTROPIC_INFLOW_FAILED_CONVERGENCE ;
+    }
+
   }
 
   $rule pointwise(u_f,gagePressure_f,temperature_f<-ci->u,
-                  ci->temperature,flow_direction,rigid_u,
+                  ci->temperature,ci->gagePressure,flow_direction,rigid_u,
                   p0Ref,T0Ref,Pambient,gamma,Rtilde,area),
     constraint(isentropicInflow_BC) {
-
-    real pb, Tb ;
-    vect3d ub ;
-    
     real p0 = $p0Ref ;
     real T0 = $T0Ref ;
-    real gamma0 = $gamma ;
-    real a0 = sqrt(gamma0*$Rtilde*T0) ;
-    vect3d ui = $ci->$u ;
-    real ai = sqrt(gamma0*$Rtilde*$ci->$temperature) ;
-    // compute total pressure and total temperature assuming ideal gas
-    // isotropy relations
-    
-    total_pressure_bc_imp(pb,Tb,ub,T0,p0,gamma0,a0,
-                          ui,ai,$ci->$temperature,
-                          $flow_direction,$rigid_u) ;
+    real uni = dot($ci->$u,$area.n) ;
+    real pi = $ci->$gagePressure+$Pambient ;
+
+    real pb, Tb, ubs ;
+    const real Beta = 1.0 ;
+    isentropic::isentropicSolve(pb,Tb,ubs,
+				uni,pi,$ci->$temperature,
+				p0,T0,$flow_direction,$area.n,
+				Beta,$gamma,$Rtilde) ;
+    vect3d ub = ubs*$flow_direction ;
     
     $u_f = ub ;
     $gagePressure_f = pb-$Pambient ;
@@ -186,67 +214,26 @@ namespace flowPsi {
   }
 
   
-  
-  $rule apply(ci->srcJ<-flow_direction,rigid_u,
-	      Pambient,us_n,p0Ref,T0Ref,
-              ci->(gagePressure,temperature,u),
-	      area,gamma,Rtilde)[Loci::Summation],
-    constraint(isentropicInflow_BC) {
-    real vals[5] ;
-    vals[0] = $ci->$temperature ;
-    vals[1] = $ci->$u.x ;
-    vals[2] = $ci->$u.y ;
-    vals[3] = $ci->$u.z ;
-    vals[4] = $ci->$gagePressure ;
-    
-    real pb, Tb ;
-    vect3d ub ;
-    
-    real p0 = $p0Ref ;
-    real T0 = $T0Ref ;
-    real gamma0 = $gamma ;
-    real a0 = sqrt(gamma0*$Rtilde*T0) ;
-    vect3d ui(vals[1],vals[2],vals[3]) ;
-    real Ti = vals[0] ;
-    real ai = sqrt(gamma0*$Rtilde*Ti) ;
-    total_pressure_bc_imp(pb,Tb,ub,
-			  T0,p0,gamma0,a0,
-                          ui,ai,Ti,
-                          $flow_direction,$rigid_u) ;
-    Loci::Array<real,5> iflux ;
-    inviscidFlux(iflux,pb-$Pambient,Tb,ub,
-		 $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-    
-    
-    real deltas[5] ;
-    const real eps = 1e-5 ;
-    deltas[0] = Ti*eps ;
-    deltas[1] = ai*eps ;
-    deltas[2] = deltas[1] ;
-    deltas[3] = deltas[1] ;
-    deltas[4] = ai*ai*eps ;
+    $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Eta_pf)[Loci::Summation],constraint(isentropicInflow_BC) {
+    const real Tr = $temperature_f ;
+    const real Pgr = $gagePressure_f ;
+    const vect3d ur = $u_f ;
+    const real Tl = $leftsP(temperature,Zero) ;
+    const real Pgl = $leftsP(gagePressure,minPg) ;
+    const vect3d ul = $leftv3d(u) ;
 
-    for(int j=0;j<5;++j) {
-      real tmp = vals[j] ;
-      vals[j] += deltas[j] ;
-      vect3d ui(vals[1],vals[2],vals[3]) ;
-      real Ti = vals[0] ;
-      real ai = sqrt(gamma0*$Rtilde*Ti) ;
-      total_pressure_bc_imp(pb,Tb,ub,
-			    T0,p0,gamma0,a0,
-			    ui,ai,Ti,
-			    $flow_direction,$rigid_u) ;
-      Loci::Array<real,5> iflux2 ;
-      inviscidFlux(iflux2,pb-$Pambient,Tb,ub,
-		   $area.n,$area.sada,$Pambient,$Rtilde,$gamma,$us_n) ;
-      const real rh = 1./(tmp-vals[j]) ;
-      for(int i = 0;i<5;++i) {
-	$ci->$srcJ[i][j] -= (iflux[i]-iflux2[i])*rh ;
-      }
-      vals[j] = tmp ;
+    real_fj tmp1[25] ;
+    Mat<real_fj> fjp(&tmp1[0],5) ;
+    fjp = mk_Scalar(0.) ;
+    inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
+		       $Rtilde, $gamma,$us_n,$Eta_pf) ;
 
-    }
+    for(int i=0;i<5;++i)
+      for(int j=0;j<5;++j)
+	$ci->$srcJ[i][j] -= fjp[i][j] ;
+
   }
+
   $rule pointwise(p0Ref<-ref->p0_BC) {
     $p0Ref = $ref->$p0_BC ;
   } 

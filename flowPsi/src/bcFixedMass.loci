@@ -123,7 +123,8 @@ namespace flowPsi {
     }
     if(iter == MAX_ITER) {
       Loci::debugout << "T = " << T <<" " ;
-      Loci::debugout << "fixed mass bc failed to converge!" << endl ;       BCErrorCode |= flowPsi::FIXED_MASS_FAILED_CONVERGENCE ;
+      Loci::debugout << "fixed mass bc failed to converge!" << endl ;
+      BCErrorCode |= flowPsi::FIXED_MASS_FAILED_CONVERGENCE ;
     }
     
     const real rhob = pin/(Rtilde*T) ;
