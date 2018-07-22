@@ -23,6 +23,10 @@ $type p0 param<PressureValue> ;
 $type temperature_ic store<flowPsi::real> ;
 $type gagePressure_ic store<flowPsi::real> ;
 $type u_ic store<flowPsi::vect3d> ;
+// Previous timestep values for BDF2
+$type temperature_ico store<flowPsi::real> ;
+$type gagePressure_ico store<flowPsi::real> ;
+$type u_ico store<flowPsi::vect3d> ;
 
 // Ambient Pressure used to define gage pressure
 $type Pambient          param<flowPsi::real> ;
@@ -72,7 +76,7 @@ $type Minf param<flowPsi::real> ; // Free stream Mach number
 $type etaT param<flowPsi::real> ; // Stagnation point limit factor
 $type Eta_p store<flowPsi::real> ; // Eta factor used in preconditioning
 $type Eta_pf store<flowPsi::real> ; // Eta factor used in preconditioning
-
+$type Eta_bc store<flowPsi::real> ; // used for boundary conditions, only includes viscous terms
 // Jacobian Assembly
 $type fjp storeMat<flowPsi::real_fj> ;
 $type fjm storeMat<flowPsi::real_fj> ;
@@ -270,6 +274,9 @@ $type scalarTransport(X,C) store<flowPsi::real> ;
 
 $type timeStepSteadyState Constraint ;
 $type timeStepAccurate Constraint ;
+
+$type timeStepSchemeBDF2 Constraint ;
+$type timeStepSchemeKEC Constraint ;
 
 $type LaminarSimulation Constraint ;
 $type TurbulentSimulation Constraint ;

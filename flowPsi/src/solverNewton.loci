@@ -90,7 +90,7 @@ namespace flowPsi {
     inplace(temperature_i{n,it+1}|temperature{n,it}),
     inplace(gagePressure_i{n,it+1}|gagePressure{n,it}),
     inplace(u_i{n,it+1}|u{n,it}),
-    constraint(geom_cells,timeStepAccurate) {
+    constraint(geom_cells,timeStepAccurate,timeStepSchemeKEC) {
     const real dT = $dfluid{n,it}[0] ;
     const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
     const real dp = $dfluid{n,it}[4] ;
@@ -124,7 +124,7 @@ namespace flowPsi {
     inplace(temperature{n+1}|temperature{n,it}),
     inplace(gagePressure{n+1}|gagePressure{n,it}),
     inplace(u{n+1}|u{n,it}),
-    constraint(geom_cells,timeStepAccurate),
+    constraint(geom_cells,timeStepAccurate,timeStepSchemeKEC),
     conditional(newtonFinished{n,it}) {
     const real Tstar = $temperature{n,it} ;
     const real Tn = $temperature{n} ;
@@ -149,6 +149,45 @@ namespace flowPsi {
     $temperature{n+1} = ($iblank{n,it} > 1)?$temperature{n,it}:Tnp1 ;
     $u{n+1} = ($iblank{n,it} > 1)?$u{n,it}:unp1 ;
   } 
+
+  $rule pointwise(temperature_i{n,it+1},gagePressure_i{n,it+1},u_i{n,it+1}<- 
+		  temperature{n,it},gagePressure{n,it},u{n,it},dfluid{n,it},
+                  iblank{n,it}, Pambient),
+    inplace(temperature_i{n,it+1}|temperature{n,it}),
+    inplace(gagePressure_i{n,it+1}|gagePressure{n,it}),
+    inplace(u_i{n,it+1}|u{n,it}),
+    constraint(geom_cells,timeStepAccurate,timeStepSchemeBDF2) {
+    const real dT = $dfluid{n,it}[0] ;
+    const vect3d du($dfluid{n,it}[1],$dfluid{n,it}[2],$dfluid{n,it}[3]) ;
+    const real dp = $dfluid{n,it}[4] ;
+    real alpha = 1. ;
+
+    // determine if dq qill cause negative pressure or temperature,
+    // if so scale back dq
+    const real relax = 0.75 ;
+    const real pnit = $gagePressure{n,it}+$Pambient ;
+    alpha = min(alpha,relax*pnit/max<real>(fabs(dp),1e-30)) ;
+    alpha = min(alpha,relax*$temperature{n,it}/max<real>(fabs(dT),1e-30)) ;
+    alpha = ($iblank{n,it}>1)?0.0:alpha ;
+    $temperature_i{n,it+1} = $temperature{n,it} + alpha*dT;
+    $gagePressure_i{n,it+1} = $gagePressure{n,it} + alpha*dp ;
+    $u_i{n,it+1} = $u{n,it} + alpha*du ;
+  }
+
+
+  $rule pointwise(temperature{n+1},gagePressure{n+1},u{n+1}<-
+		  temperature{n,it},gagePressure{n,it},u{n,it},iblank{n,it},
+                  temperature{n},gagePressure{n},u{n},Pambient,Rtilde),
+    inplace(temperature{n+1}|temperature{n,it}),
+    inplace(gagePressure{n+1}|gagePressure{n,it}),
+    inplace(u{n+1}|u{n,it}),
+    constraint(geom_cells,timeStepAccurate,timeStepSchemeBDF2),
+    conditional(newtonFinished{n,it}), prelude {} ; // Inplace copy
+  //    {
+  //      $gagePressure{n+1} = $gagePressure{n,it} ;
+  //      $temperature{n+1} = $temperature{n,it} ;
+  //      $u{n+1} = $u{n,it} ;
+  //    } 
 
   $rule default(newtonMaxIter) {
     $newtonMaxIter = 6 ;

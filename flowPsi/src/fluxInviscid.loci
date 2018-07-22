@@ -112,7 +112,12 @@ namespace flowPsi {
     $Eta_p = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
   }
 
-
+  $rule pointwise(Eta_bc<-ci->(u,soundSpeed),area,Mlim2) {
+    real M = norm($ci->$u)/$ci->$soundSpeed ;
+    real M2 = min<real>(0.5,M*M) ;
+    $Eta_bc = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
+  }
+  
   $rule pointwise(Eta_pf<-ci->u,ci->soundSpeed,Minf,Mlim2) {
     real M = norm($ci->$u)/$ci->$soundSpeed ;
     real M2 = min<real>(0.5,M*M) ;
@@ -882,7 +887,7 @@ namespace flowPsi {
     // estimate derivatives of roe state
 
     real af2 = gm1*h_ ;
-    af2 = max<real>(af2,1e-30) ; //ROE_SOUND_LIMIT*min(sl.aSquared(),sr.aSquared())) ;
+    af2 = max<real>(af2,1e-30) ; 
 
 
 
@@ -1098,8 +1103,7 @@ namespace flowPsi {
     // estimate derivatives of roe state
 
     real af2 = gm1*h_ ;
-    af2 = max<real>(af2,1e-30) ; //ROE_SOUND_LIMIT*min(sl.aSquared(),sr.aSquared())) ;
-
+    af2 = max<real>(af2,1e-30) ; 
 
     const real T_ = h_*gm1/(Rt*gamma) ;
 

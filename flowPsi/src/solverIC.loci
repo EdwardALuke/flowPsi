@@ -354,9 +354,10 @@ namespace flowPsi {
         geomInfo.push_back(ginfo) ;
       }
     } else {
-      if(Loci::MPI_rank == 0)
+      $[Once] {
         cerr << "Warning: No regions defined in initialConditionRegions!" 
 	     << endl ;
+      }
     }
     $regionsGeomInfo.swap(geomInfo) ;
   }
@@ -557,17 +558,28 @@ namespace flowPsi {
 
     $u_ic = $initialConditionsU[$icRegionId]+urot ;
   }
-  
+
+  $rule pointwise(temperature_ico<-temperature_ic) {
+    $temperature_ico = $temperature_ic ;
+  }
+  $rule pointwise(gagePressure_ico<-gagePressure_ic) {
+    $gagePressure_ico = $gagePressure_ic ;
+  }
+  $rule pointwise(u_ico<-u_ic) {
+    $u_ico = $u_ic ;
+  }
+    
   $rule pointwise(icfile::temperature_ic,icfile::gagePressure_ic,
 		  icfile::u_ic<-icfile,modelName,Pambient),
     constraint(geom_cells,icfile),  option(disable_threading),  prelude {
     
     string filename = *$icfile+"flowVars_"+*$modelName ;
-    if(Loci::MPI_rank == 0)
+    $[Once] {
       cout << "restarting flow variables from '" << filename << "'"<<endl ;
+    }
     struct stat buf ;
     int has_file = 0 ;
-    if(Loci::MPI_rank == 0) {
+    $[Once] {
       if(stat(filename.c_str(),&buf)==0) {
 	if(buf.st_size != 0 && S_ISREG(buf.st_mode))
 	  has_file = 1 ;
@@ -577,8 +589,9 @@ namespace flowPsi {
     }
     MPI_Bcast(&has_file,1,MPI_INT,0,MPI_COMM_WORLD) ;
     if(has_file == 2)  {
-      if(Loci::MPI_rank == 0)
+      $[Once] {
 	cerr << "unable to find file '" << filename << "'" << endl ;
+      }
       Loci::Abort() ;
     }
     hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
@@ -595,4 +608,58 @@ namespace flowPsi {
     } ENDFORALL ;
     Loci::hdf5CloseFile(file_id) ;
   } ;
+
+  $rule pointwise(icfile::temperature_ico,icfile::gagePressure_ico,
+		  icfile::u_ico<-icfile,modelName,Pambient),
+    constraint(geom_cells,icfile),  option(disable_threading),  prelude {
+    
+    string filename = *$icfile+"flowVarsPrev_"+*$modelName ;
+
+    struct stat buf ;
+    int has_file = 0 ;
+    $[Once] {
+      if(stat(filename.c_str(),&buf)==0) {
+	if(buf.st_size != 0 && S_ISREG(buf.st_mode))
+	  has_file = 1 ;
+	else
+	  has_file = 2 ;
+      }
+    }
+    MPI_Bcast(&has_file,1,MPI_INT,0,MPI_COMM_WORLD) ;
+    if(has_file == 2) {
+      filename = *$icfile+"flowVars_"+*$modelName ;
+      has_file = 0 ;
+      $[Once] { 
+	if(stat(filename.c_str(),&buf)==0) {
+	  if(buf.st_size != 0 && S_ISREG(buf.st_mode))
+	    has_file = 1 ;
+	  else
+	    has_file = 2 ;
+	}
+      }
+      MPI_Bcast(&has_file,1,MPI_INT,0,MPI_COMM_WORLD) ;
+    }
+
+    if(has_file == 2)  {
+      $[Once] {
+	cerr << "unable to find file '" << filename << "'" << endl ;
+      }
+      Loci::Abort() ;
+    }
+    
+    hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+					 H5F_ACC_RDONLY, H5P_DEFAULT);
+    entitySet read_set = entitySet(seq) ;
+    Loci::readContainer(file_id,"temperature",$temperature_ico.Rep(),read_set) ;
+    Loci::readContainer(file_id,"gagePressure",$gagePressure_ico.Rep(),read_set) ;
+    Loci::readContainer(file_id,"u",$u_ico.Rep(),read_set) ;
+    param<real> Pref ;
+    Loci::readContainer(file_id,"Pambient",Pref.Rep(),read_set) ;
+    real dp = *Pref-*$Pambient ;
+    FORALL(read_set,ii) {
+      $gagePressure_ico[ii] += dp ;
+    } ENDFORALL ;
+    Loci::hdf5CloseFile(file_id) ;
+  } ;
+
 }

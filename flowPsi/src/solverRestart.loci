@@ -60,7 +60,7 @@ namespace flowPsi {
   $rule singleton(restart_directory<-ncycle,do_restart,restart_postfix) {
     $restart_directory = "restart/" + $restart_postfix + "/" ;
     if($do_restart) {
-      if(Loci::MPI_rank == 0) {
+      $[Once] {
         struct stat statbuf ;
 	int fid = open("restart",O_RDONLY) ;
 	if(fid < 0) { // No file exists so make it
@@ -98,7 +98,7 @@ namespace flowPsi {
       hid_t file_id = 0 ;
       string filename = *$restart_directory{n} + "flowVars_" + *$modelName{n} ;
 
-      if(Loci::MPI_rank == 0) {
+      $[Once] {
 	cout << "output restart file at iteration " << *$ncycle{n}
 	     << " to file " << filename << endl ;
       }
@@ -114,6 +114,26 @@ namespace flowPsi {
       Loci::writeContainer(file_id,"u",$u{n}.Rep()) ;
       Loci::writeContainer(file_id,"cellcenter",$cellcenter{n}.Rep()) ;
 
+      Loci::hdf5CloseFile(file_id) ;
+    }
+  } ;
+
+  $rule pointwise(OUTPUT{n}<-temperature{n-1},gagePressure{n-1},Pambient{n},u{n-1},
+		  restart_directory{n},modelName{n},
+		  restart_modulo{n},ncycle{n},restart_postfix{n},$n{n}),
+    constraint(temperature{n},gagePressure{n},u{n},timeStepSchemeBDF2{n}),
+    conditional(do_restart{n}),prelude {
+    if(*$ncycle{n} != 0 && *$$n{n} != 0) {
+      hid_t file_id = 0 ;
+      string filename = *$restart_directory{n} + "flowVarsPrev_" + *$modelName{n} ;
+
+      file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+				     H5P_DEFAULT, H5P_DEFAULT) ;
+      
+      Loci::writeContainer(file_id,"temperature",$temperature{n-1}.Rep()) ;
+      Loci::writeContainer(file_id,"gagePressure",$gagePressure{n-1}.Rep()) ;
+      Loci::writeContainer(file_id,"u",$u{n-1}.Rep()) ;
+      Loci::writeContainer(file_id,"Pambient",$Pambient{n}.Rep()) ;
       Loci::hdf5CloseFile(file_id) ;
     }
   } ;

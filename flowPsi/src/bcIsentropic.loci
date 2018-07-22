@@ -97,7 +97,7 @@ namespace flowPsi {
 			 const real p0, const real T0,
 			 const vect3d &flowdir,
 			 const vect3d &n,
-			 const real Beta,
+			 const real Eta,
 			 const real gamma,
 			 const real Rtilde) {
 
@@ -111,10 +111,10 @@ namespace flowPsi {
       const real ri = pi/(Rtilde*Tim) ;
       const real ai2 = gamma*Rtilde*Tim ;
 
-      const real BM = Beta-1. ;
+      const real BM = Eta-1. ;
       const real unia = min(uni,a0) ;
       const real unil = (unia*dot(n,flowdir) <0)?-unia:unia ;
-      const real sigmai = sqrt(unil*unil*BM*BM+4.*Beta*ai2) ;
+      const real sigmai = sqrt(unil*unil*BM*BM+4.*Eta*ai2) ;
       const real K3 = (2.*pi+ri*unil*(sigmai-BM*unil))/(2.*ri*sigmai) ;
 
       pb=min(p0,pi) ;
@@ -147,7 +147,7 @@ namespace flowPsi {
 	A[1][2] = ub ;
 	const real f = dot(n,flowdir) ;
 	const real unb = ub*f ;
-	const real sigmab = sqrt(unb*unb*BM*BM+4.*Beta*ab2) ;
+	const real sigmab = sqrt(unb*unb*BM*BM+4.*Eta*ab2) ;
 	const real K3b = (2.*pb+rb*unb*(sigmab-BM*unb))/(2.*rb*sigmab) ;
 	b[2] = K3-K3b ;
 
@@ -186,7 +186,7 @@ namespace flowPsi {
 
   $rule pointwise(u_f,gagePressure_f,temperature_f<-ci->u,
                   ci->temperature,ci->gagePressure,flow_direction,rigid_u,
-                  p0Ref,T0Ref,Pambient,gamma,Rtilde,area),
+                  p0Ref,T0Ref,Pambient,gamma,Rtilde,area,Eta_bc),
     constraint(isentropicInflow_BC) {
     real p0 = $p0Ref ;
     real T0 = $T0Ref ;
@@ -194,11 +194,11 @@ namespace flowPsi {
     real pi = $ci->$gagePressure+$Pambient ;
 
     real pb, Tb, ubs ;
-    const real Beta = 1.0 ;
+    const real Eta = $Eta_bc ;
     isentropic::isentropicSolve(pb,Tb,ubs,
 				uni,pi,$ci->$temperature,
 				p0,T0,$flow_direction,$area.n,
-				Beta,$gamma,$Rtilde) ;
+				Eta,$gamma,$Rtilde) ;
     vect3d ub = ubs*$flow_direction ;
     
     $u_f = ub ;
@@ -214,7 +214,7 @@ namespace flowPsi {
   }
 
   
-    $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Eta_pf)[Loci::Summation],constraint(isentropicInflow_BC) {
+    $rule apply(ci->srcJ<-leftsP(gagePressure,minPg),leftsP(temperature,Zero),leftv3d(u), gagePressure_f, temperature_f, u_f, area,us_n,Pambient,Rtilde,gamma,Eta_bc)[Loci::Summation],constraint(isentropicInflow_BC) {
     const real Tr = $temperature_f ;
     const real Pgr = $gagePressure_f ;
     const vect3d ur = $u_f ;
@@ -226,7 +226,7 @@ namespace flowPsi {
     Mat<real_fj> fjp(&tmp1[0],5) ;
     fjp = mk_Scalar(0.) ;
     inviscidRiemannFjp(fjp,Pgl,Tl,ul,Pgr,Tr,ur,$area.n,$area.sada,$Pambient,
-		       $Rtilde, $gamma,$us_n,$Eta_pf) ;
+		       $Rtilde, $gamma,$us_n,$Eta_bc) ;
 
     for(int i=0;i<5;++i)
       for(int j=0;j<5;++j)
