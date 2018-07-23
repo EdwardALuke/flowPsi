@@ -90,6 +90,11 @@ namespace flowPsi {
     $LDS_ducrosFactor = 0.0 ;
   }
 
+  $type LDS_MILES_filter param<real> ;
+  $rule default(LDS_MILES_filter) {
+    $LDS_MILES_filter = 0.1 ;
+  }
+  
   $type LDS_useUpwind param<real> ;
   $rule default(LDS_useUpwind) {
     $LDS_useUpwind = 0.0 ;
@@ -166,6 +171,102 @@ namespace flowPsi {
   }
 
   
+  inline void roedis(real pg_l, vect3d Ul, const real Tl,
+		     real pg_r, vect3d Ur,const real Tr,
+		     real Rtilde, real gamma, real pambient,
+		     const vect3d &an, real sada,real Us_n,
+		     Loci::Array<real, 5> &iflux) {
+
+    const real pl = pg_l+pambient ;      // right and left pressures
+    const real pr = pg_r+pambient ;
+
+    const real rl = pl/(Rtilde*Tl) ;
+    const real rr = pr/(Rtilde*Tr) ;
+    const real rgm1 = 1./(gamma-1) ;
+    const real el = Rtilde*rgm1*Tl ;
+    const real er = Rtilde*rgm1*Tr ;
+    const real re0l = rl*el + 0.5*rl*dot(Ul,Ul) ;
+    const real re0r = rr*er + 0.5*rr*dot(Ur,Ur) ;
+
+    const real h0l = (re0l+pl)/rl ;
+    const real h0r = (re0r+pr)/rr ;
+
+    const real r_ = sqrt(rl*rr) ;        // Roe average density
+    const real srl = sqrt(rl) ;          // coefficents used for
+    const real srr = sqrt(rr) ;          //  Roe averaging
+    const real roe_factor = 1./(srl+srr) ;
+
+#define AVG(vl,vr)  (0.5*((vl)+(vr))) // Standard Average (arithmetic average)
+#define JMP(vl,vr)  ((vr)-(vl))       // Jump function
+#define RAVG(vl,vr) (((vl)*srl+(vr)*srr)*roe_factor) // Roe average
+
+    const vect3d U_ = RAVG(Ul,Ur) ;
+    const real ut_ = dot(U_,an)-Us_n ; //dot(U_-Us,an) ;
+    const real uta_ = dot(U_,an) ;
+
+    const real h0_ = RAVG(h0l,h0r) ;               // Roe total  energy
+    
+    const real al2 = gamma*Rtilde*Tl ;
+    const real ar2 = gamma*Rtilde*Tr ;
+
+    // estimate sound speed at face
+    real af2 = 2.*al2*ar2/(al2+ar2) ;
+    af2 = max<real>(af2,1e-30) ; 
+
+    const real Cp_ = Rtilde*gamma*rgm1 ;
+
+    const real T_ = (Tl*ar2+Tr*al2)*af2/(2.*ar2*al2) ;
+
+    const real rT_ = -r_/T_ ;
+
+
+    real a_ = sqrt(af2) ;
+
+    real ev1 = fabs(ut_) ;
+    real ev2 = fabs(ut_ - a_) ;
+    real ev3 = fabs(ut_ + a_) ;
+
+    // Jump in contravariant velocity
+    vect3d Uj=JMP(Ul,Ur) ;
+    const real utj = dot(Uj,an) ; 
+    const real pj = JMP(pg_l,pg_r) ;
+    const real Tj = JMP(Tl,Tr) ;
+      
+    
+    const real T1 = ev2-ev3 ;
+    const real T2 = (ev2+ev3-2*ev1 );
+    const real T3 = -r_*a_/2. ;
+    const real T4 = 2.*T2*a_  ;
+    const real T5 = T2/2. ;
+    const real T6 = (ev2+ev3)/2. ;
+    const real C1 = (1-gamma)/rT_ ;
+    const real ra2 = 1./(a_*a_) ;
+    const real gm1 = gamma-1 ;
+    const real T7=(1+gm1+C1*rT_)*T1*T3*ra2 ;
+    const real T8 = (gamma*T6 + C1*rT_*T5)*ra2 ;
+    const real T9 = Cp_*r_+h0_*rT_ ;
+    const real x1 = gamma*h0_*T1*T3*ra2 ;
+    const real x2 = C1*T1*T3*T9*ra2 ;
+    const real x3 = rT_*T_*T1*T3*1/r_ ;
+    const real x4 = .25*r_*T4*uta_/a_ ;
+    const real T10 = (x1+x2+x3+x4) ;
+    const real T11= (ra2*h0_ + (T9 - r_*Cp_)*ra2*gm1 / rT_
+		     + rT_*T_ / r_)*T6 + ra2*T9*T5*C1 - .5*uta_*T1 / a_ ;
+
+    const real coef = 0.5*sada ;
+
+    const real md = coef*(pj*T8 + utj*T7 + ev1*Tj*rT_) ;
+    iflux[0] -= md ;
+    const real fp = .5*(.5*r_*T4*utj-pj*T1)/a_ ;
+    iflux[1] -= md*U_.x + coef*(ev1*r_*Uj.x+fp*an.x) ;
+    iflux[2] -= md*U_.y + coef*(ev1*r_*Uj.y+fp*an.y) ;
+    iflux[3] -= md*U_.z + coef*(ev1*r_*Uj.z+fp*an.z) ;
+    iflux[4] -= coef*(pj*T11+T10*utj+ev1*(T9*Tj+r_*dot(U_,Uj))) ;
+  }
+
+
+
+
   void kec_flux(Loci::Array<real, 5> &iflux,
 		real pgl, real Tl, vect3d Ul,
 		real pgr, real Tr, vect3d Ur,
@@ -178,7 +279,8 @@ namespace flowPsi {
     // simple temperature averaging
     // const real tf = 0.5*(Tl+Tr) ;
     // equivalent to density averaging
-    const real tf = Tl*Tr*(pgl+pgr+2*pambient)/((pgl+pambient)*Tr + (pgr+pambient)*Tl) ;
+    const real tf = Tl*Tr*(pgl+pgr+2*pambient)/
+    	  ((pgl+pambient)*Tr + (pgr+pambient)*Tl) ;
     // pressure biased temperature averaging
     //const real tf = ((pgl+pambient)*Tl+(pgr+pambient)*Tr)/(pgl+pgr+2.*pambient) ;
 
@@ -190,7 +292,7 @@ namespace flowPsi {
     iflux[mi+0] += coef*(mdot*uf.x + pgf*an.x) ;
     iflux[mi+1] += coef*(mdot*uf.y + pgf*an.y) ;
     iflux[mi+2] += coef*(mdot*uf.z + pgf*an.z) ;
-    real e_internalf = Rt*tf/(gamma-1) ;
+    real e_internalf = 0.5*Rt*(Tl+Tr)/(gamma-1) ;
     // kinetic energy consistent flux formulation
     real ke_f = dot(uf,uf) - 0.25*(dot(Ul,Ul)+dot(Ur,Ur)) ;
     // just kinetic energy of the average
@@ -328,7 +430,7 @@ namespace flowPsi {
 		  (cl,cr)->alpha_diss,alpha_geom_f,
 		  facecenter,
 		  Pambient,area,Rtilde,gamma,us_n,
-		  SSF_Coeff),
+		  SSF_Coeff,LDS_MILES_filter),
     constraint(useSkewSymmetricFluxScheme,(cl,cr)->vol) {
     
     const vect3d an = $area.n ;
@@ -395,11 +497,6 @@ namespace flowPsi {
 	$iflux[i] = 0 ;
     }
 
-    
-    real CC = $SSF_Coeff/6.0 ;
-    
-
-    const real sada = $area.sada*(1.-alpha) ;
     const vect3d dv = $facecenter -0.5*($cl->$cellcenter+$cr->$cellcenter) ;
     const real pg_l = max($cl->$gagePressure + 
 			 $cl->$limiters(gagePressure)*
@@ -431,10 +528,6 @@ namespace flowPsi {
 					dot($cr->$gradv3d(u).z,dv)) ;
 
     
-    real coef2 = (1.+2.*CC)*sada ;
-    kec_flux($iflux,pg_l,t_l,u_l,pg_r,t_r,u_r,an,coef2,
-	     $Pambient,$Rtilde,$gamma,$us_n) ;
-
     const vect3d dv2 = $cr->$cellcenter-$cl->$cellcenter ;
 
     const real pg_ll = max(pg_r - 
@@ -457,13 +550,46 @@ namespace flowPsi {
     const vect3d u_rr = u_l + vect3d(2.*dot($cr->$gradv3d(u).x,dv2),
 				     2.*dot($cr->$gradv3d(u).y,dv2),
 				     2.*dot($cr->$gradv3d(u).z,dv2)) ;
+
+
     
+    real CC = $SSF_Coeff/6.0 ;
+    
+
+    const real sada = $area.sada*(1.-alpha) ;
+    
+    real coef2 = (1.+2.*CC)*sada ;
+    kec_flux($iflux,pg_l,t_l,u_l,pg_r,t_r,u_r,an,coef2,
+	     $Pambient,$Rtilde,$gamma,$us_n) ;
+
     real coef = -CC*sada ;
     kec_flux($iflux,pg_l,t_l,u_l,pg_rr,t_rr,u_rr,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
     kec_flux($iflux,pg_ll,t_ll,u_ll,pg_r,t_r,u_r,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
-  }
+
+    // Third order extrapolation to face using QUICK
+    const real pg_lq  = (1./6.)*(2.*pg_r + 5.*pg_l - pg_ll) ;
+    const real pg_rq  = (1./6.)*(2.*pg_l + 5.*pg_r - pg_rr) ;
+
+    const real t_lq   = (1./6.)*(2.*t_r  + 5.*t_l  - t_ll) ;
+    const real t_rq   = (1./6.)*(2.*t_l  + 5.*t_r  - t_rr) ;
+
+    const vect3d u_lq = (1./6.)*(2.*u_r  + 5.*u_l  - u_ll) ;
+    const vect3d u_rq = (1./6.)*(2.*u_l  + 5.*u_r  - u_rr) ;
+
+    // Add in 3rd order dissipation flux (To act as a MILES filter)
+    coef = $LDS_MILES_filter*sada ;
+
+    //Thornber low dissipation preconditioning
+    const real amin = sqrt(min(al2,ar2)) ;
+    const real utmax = max(fabs(dot(u_lq,an)+$us_n),fabs(dot(u_rq,an)+$us_n)) ;
+    const real Ma = min<real>(1.0,utmax/amin+1e-4) ;
+    vect3d u_lqp = u_lq+0.5*(1.-Ma)*(u_rq-u_lq) ;
+    vect3d u_rqp = u_rq+0.5*(1.-Ma)*(u_lq-u_rq) ;
+    roedis(pg_lq,u_lqp,t_lq, pg_rq,u_rqp,t_rq,
+	   $Rtilde, $gamma, $Pambient, an,coef,$us_n,$iflux) ;
+}
 
   OUTPUT_SCALAR("cell2nodeMax(alpha_diss)",alpha) ;  
 }

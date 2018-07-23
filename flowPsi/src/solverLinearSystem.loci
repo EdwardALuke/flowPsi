@@ -222,7 +222,9 @@ namespace flowPsi {
   $rule pointwise(rhonp1{n,it}<-
                   temperature{n},gagePressure{n},Pambient,
                   temperature{n,it},gagePressure{n,it},localPBias{n,it},
-                  Rtilde), constraint(temperature{n},gagePressure{n},timeStepSchemeKEC) {
+                  Rtilde),
+    constraint(temperature{n},gagePressure{n},localPBias{n,it},
+	       timeStepSchemeKEC) {
     const real Tstar = $temperature{n,it} ;
     const real Tn = $temperature{n} ;
     // use harmonic mean of Tn and Tnp1 to define Tstar

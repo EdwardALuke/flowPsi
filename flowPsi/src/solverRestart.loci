@@ -121,8 +121,8 @@ namespace flowPsi {
   $rule pointwise(OUTPUT{n}<-temperature{n-1},gagePressure{n-1},Pambient{n},u{n-1},
 		  restart_directory{n},modelName{n},
 		  restart_modulo{n},ncycle{n},restart_postfix{n},$n{n}),
-    constraint(temperature{n},gagePressure{n},u{n},timeStepAccurate{n},
-	timeStepSchemeBDF2{n}),
+    constraint(temperature{n-1},gagePressure{n-1},u{n-1},
+	       timeStepAccurate{n}, timeStepSchemeBDF2{n}),
     conditional(do_restart{n}),prelude {
     if(*$ncycle{n} != 0 && *$$n{n} != 0) {
       hid_t file_id = 0 ;

@@ -30,10 +30,14 @@ namespace flowPsi {
   $rule default(stop_iter) {
     $stop_iter=1000 ;
   }
+
+  $rule optional(cflmax) { }
   
   $rule singleton(plot_status{n=-1}),constraint(UNIVERSE) {
     $plot_status{n=-1} = 0 ;
   }
+
+  
   $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1}) {
     $timestepFinished{n} = ($$n{n}>$stop_iter+1)||($plot_status{n-1}>1) ;
   }
@@ -240,11 +244,22 @@ namespace flowPsi {
   $rule default(dtmax), comments("setting of maximum timestep") {
     $dtmax.val = 1.0 ;
   }
+
+  $type dtcfl store<real> ;
+  $rule pointwise(dtcfl<-dtmax) {
+    $dtcfl = real($dtmax) ;
+  }
+
+  $rule pointwise(cflmax::dtcfl<-dtmax,cflpdt,cflmax) {
+    $dtcfl = real($dtmax) ;
+    $dtcfl = min($dtcfl,$cflmax/$cflpdt) ;
+  }
+    
   // Compute local timestep by using linearization of change in pressure and temperature by
   // urelax factor
   // using  \delta q = \delta t * \partial q/\partial Q src
-  $rule pointwise(dtau<-vol,src,temperature,gagePressure,u,gamma,urelax,dtmax,Pambient,Rtilde) {
-    real dt = $dtmax ;
+  $rule pointwise(dtau<-vol,src,temperature,gagePressure,u,gamma,urelax,dtcfl,Pambient,Rtilde) {
+    real dt = $dtcfl ;
     const real q = 0.5*dot($u,$u) ;
     const real p = $gagePressure+$Pambient ;
     const real T = $temperature ;
