@@ -569,11 +569,11 @@ namespace flowPsi {
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
 
     // Third order extrapolation to face using QUICK
-    const real pg_lq  = (1./6.)*(2.*pg_r + 5.*pg_l - pg_ll) ;
-    const real pg_rq  = (1./6.)*(2.*pg_l + 5.*pg_r - pg_rr) ;
+    const real pg_lq  = max(pglim,(1./6.)*(2.*pg_r + 5.*pg_l - pg_ll)) ;
+    const real pg_rq  = max(pglim,(1./6.)*(2.*pg_l + 5.*pg_r - pg_rr)) ;
 
-    const real t_lq   = (1./6.)*(2.*t_r  + 5.*t_l  - t_ll) ;
-    const real t_rq   = (1./6.)*(2.*t_l  + 5.*t_r  - t_rr) ;
+    const real t_lq   = max(tlim,(1./6.)*(2.*t_r  + 5.*t_l  - t_ll)) ;
+    const real t_rq   = max(tlim,(1./6.)*(2.*t_l  + 5.*t_r  - t_rr)) ;
 
     const vect3d u_lq = (1./6.)*(2.*u_r  + 5.*u_l  - u_ll) ;
     const vect3d u_rq = (1./6.)*(2.*u_l  + 5.*u_r  - u_rr) ;
