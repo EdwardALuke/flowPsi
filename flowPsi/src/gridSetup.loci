@@ -893,7 +893,9 @@ namespace flowPsi {
 
     constraint geom_cells(facts.get_variable("geom_cells")) ;
 
+#ifdef LOCI_HAS_STATIC_KEYSPACE
     int fk = face2node.Rep()->getDomainKeySpace() ;
+#endif
     if(Loci::MPI_processes > 1) {
       // Fill in ghost facecenter
       entitySet face_out = face_dom ;
@@ -901,7 +903,11 @@ namespace flowPsi {
       face_out += Loci::MapRepP(boundary_map.Rep())->image(*geom_cells) ;
       face_out += Loci::MapRepP(upper.Rep())->image(*geom_cells) ;
       // Fill clone for facecenter
+#ifdef LOCI_HAS_STATIC_KEYSPACE
       std::vector<entitySet> init_ptn = facts.get_init_ptn(fk) ;
+#else
+      std::vector<entitySet> init_ptn = facts.get_init_ptn() ;
+#endif
       Loci::storeRepP facecenterRep = facecenter.Rep() ;
       fill_clone(facecenterRep, face_out, init_ptn) ;
       // fill clone for face area ;
@@ -1040,7 +1046,9 @@ namespace flowPsi {
     if(Loci::MPI_rank == 0)
       Loci::debugout << "Time spent in new min_2noslip is " << tglobal << endl ;
 
+#ifdef LOCI_HAS_STATIC_KEYSPACE
     MapRepP(min_cell2face.Rep())->setRangeKeySpace(fk) ;
+#endif
     return min_cell2face.Rep() ;
   }
 
