@@ -168,8 +168,8 @@ namespace flowPsi {
   X_ic_from_fileP::X_ic_from_fileP() {
     name_store("icfile",icfile) ;
     name_store("modelName",modelName) ;
-    name_store("scalarTransportName_X",scalarTransportName_X) ;
     name_store("priority::ic_file::X_ic",X_ic) ;
+    name_store("scalarTransportName_X",scalarTransportName_X) ;
     input("icfile,scalarTransportName_X") ;
     input("modelName") ;
     constraint("geom_cells,icfile,C") ;
@@ -228,13 +228,13 @@ namespace flowPsi {
   X_ico_from_file::X_ico_from_file() {
     name_store("icfile",icfile) ;
     name_store("modelName",modelName) ;
-    name_store("scalarTransportName(X)",scalarTransportName_X) ;
     name_store("priority::ic_file::X_ico",X_ico) ;
     name_store("X_ic",X_ic) ;
+    name_store("scalarTransportName_X",scalarTransportName_X) ;
+    input("icfile,scalarTransportName_X") ;
     input("X_ic") ;
-    input("icfile,scalarTransportName(X)") ;
     input("modelName") ;
-    constraint("geom_cells,icfile,C") ;
+    constraint("geom_cells,icfile,timeStepSchemeBDF2,timeStepAccurate,C") ;
     output("priority::ic_file::X_ico") ;
     set_parametric_variable("scalarTransportP(X,C)") ;
     disable_threading() ;
