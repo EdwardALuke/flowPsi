@@ -1,4 +1,4 @@
-TEST_FILES= steadyState.test timeAccurateKEC.test #timeAccurateBDF2.test
+TEST_FILES= steadyState.test timeAccurateKEC.test timeAccurateBDF2.test
 
 
 include $(FLOWPSI_BASE)/test.conf
