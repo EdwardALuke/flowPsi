@@ -922,7 +922,7 @@ namespace flowPsi {
   $rule pointwise(dhrl::vortex_correction::stress_scalar<-tmu_rans,rho_avg,k,divu_avg,
                   vortMag_avg,strainRateMag_avg,Cvor),
     constraint(vortex_preserving_production,k,tmu_rans,DHRL_SST_BSL_KW) {
-    const real O = max<real>($vortMag_avg + $Cvor*(min($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
+    const real O = max<real>($vortMag_avg + $Cvor*(min<real>($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
     const real S = $strainRateMag_avg ;
     $stress_scalar = max<real>($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                          0.0);
