@@ -1160,7 +1160,7 @@ namespace LGSI {
       resid = sqrt(resid) ;
       if(0 == iter)
 	zero_resid = resid ;
-      real rel_resid = resid/max<double>(zero_resid,1e-16) ;
+      real rel_resid = resid/max<real>(zero_resid,1e-16) ;
       //      if(Loci::MPI_rank == 0)
       //	cout << iter << ":sresid = " << rel_resid << endl ;
       if(rel_resid > 1.0)
@@ -1767,7 +1767,7 @@ namespace LGSI {
       resid = sqrt(resid) ;
       if(0 == iter)
 	zero_resid = resid ;
-      real rel_resid = resid/max<double>(zero_resid,1e-16) ;
+      real rel_resid = resid/max<real>(zero_resid,1e-16) ;
       //      if(Loci::MPI_rank == 0)
       //	cout << iter << ":resid = " << rel_resid << endl ;
       if(rel_resid > 1.0)

@@ -353,9 +353,9 @@ namespace flowPsi {
     const real rhonp1 = ($gagePressure{n,it}+$Pambient)/($Rtilde*$temperature{n,it}) ;
 
     const real rdtvol = $vol{n,it}/real($dtmax{n,it}) ;
-    const double w = 0.5 ;
-    const double w1 = (1.0+w)*rdtvol ;
-    const double w2 = w*rdtvol ;
+    const real w = 0.5 ;
+    const real w1 = (1.0+w)*rdtvol ;
+    const real w2 = w*rdtvol ;
     $rhs{n,it}[0] = ($src{n,it}[0] - w1*(rhonp1-rhon)+w2*(rhon-rhonm1)) ;
 
     const vect3d runp1 = rhonp1*$u{n,it} ;

@@ -1181,12 +1181,12 @@ namespace flowPsi {
     }
 
 
-    vector<vect3d> vecs(dom.size()) ;
+    vector<vector3d<double> > vecs(dom.size()) ;
     vector<vect3d> fcenter(dom.size()) ;
     vector<vect3d> fnormal(dom.size()) ;
     int cnt = 0 ;
     FORALL(dom,cc) {
-      vecs[cnt] = pnts[cc] ;
+      vecs[cnt] = realToDouble(pnts[cc]) ;
       fcenter[cnt] = facecenter[min_cell2noslip[cc]] ;
       fnormal[cnt] = area[min_cell2noslip[cc]].n ;
       cnt++ ;
