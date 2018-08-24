@@ -303,7 +303,20 @@ namespace flowPsi {
     iflux[4] += coef*(mdot*(ke_f+e_internalf) +
                        (ufn+Us_n)*(pgf+pambient) );
   }
-  
+
+  // p1=l,p2=r,p3=rr (or) p1=r,p2=l,p3=ll
+
+  inline real WENO(real p1, real p2,  real p3) {
+    real a1 = 2./(1e-30 +3.*pow(p1-p2,4)) ;
+    real a2 = 1./(1e-30 +3.*pow(p2-p3,4)) ;
+    real w1 = a1/(a1+a2) ;
+    real w2 = a2/(a1+a2) ;
+    real alpha0 = 0.5*w1 ;
+    real alpha1 = 0.5*w1 + 1.5*w2 ;
+    real alpha2 = -0.5*w2 ;
+    return (p1*alpha0 + p2*alpha1 + p3*alpha2) ;
+  }
+
   $rule pointwise(KEC::iflux<-(cl,cr)->(gagePressure,temperature,u,cellcenter),
 		  (cl,cr)->alpha_diss,alpha_geom_f,
 		  (cl,cr)->(grads(temperature),grads(gagePressure),
@@ -567,16 +580,52 @@ namespace flowPsi {
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
     kec_flux($iflux,pg_ll,t_ll,u_ll,pg_r,t_r,u_r,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
+#define CUBIC_SCHEME
+    //#define QUICK_SCHEME
+    //#define WENO_SCHEME
+#ifdef CUBIC_SCHEME
+    const double alpha0 =  1./3. ;
+    const double alpha1 =  5./6. ;
+    const double alpha2 = -1./6. ;
+    // extrapolation to face 
+    const real pg_lq  = max(pglim,alpha0*pg_r + alpha1*pg_l + alpha2*pg_ll) ;
+    const real pg_rq  = max(pglim,alpha0*pg_l + alpha1*pg_r + alpha2*pg_rr) ;
 
-    // Third order extrapolation to face using QUICK
-    const real pg_lq  = max(pglim,(1./6.)*(2.*pg_r + 5.*pg_l - pg_ll)) ;
-    const real pg_rq  = max(pglim,(1./6.)*(2.*pg_l + 5.*pg_r - pg_rr)) ;
+    const real t_lq   = max(tlim,alpha0*t_r  + alpha1*t_l  + alpha2*t_ll) ;
+    const real t_rq   = max(tlim,alpha0*t_l  + alpha1*t_r  + alpha2*t_rr) ;
 
-    const real t_lq   = max(tlim,(1./6.)*(2.*t_r  + 5.*t_l  - t_ll)) ;
-    const real t_rq   = max(tlim,(1./6.)*(2.*t_l  + 5.*t_r  - t_rr)) ;
+    const vect3d u_lq = alpha0*u_r  + alpha1*u_l  + alpha2*u_ll ;
+    const vect3d u_rq = alpha0*u_l  + alpha1*u_r  + alpha2*u_rr ;
+#endif
+#ifdef QUICK_SCHEME
+    const double alpha0 =  3./8. ;
+    const double alpha1 =  6./8. ;
+    const double alpha2 = -1./8. ;
+    // extrapolation to face 
+    const real pg_lq  = max(pglim,alpha0*pg_r + alpha1*pg_l + alpha2*pg_ll) ;
+    const real pg_rq  = max(pglim,alpha0*pg_l + alpha1*pg_r + alpha2*pg_rr) ;
 
-    const vect3d u_lq = (1./6.)*(2.*u_r  + 5.*u_l  - u_ll) ;
-    const vect3d u_rq = (1./6.)*(2.*u_l  + 5.*u_r  - u_rr) ;
+    const real t_lq   = max(tlim,alpha0*t_r  + alpha1*t_l  + alpha2*t_ll) ;
+    const real t_rq   = max(tlim,alpha0*t_l  + alpha1*t_r  + alpha2*t_rr) ;
+
+    const vect3d u_lq = alpha0*u_r  + alpha1*u_l  + alpha2*u_ll ;
+    const vect3d u_rq = alpha0*u_l  + alpha1*u_r  + alpha2*u_rr ;
+#endif
+#ifdef WENO_SCHEME
+    const real pg_lq = max(pglim,WENO(pg_r,pg_l,pg_ll)) ;
+    const real pg_rq = max(pglim,WENO(pg_l,pg_r,pg_rr)) ;
+    
+    const real t_lq = max(tlim,WENO(t_r,t_l,t_ll)) ;
+    const real t_rq = max(tlim,WENO(t_l,t_r,t_rr)) ;
+    
+    const vect3d u_lq = vect3d(WENO(u_r.x,u_l.x,u_ll.x),
+			       WENO(u_r.y,u_l.y,u_ll.y),
+			       WENO(u_r.z,u_l.z,u_ll.z)) ;
+    const vect3d u_rq = vect3d(WENO(u_l.x,u_r.x,u_rr.x),
+			       WENO(u_l.y,u_r.y,u_rr.y),
+			       WENO(u_l.z,u_r.z,u_rr.z)) ;
+#endif
+
 
     // Add in 3rd order dissipation flux (To act as a MILES filter)
     coef = $LDS_MILES_filter*sada ;
