@@ -481,8 +481,9 @@ namespace flowPsi {
     const real alpha_c = max(max($cl->$alpha_diss,$cr->$alpha_diss),
 			     min<real>(1.0,dp*1.0-0.5)) ;
 
-    const real alpha = max(alpha_c,real($alpha_geom_f)) ;
-
+    //    const real alpha = max(alpha_c,real($alpha_geom_f)) ;
+    const real alpha = alpha_c ;
+    
     if(alpha >1e-10) {
       const real sada = $area.sada*alpha ;
       vect3d uL = $cl->$u + vect3d($cl->$limiterv3d(u).x*
@@ -580,9 +581,9 @@ namespace flowPsi {
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
     kec_flux($iflux,pg_ll,t_ll,u_ll,pg_r,t_r,u_r,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
-#define CUBIC_SCHEME
-    //#define QUICK_SCHEME
-    //#define WENO_SCHEME
+//#define CUBIC_SCHEME
+#define QUICK_SCHEME
+//#define WENO_SCHEME
 #ifdef CUBIC_SCHEME
     const double alpha0 =  1./3. ;
     const double alpha1 =  5./6. ;
@@ -628,7 +629,7 @@ namespace flowPsi {
 
 
     // Add in 3rd order dissipation flux (To act as a MILES filter)
-    coef = $LDS_MILES_filter*sada ;
+    coef = max<real>($alpha_geom_f,$LDS_MILES_filter)*sada ;
 
     //Thornber low dissipation preconditioning
     const real amin = sqrt(min(al2,ar2)) ;
