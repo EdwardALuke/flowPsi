@@ -57,7 +57,24 @@ namespace flowPsi {
   $type ransFluxBlendEnergy param<real> ;   // in RANS flux terms. 0 = pure instantaneous, 1 = pure mean (default)
 
 
-  $rule pointwise(enthalpy_avg<-Cp,scalarFavreMean(temperature)) {
+  $type qf_f store<real> ; // Face mass flux
+  $rule pointwise(qf_f<-iflux) { $qf_f = $iflux[0] ; }
+  $type scalar_mdot_f store<real> ;
+  // Reynolds-averaged face mass flux
+  $rule pointwise(dhrl::scalar_mdot_f<-scalarMeanAll_f(qf_f))
+  { $scalar_mdot_f = $scalarMeanAll_f(qf_f) ; }
+
+    $type scalarRhon store<real> ;
+  $type scalarRhonm1 store<real> ;
+
+  $rule pointwise(dhrl::scalarRhon{n,it}<-rho_t{n,it}) {
+    $scalarRhon{n,it} = $rho_t{n,it} ;
+  }
+  $rule pointwise(dhrl::scalarRhonm1{n,it}<-rho_t{n,it}) {
+    $scalarRhonm1{n,it} = $rho_t{n,it} ;
+  }
+
+    $rule pointwise(enthalpy_avg<-Cp,scalarFavreMean(temperature)) {
     $enthalpy_avg = $Cp*$scalarFavreMean(temperature) ;
   }
 
@@ -81,9 +98,9 @@ namespace flowPsi {
     const int mi = 1 ;
     const int ei = 4;
 
-    $cl->$src[mi+0] += $vis_flux_rans[0] ;
-    $cl->$src[mi+1] += $vis_flux_rans[1] ;
-    $cl->$src[mi+2] += $vis_flux_rans[2] ;
+    $cl->$src[mi+0] += $vis_flux_rans.x ;
+    $cl->$src[mi+1] += $vis_flux_rans.y ;
+    $cl->$src[mi+2] += $vis_flux_rans.z ;
     $cl->$src[ei] += $vis_energy_flux_rans + $heat_flux_rans ;
   }
   //Add RANS flux at face fc to cr[fc] cells
@@ -93,14 +110,14 @@ namespace flowPsi {
     const int mi = 1 ;
     const int ei = 4 ;
 
-    $cr->$src[mi+0] -= $vis_flux_rans[0] ;
-    $cr->$src[mi+1] -= $vis_flux_rans[1] ;
-    $cr->$src[mi+2] -= $vis_flux_rans[2] ;
+    $cr->$src[mi+0] -= $vis_flux_rans.x ;
+    $cr->$src[mi+1] -= $vis_flux_rans.y ;
+    $cr->$src[mi+2] -= $vis_flux_rans.z ;
     $cr->$src[ei] -= $vis_energy_flux_rans + $heat_flux_rans ;
   }
 
-  //   //compute analytical viscous flux Jacobian at interior faces based on
-  //   //thin layer linear approximation of gradients
+  // compute analytical viscous flux Jacobian at interior faces based on
+  // thin layer linear approximation of gradients
   // Include contribution to Jacobian from instantaneous part of RANS flux
   $rule apply(fjm<-u_f,vis_flux_rans,area,tmu_rans_eff_f,ransFluxBlendMomentum,
               kcond_rans_eff_f,ransFluxBlendEnergy,cr->u,(cr,cl)->cellcenter,us_n)[Loci::Summation],
@@ -139,9 +156,9 @@ namespace flowPsi {
     $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
     $fjm[ei][rw] -= $u_f.z*coef*(1.0 + an.z*an.z*third) ;
 
-    $fjm[ei][ru] -= .5*$vis_flux_rans[0] ;
-    $fjm[ei][rv] -= .5*$vis_flux_rans[1] ;
-    $fjm[ei][rw] -= .5*$vis_flux_rans[2] ;
+    $fjm[ei][ru] -= .5*$vis_flux_rans.z ;
+    $fjm[ei][rv] -= .5*$vis_flux_rans.y ;
+    $fjm[ei][rw] -= .5*$vis_flux_rans.z ;
       
     const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
     const real factor = total_k*sada/dist ;
@@ -185,9 +202,9 @@ namespace flowPsi {
     $fjp[ei][rw] += $u_f.y*coef*an.y*an.z*third ;
     $fjp[ei][rw] += $u_f.z*coef*(1.0 + an.z*an.z*third) ;
 
-    $fjp[ei][ru] += 0.5*$vis_flux_rans[0] ;
-    $fjp[ei][rv] += 0.5*$vis_flux_rans[1] ;
-    $fjp[ei][rw] += 0.5*$vis_flux_rans[2] ;
+    $fjp[ei][ru] += 0.5*$vis_flux_rans.x ;
+    $fjp[ei][rv] += 0.5*$vis_flux_rans.y ;
+    $fjp[ei][rw] += 0.5*$vis_flux_rans.z ;
 
     const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
     const real factor = total_k*sada/dist ;
@@ -232,14 +249,78 @@ namespace flowPsi {
     $ci->$srcJ[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
     $ci->$srcJ[ei][rw] -= $u_f.z*coef*(1.0+an.z*an.z*third) ;
 
-    $ci->$srcJ[ei][ru] -= .5*$vis_flux_rans[0] ;
-    $ci->$srcJ[ei][rv] -= .5*$vis_flux_rans[1] ;
-    $ci->$srcJ[ei][rw] -= .5*$vis_flux_rans[2] ;
+    $ci->$srcJ[ei][ru] -= .5*$vis_flux_rans.x ;
+    $ci->$srcJ[ei][rv] -= .5*$vis_flux_rans.y ;
+    $ci->$srcJ[ei][rw] -= .5*$vis_flux_rans.z ;
 
     const real total_k = $kcond_rans_eff_f*(1.-$ransFluxBlendEnergy) ;
     const real factor = total_k*sada/dist ;
     $ci->$srcJ[ei][0] -= factor ;
   }
+
+  // Output controls
+
+
+
+  $type machNumber store<real> ;
+  $rule pointwise(machNumber<-u,soundSpeed) {
+    $machNumber = norm($u)/$soundSpeed ;
+  }
+
+  $type mach_avg store<real> ;
+  $rule pointwise(mach_avg<-scalarMean(machNumber)) {
+    $mach_avg = $scalarMean(machNumber) ;
+  }
+  $type mach_avg_f store<real> ;
+  $rule pointwise(mach_avg_f<-ci->mach_avg) {
+    $mach_avg_f = $ci->$mach_avg ;
+  }
+
+#ifdef OUTPUT_AVERAGES
+  OUTPUT_SCALAR_ALWAYS("cell2nodeMaxMag(k_resid)",k_resid) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(temp_avg)",temp_avg) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(alpha_dhrl)",alpha_dhrl) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(alpha_energy_dhrl)",alpha_energy_dhrl) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(s_ratio)",s_ratio) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(mach_avg)",mach_avg) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(tmuu_rans)",tmuu_rans) ;
+  OUTPUT_SCALAR_ALWAYS("cell2nodeMaxMag(k_src)",k_src) ;
+#else
+  OUTPUT_SCALAR_ALWAYS("cell2node(mach_avg)",mach_avg) ;
+  OUTPUT_SCALAR("cell2node(temp_avg)",temp_avg) ;
+  OUTPUT_SCALAR("cell2node(alpha_dhrl)",alpha_dhrl) ;
+  OUTPUT_SCALAR("cell2node(alpha_energy_dhrl)",alpha_energy_dhrl) ;
+  OUTPUT_SCALAR("cell2node(s_ratio)",s_ratio) ;
+  OUTPUT_SCALAR("cell2node(tmuu_rans)",tmuu_rans) ;
+#endif
+
+
+  //#define TEST_OUTPUT
+#ifdef TEST_OUTPUT
+  $type sij_sij_avg_f store<real> ;
+  $rule pointwise(sij_sij_avg_f<-ci->sij_sij_avg) {
+    $sij_sij_avg_f = $ci->$sij_sij_avg ;
+  }
+
+  $type s_mean_2 store<real> ;
+  $rule pointwise(s_mean_2<-gradv3d(u_avg)) {
+    const real s11_avg = $gradv3d(u_avg).x.x ;
+    const real s22_avg = $gradv3d(u_avg).y.y ;
+    const real s33_avg = $gradv3d(u_avg).z.z ;
+    const real s12_avg = 0.5*($gradv3d(u_avg).x.y+$gradv3d(u_avg).y.x) ;
+    const real s13_avg = 0.5*($gradv3d(u_avg).x.z+$gradv3d(u_avg).z.x) ;
+    const real s23_avg = 0.5*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y) ;
+    $s_mean_2 = s11_avg*s11_avg+s22_avg*s22_avg+s33_avg*s33_avg
+      + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
+  }
+  $type s_mean_2_f store<real> ;
+  $rule pointwise(s_mean_2_f<-ci->s_mean_2) {
+    $s_mean_2_f = $ci->$s_mean_2 ;
+  }
+
+  OUTPUT_SCALAR_ALWAYS("cell2node(sij_sij_avg)",sij_sij_avg) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(s_mean_2)",s_mean_2) ;
+#endif
 
 }
 

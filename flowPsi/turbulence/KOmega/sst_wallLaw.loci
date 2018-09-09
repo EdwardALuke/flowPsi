@@ -317,7 +317,7 @@ namespace flowPsi {
 
   $rule pointwise(u_f,temperature_f,gagePressure_f,
   		  tau_wall,q_wall,wall_law_k,wall_law_w<-Pambient,Cp,
-  		  ci->(u,rho,mu,gagePressure,kconduct,cellcenter),
+  		  ui_t,ci->(rho_t,mu_lam,gagePressure,kconduct,cellcenter),
   		  mu(temp_wlaw),Rtilde,
   		  wallVelocity,area,facecenter,wall_law,temp_wlaw,us),constraint(wallLaw_BC,ref->adiabatic_BCoption,SST_BSL_KW) {
     real w_f=0,k_f=0 ;
@@ -325,12 +325,12 @@ namespace flowPsi {
     // Wall tangential velocity
     const vect3d uwall = $wallVelocity ;
     $u_f = uwall-dot(uwall,$area.n)*$area.n + $us;
-    const real ri = $ci->$rho ;
+    const real ri = $ci->$rho_t ;
     const real pi = $ci->$gagePressure+$Pambient ;
     const real rb = pi/($Rtilde*$temp_wlaw) ;
-    wall_law_bc($ci->$u-$u_f,ri,rb,
+    wall_law_bc($ui_t-$u_f,ri,rb,
   		$area,$mu(temp_wlaw),
-  		$ci->$mu,$ci->$cellcenter,
+  		$ci->$mu_lam,$ci->$cellcenter,
   		$facecenter,$ci->$kconduct,$Cp,$wall_law,
   		$temp_wlaw,1000,10.0,$tau_wall,w_f,k_f) ;
     $temperature_f = $temp_wlaw ;
@@ -392,7 +392,7 @@ namespace flowPsi {
 
   $rule pointwise(heat::u_f,heat::temperature_f,heat::gagePressure_f,
   		  heat::tau_wall,heat::q_wall,wall_law_k,wall_law_w<-Pambient,wallVelocity,area,
-  		  ci->(u,rho,temperature,mu,gagePressure),
+  		  ui_t,ci->(rho_t,temperature,mu_lam,gagePressure),
   		  mu(temp_wlaw),kconduct(temp_wlaw),
   		  ci->(kconduct,cellcenter),Rtilde,
   		  facecenter,wall_law,temp_wlaw,Twall,us,Cp),
@@ -406,10 +406,10 @@ namespace flowPsi {
     const real pi = $ci->$gagePressure+$Pambient ;
     const real rb = pi/($Rtilde*$temp_wlaw) ;
     
-    wall_law_nonadiabatic_bc($ci->$u-$u_f,
-  			     $ci->$rho,$ci->$temperature,
+    wall_law_nonadiabatic_bc($ui_t-$u_f,
+  			     $ci->$rho_t,$ci->$temperature,
   			     rb,$area,
-  			     $mu(temp_wlaw),$ci->$mu,
+  			     $mu(temp_wlaw),$ci->$mu_lam,
   			     $ci->$cellcenter,$facecenter,
   			     $wall_law,$Cp,
   			     $temp_wlaw,100000, $kconduct(temp_wlaw),
@@ -425,13 +425,13 @@ namespace flowPsi {
   } 
 
   
-  $rule pointwise(Twall<-ci->(u,temperature,mu,kconduct),area,Cp,us),
+  $rule pointwise(Twall<-ui_t,ci->(temperature,mu_lam,kconduct),area,Cp,us),
     constraint(wallLaw_BC,ref->adiabatic_BCoption) { 
-    const vect3d ui = $ci->$u-$us ;
+    const vect3d ui = $ui_t-$us ;
     const real uit = dot(ui,$area.n) ;
     const vect3d ui_tan = ui - uit*$area.n ;
     const real ui_tan_mag = sqrt(dot(ui_tan,ui_tan)) ;
-    const real r =  pow($ci->$mu*$Cp/$ci->$kconduct,1.0/3.0) ;
+    const real r =  pow($ci->$mu_lam*$Cp/$ci->$kconduct,1.0/3.0) ;
     $Twall = $ci->$temperature + r* pow(ui_tan_mag,2)/(2.0*$Cp) ;
   } 
 

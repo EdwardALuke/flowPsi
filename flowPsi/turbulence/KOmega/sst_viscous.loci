@@ -115,7 +115,7 @@ namespace flowPsi {
     $sst_w_bc = w ;
   }
 
-  $rule pointwise(k_f,w_f<-area,u_f,ci->(k,w),
+  $rule pointwise(k_f,w_f<-area,u_t_f,ci->(k,w),
 		  ref->(sst_k_bc,sst_w_bc)),
     constraint(SST_BSL_KW,area,ci->u) {
     const vect3d n = $area.n ;
@@ -123,7 +123,7 @@ namespace flowPsi {
     $k_f = $ref->$sst_k_bc ;
     $w_f = $ref->$sst_w_bc ;
     
-    if(dot($u_f,n) >= -0.0){ 
+    if(dot($u_t_f,n) >= -0.0){ 
       $k_f = $ci->$k ;
       $w_f = $ci->$w ;
     }
@@ -132,26 +132,26 @@ namespace flowPsi {
   $type prescribe_turb_ref store<vec<2> > ;
 
   $rule pointwise(prescribe::k_f,prescribe::w_f<-area,
-		  u_f,us_n,
-		  ci->(k,w),prescribe_turb_ref,rho_f),
+		  u_t_f,us_n,
+		  ci->(k,w),prescribe_turb_ref,rho_t_f),
     constraint(SST_BSL_KW,area,ci->u,prescribe_turb_ref) {
     const vect3d n = $area.n ;
     
     $k_f = $prescribe_turb_ref[0] ;
     real mut = $prescribe_turb_ref[1] ;
     
-    $w_f = max<real>($k_f*$rho_f/(mut+1e-10),1e-10) ;
+    $w_f = max<real>($k_f*$rho_t_f/(mut+1e-10),1e-10) ;
     
-    if(dot($u_f,n)+$us_n >= -0.0){ 
+    if(dot($u_t_f,n)+$us_n >= -0.0){ 
       $k_f = $ci->$k ;
       $w_f = $ci->$w ;
     }
   } 
 
-  $rule pointwise(lam_tau_w<-gradv3d_f(u),mu_f,area),
+  $rule pointwise(lam_tau_w<-gradv3d_f(u),mu_lam_f,area),
     constraint(viscousWall_BC){
     symmetricTensor tau ;
-    real mu_lam = $mu_f ;
+    real mu_lam = $mu_lam_f ;
     
     real dudx = $gradv3d_f(u).x.x ;
     real dvdy = $gradv3d_f(u).y.y ;
@@ -179,14 +179,14 @@ namespace flowPsi {
     $lam_tau_w = sqrt(dot(tau_w,tau_w)) ;
   }
 
-  $rule pointwise(axi::lam_tau_w<-gradv3d_f(u),mu_f,area,u_f,facecenter),
-    constraint(viscousWall_BC,axisymmetricCoordinateModel,u_f) {
+  $rule pointwise(axi::lam_tau_w<-gradv3d_f(u),mu_lam_f,area,u_t_f,facecenter),
+    constraint(viscousWall_BC,axisymmetricCoordinateModel,u_t_f) {
     symmetricTensor tau ;
-    real mu_lam = $mu_f ;
+    real mu_lam = $mu_lam_f ;
 
     real y = $facecenter.y+1e-33 ;
-    real v = $u_f.y ;
-    real w = $u_f.z ;
+    real v = $u_t_f.y ;
+    real w = $u_t_f.z ;
 
     real dudx = $gradv3d_f(u).x.x ;
     real dvdy = $gradv3d_f(u).y.y ;
@@ -215,11 +215,11 @@ namespace flowPsi {
   }
 
   // menter's k-omega wall bc
-  $rule pointwise(viscousWall::prescribe::k_f,viscousWall::prescribe::w_f<-rho_f,
-                  sst1,ci->(mu,dist_noslip)),
+  $rule pointwise(viscousWall::prescribe::k_f,viscousWall::prescribe::w_f<-rho_t_f,
+                  sst1,ci->(mu_lam,dist_noslip)),
     constraint(viscousWall_BC,SST_BSL_KW) {
     $k_f = 0.0 ;
-    $w_f = 10.0*6.0*$ci->$mu/($rho_f*$sst1.beta*
+    $w_f = 10.0*6.0*$ci->$mu_lam/($rho_t_f*$sst1.beta*
                                pow($ci->$dist_noslip,2)) ;
   }
 
@@ -237,16 +237,16 @@ namespace flowPsi {
   }
 
   $type ksp store<real> ;
-  $rule pointwise(ksp<-rho_f,lam_tau_w,ksRef,mu_f),
+  $rule pointwise(ksp<-rho_t_f,lam_tau_w,ksRef,mu_lam_f),
     constraint(RoughWallBC,SST_BSL_KW) {
-    const real nu_w = $mu_f/$rho_f ;
+    const real nu_w = $mu_lam_f/$rho_t_f ;
     const real tau_w = $lam_tau_w ;
-    const real utau = sqrt(tau_w/$rho_f) ;
+    const real utau = sqrt(tau_w/$rho_t_f) ;
     $ksp = max<real>(utau*$ksRef/nu_w,1e-30) ;
   }
 
-  $rule pointwise(rough::viscousWall::prescribe::k_f,rough::viscousWall::prescribe::w_f<-rho_f,
-                  lam_tau_w,ksp,mu_f),
+  $rule pointwise(rough::viscousWall::prescribe::k_f,rough::viscousWall::prescribe::w_f<-rho_t_f,
+                  lam_tau_w,ksp,mu_lam_f),
     constraint(RoughWallBC,SST_BSL_KW) {
     $k_f = 0.0 ;
 
@@ -255,9 +255,9 @@ namespace flowPsi {
     // SR is modified from original Wilcox formulation for slightly
     // better prediction of transitionally rough surfaces
 
-    const real nu_w = $mu_f/$rho_f ;
+    const real nu_w = $mu_lam_f/$rho_t_f ;
     const real tau_w = $lam_tau_w ;
-    const real utau = sqrt(tau_w/$rho_f) ;
+    const real utau = sqrt(tau_w/$rho_t_f) ;
     const real blend1 = exp((5.-$ksp)/1.4) ;
     const real blend2 = pow(1.35,0.5*(5.-$ksp)) ;
     const real SR1 = 100./$ksp ;

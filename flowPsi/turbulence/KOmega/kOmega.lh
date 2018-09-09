@@ -20,6 +20,18 @@
 //#############################################################################
 
 
+$type rho_t             store<flowPsi::real> ;
+$type rho_t_f           store<flowPsi::real> ;
+$type u_t_f             store<flowPsi::vect3d> ;
+$type ui_t              store<flowPsi::vect3d> ;
+$type mu_lam            store<flowPsi::real> ;
+$type mu_lam_f          store<flowPsi::real> ;
+$type soundSpeed_t      store<flowPsi::real> ;
+
+$type divu_t            store<flowPsi::real> ;
+$type vortMag_t         store<flowPsi::real>  ;
+$type strainRate_t      store<flowPsi::real> ;
+
 $type lam_tau_w         store<flowPsi::real> ;
 
 // K-omega turbulence models
@@ -42,11 +54,11 @@ $type sigmak_f          store<flowPsi::real> ;
 $type sigmae_f          store<flowPsi::real> ;
 // SST turbulence model parameters
 $type sst               store<flowPsi::sst_param> ;
-$type sst1 param<sst1_param> ;
-$type sst1_wilcox08 param<sst1_param> ;
-$type sst1m param<sst1_param> ;
-$type sst1 param<sst1_param> ;
-$type sst2 param<sst2_param> ;
+$type sst1              param<sst1_param> ;
+$type sst1_wilcox08     param<sst1_param> ;
+$type sst1m             param<sst1_param> ;
+$type sst1              param<sst1_param> ;
+$type sst2              param<sst2_param> ;
 // tke diffusion flux
 $type diff_t            store<flowPsi::real> ;
 // omega diffusion flux

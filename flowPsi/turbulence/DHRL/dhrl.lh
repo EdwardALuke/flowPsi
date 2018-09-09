@@ -1,4 +1,18 @@
-  // Variable declarations
+  //-------change variables in sst.loci
+  $type rho_avg store<real> ;
+  $type rho_t store<real> ;
+  $type rho_t_f store<real> ;
+  $type u_t store<vect3d>;
+  $type ui_t store<vect3d>;
+  $type mu_avg store<real> ;
+  $type mu_lam store<real> ;
+  $type mu_lam_f store<real> ;
+  $type soundSpeed_t store<real> ;
+  $type divu_t store<real> ;
+  $type vortMag_t store<real> ;
+  $type strainRate_t store<real> ;
+
+// Variable declarations
   $type multi_scale param<std::string> ; // Turn DHRL on/off
   $type DHRL_SST_BSL_KW Constraint ;
 

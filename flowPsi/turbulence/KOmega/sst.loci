@@ -58,6 +58,72 @@ namespace flowPsi {
 
   register_BC<turbulence_check> register_BC_turbulence_check ;
   
+
+  // Copy some variables so they can be overridden by DHRL model
+  $rule pointwise(rho_t<-rho) { $rho_t = $rho ; }
+  $rule pointwise(rho_t_f<-rho_f) { $rho_t_f = $rho_f; }
+  $rule pointwise(u_t_f<-u_f) {$u_t_f = $u_f ; } 
+  $rule pointwise(ui_t<-ci->u) { $ui_t = $ci->$u ; }
+  $rule pointwise(mu_lam<-mu) { $mu_lam = $mu ; }
+  $rule pointwise(mu_lam_f<-mu_f) { $mu_lam_f = $mu_f ; }
+  $rule pointwise(soundSpeed_t<-soundSpeed) { $soundSpeed_t = $soundSpeed ; }
+
+  $rule pointwise(divu_t<-gradv3d(u)) {
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $gradv3d(u).z.z ;
+      const real dudx = $gradv3d(u).x.x ;
+      $divu_t = (dudx+dvdy+dwdz) ;
+  }
+
+  $rule pointwise(axi::divu_t<-u,gradv3d(u),cellcenter),
+      constraint(u,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y;
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $u.y/y ;
+      $divu_t = (dudx+dvdy+dwdz) ;
+  }
+
+  $rule pointwise(strainRate_t<-gradv3d(u)) {
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $gradv3d(u).z.z ;
+      const real dvdx = $gradv3d(u).y.x ;
+      const real dwdx = $gradv3d(u).z.x ;
+      const real dwdy = $gradv3d(u).z.y ;
+      const real dudy = $gradv3d(u).x.y ;
+      const real dudz = $gradv3d(u).x.z ;
+      const real dvdz = $gradv3d(u).y.z ;
+
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRate_t = sqrt(S2) ;
+  }
+
+  $rule pointwise(axi::strainRate_t<-u,gradv3d(u),cellcenter),
+      constraint(u,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y ;
+      const real dudx = $gradv3d(u).x.x ;
+      const real dvdy = $gradv3d(u).y.y ;
+      const real dwdz = $u.y/y ;
+      const real dvdx = $gradv3d(u).y.x ;
+      const real dwdx = $gradv3d(u).z.x ;
+      const real dwdy = $gradv3d(u).z.y-$u.z/y ;
+      const real dudy = $gradv3d(u).x.y ;
+      const real dudz = 0.0 ;
+      const real dvdz = 0.0 ;
+
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRate_t = sqrt(S2) ;
+  }
+
+  $rule pointwise(vortMag_t<-vort) {
+    $vortMag_t = norm($vort) ;
+  }
+
   $type tmu_clip param<real> ;
 
   $rule default(tmu_clip),
@@ -400,45 +466,45 @@ namespace flowPsi {
   // ------
   // We use the identity div(w grad(k)) = dot(grad(w),grad(k)) + w div(grad(k))
 
-  $rule pointwise(crossDiffusionTerm<-sst2,rho,w,laplace_k,div_w_grad_k,vol) {
+  $rule pointwise(crossDiffusionTerm<-sst2,rho_t,w,laplace_k,div_w_grad_k,vol) {
     const real gradkdotgradw = ($div_w_grad_k-$w*$laplace_k)/$vol ;
     const real crossterm = max<real>($sst2.sigmae*gradkdotgradw,0.0) ;
-    $crossDiffusionTerm = 2.*$rho*crossterm/max<real>($w,1e-30) ;
+    $crossDiffusionTerm = 2.*$rho_t*crossterm/max<real>($w,1e-30) ;
   }
 
-  $rule pointwise(wilcox08::crossDiffusionTerm<-rho,w,laplace_k,div_w_grad_k,vol),
+  $rule pointwise(wilcox08::crossDiffusionTerm<-rho_t,w,laplace_k,div_w_grad_k,vol),
     constraint(Wilcox08Model,geom_cells) {
     // t1 = dot(grad(k),grad(w))/w 
     const real  crossterm = ($div_w_grad_k-$laplace_k*$w)/$vol ;
     const real sigma_d = crossterm<=0?0.0:0.125 ;
-    $crossDiffusionTerm = sigma_d*$rho*crossterm/max<real>($w,1e-30) ;
+    $crossDiffusionTerm = sigma_d*$rho_t*crossterm/max<real>($w,1e-30) ;
   }
 
     
 #else
 
-  $rule pointwise(crossDiffusionTerm<-sst2,rho,w, grads(k),grads(w)) {
+  $rule pointwise(crossDiffusionTerm<-sst2,rho_t,w, grads(k),grads(w)) {
     const real crossterm = max<real>($sst2.sigmae*dot($grads(k),$grads(w)),0.0) ;
-    $crossDiffusionTerm = 2.*$rho*crossterm/max<real>($w,1e-30) ;
+    $crossDiffusionTerm = 2.*$rho_t*crossterm/max<real>($w,1e-30) ;
   }
-  $rule pointwise(wilcox08::crossDiffusionTerm<-rho,w,grads(k),grads(w)),
+  $rule pointwise(wilcox08::crossDiffusionTerm<-rho_t,w,grads(k),grads(w)),
     constraint(Wilcox08Model,geom_cells) {
     const real crossterm = dot($grads(k),$grads(w)) ;
     const real sigma_d = crossterm<=0?0.0:0.125 ;
-    $crossDiffusionTerm = sigma_d*$rho*crossterm/max<real>($w,1e-30) ;
+    $crossDiffusionTerm = sigma_d*$rho_t*crossterm/max<real>($w,1e-30) ;
   }
 #endif
   
   // Blending function for BSL model with wall
-  $rule pointwise(wall::bF1<-dist_noslip,rho,mu,k,w,crossDiffusionTerm,sst2),
+  $rule pointwise(wall::bF1<-dist_noslip,rho_t,mu_lam,k,w,crossDiffusionTerm,sst2),
     constraint(k,w,dist_noslip,geom_cells,SST_BSL) {
     const real sigma_w2 = $sst2.sigmae ;
     const real CDmin = 1.0e-10 ; // Menter's new suggested value
     const real CD = max(CDmin,$crossDiffusionTerm) ;
     const real y = $dist_noslip ;
-    const real nu = $mu/$rho ;
+    const real nu = $mu_lam/$rho_t ;
     const real ls = max(sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)) ;
-    const real arg1= min<real>(min(ls, 4.*$rho*sigma_w2*$k/(CD*y*y)),32.0) ;
+    const real arg1= min<real>(min(ls, 4.*$rho_t*sigma_w2*$k/(CD*y*y)),32.0) ;
     const real arg1_2 = arg1*arg1 ;
     const real arg1_4 = arg1_2*arg1_2 ;
     $bF1 = tanh(arg1_4) ;
@@ -455,10 +521,10 @@ namespace flowPsi {
   }
 
   // blending function if there is a wall and it is the SST model
-  $rule pointwise(sst::bF2<-k,dist_noslip,w,mu,rho),
+  $rule pointwise(sst::bF2<-k,dist_noslip,w,mu_lam,rho_t),
     constraint(SSTModel,dist_noslip) {
       const real y = $dist_noslip ;
-      const real nu = $mu/$rho ;
+      const real nu = $mu_lam/$rho_t ;
       real arg2 =min<real>(max(2.0*sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)),1000.0) ;
       $bF2 = tanh(arg2*arg2) ;
   }
@@ -480,10 +546,10 @@ namespace flowPsi {
   }
 
   // additional SST correction for rough walls, from Hellsten aiaa-98-2554
-  $rule pointwise(sst::bF3<-k,dist_noslip,w,mu,rho),
+  $rule pointwise(sst::bF3<-k,dist_noslip,w,mu_lam,rho_t),
     constraint(SSTModel,SST_ROUGH_WALL,dist_noslip) {
       const real y = $dist_noslip ;
-      const real nu = $mu/$rho ;
+      const real nu = $mu_lam/$rho_t ;
       const real arg = min<real>(150.0*nu/($w*y*y),32.0) ;
       const real arg4 = pow(arg,4) ;
       $bF3 = 1.-tanh(arg4) ;
@@ -496,8 +562,8 @@ namespace flowPsi {
 
   //round jet parameter
   $type chiw store<real> ;
-  $rule pointwise(chiw<-sst1m,gradv3d(u),divu,w),
-    constraint(divu,w,SST_BSL) { 
+  $rule pointwise(chiw<-sst1m,gradv3d(u),divu_t,w),
+    constraint(divu_t,w,SST_BSL) { 
     const real dudx = $gradv3d(u).x.x ;
     const real dvdy = $gradv3d(u).y.y ;
     const real dwdz = $gradv3d(u).z.z ;
@@ -516,15 +582,15 @@ namespace flowPsi {
     const real s23 = dvdz+dwdy ;
 
     const real oms = (s12*wx*wy+s13*wx*wz+s23*wy*wz)-
-                     (dudx-0.5*$divu)*(wy*wy+wz*wz) -
-                     (dvdy-0.5*$divu)*(wx*wx+wz*wz) -
-                     (dwdz-0.5*$divu)*(wx*wx+wy*wy) ;
+                     (dudx-0.5*$divu_t)*(wy*wy+wz*wz) -
+                     (dvdy-0.5*$divu_t)*(wx*wx+wz*wz) -
+                     (dwdz-0.5*$divu_t)*(wx*wx+wy*wy) ;
 
     $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
   }
 
-  $rule pointwise(axi::chiw<-sst1m,u,gradv3d(u),divu,w,cellcenter),
-    constraint(divu,w,SST_BSL,axisymmetricCoordinateModel) {
+  $rule pointwise(axi::chiw<-sst1m,u,gradv3d(u),divu_t,w,cellcenter),
+    constraint(divu_t,w,SST_BSL,axisymmetricCoordinateModel) {
     const real y = $cellcenter.y ;
     const real dudx = $gradv3d(u).x.x ;
     const real dvdy = $gradv3d(u).y.y ;
@@ -544,9 +610,9 @@ namespace flowPsi {
     const real s23 = dvdz+dwdy ;
 
     const real oms = (s12*wx*wy+s13*wx*wz+s23*wy*wz)-
-                     (dudx-0.5*$divu)*(wy*wy+wz*wz) -
-                     (dvdy-0.5*$divu)*(wx*wx+wz*wz) -
-                     (dwdz-0.5*$divu)*(wx*wx+wy*wy) ;
+                     (dudx-0.5*$divu_t)*(wy*wy+wz*wz) -
+                     (dvdy-0.5*$divu_t)*(wx*wx+wz*wz) -
+                     (dwdz-0.5*$divu_t)*(wx*wx+wy*wy) ;
 
     $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
   }
@@ -690,18 +756,18 @@ namespace flowPsi {
   
   $type kw_tmu store<real> ;
   // Definition of turbulence viscosity
-  $rule pointwise(kw_tmu<-tmu_clip,rho,k,w,sst1m,bF2,bF3,strainRate),
+  $rule pointwise(kw_tmu<-tmu_clip,rho_t,k,w,sst1m,bF2,bF3,strainRate_t),
     constraint(k,w,SST_BSL_KW) {
-    $kw_tmu = min($rho*$sst1m.a1*$k/max<real>(1e-30,max($sst1m.a1*$w,$strainRate*$bF2*$bF3)),$tmu_clip);
+    $kw_tmu = min($rho_t*$sst1m.a1*$k/max<real>(1e-30,max($sst1m.a1*$w,$strainRate_t*$bF2*$bF3)),$tmu_clip);
   }
 
-  $rule pointwise(wilcox08::kw_tmu<-tmu_clip,rho,k,w,sst1m,strainRate,divu),
+  $rule pointwise(wilcox08::kw_tmu<-tmu_clip,rho_t,k,w,sst1m,strainRate_t,divu_t),
     constraint(k,w,Wilcox08Model,NOT_MS_SST_BSL_KW) {
     const real clim = 7./8. ;
-    const real S2 = $strainRate*$strainRate ;
-    const real Sbar = S2 - 2./3.*$divu*$divu ;
+    const real S2 = $strainRate_t*$strainRate_t ;
+    const real Sbar = S2 - 2./3.*$divu_t*$divu_t ;
     const real wbar = max($w,clim*sqrt(Sbar/$sst1m.betas)) ;
-    $kw_tmu = min($rho*$k/(wbar+EPSILON),$tmu_clip);
+    $kw_tmu = min($rho_t*$k/(wbar+EPSILON),$tmu_clip);
   }
   
   $rule pointwise(kw::tmu<-kw_tmu) {
@@ -713,36 +779,36 @@ namespace flowPsi {
   // stress_scalar is the stress term found in the production.  We provide
   // several methods for computing this to improve robustness.
   
-  $rule pointwise(stress_scalar<-strainRate,divu,vortMag,kw_tmu,rho,k) {
-    const real S = $strainRate ;
-    const real Omega = $vortMag ;
+  $rule pointwise(stress_scalar<-strainRate_t,divu_t,vortMag_t,kw_tmu,rho_t,k) {
+    const real S = $strainRate_t ;
+    const real Omega = $vortMag_t ;
 
-    $stress_scalar=max<real>($kw_tmu*(S*Omega-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    $stress_scalar=max<real>($kw_tmu*(S*Omega-2./3.*$divu_t*$divu_t)-2./3.*$rho_t*$k*$divu_t,
                        0.0) ;
   }
 
   
-  $rule pointwise(total::stress_scalar<-rho,k,divu,kw_tmu,strainRate),
+  $rule pointwise(total::stress_scalar<-rho_t,k,divu_t,kw_tmu,strainRate_t),
     constraint(kw_tmu,k,total_production) {
-    const real S2 = $strainRate*$strainRate ;
-    $stress_scalar =  $kw_tmu*(S2 - 2./3.*$divu*$divu) - 2./3.*$rho*$k*$divu ;
+    const real S2 = $strainRate_t*$strainRate_t ;
+    $stress_scalar =  $kw_tmu*(S2 - 2./3.*$divu_t*$divu_t) - 2./3.*$rho_t*$k*$divu_t ;
   }
 
-  $rule pointwise(vorticity::stress_scalar<-kw_tmu,rho,k,divu,vortMag),
+  $rule pointwise(vorticity::stress_scalar<-kw_tmu,rho_t,k,divu_t,vortMag_t),
     constraint(vorticity_production,k,kw_tmu) {
-    const real O2 = $vortMag*$vortMag ;
+    const real O2 = $vortMag_t*$vortMag_t ;
     
-    $stress_scalar = max<real>($kw_tmu*(O2-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    $stress_scalar = max<real>($kw_tmu*(O2-2./3.*$divu_t*$divu_t)-2./3.*$rho_t*$k*$divu_t,
                          0.0) ;
   }    
 
   $type Cvor param<real> ;
-  $rule pointwise(vortex_correction::stress_scalar<-kw_tmu,rho,k,divu,
-                  vortMag,strainRate,Cvor),
+  $rule pointwise(vortex_correction::stress_scalar<-kw_tmu,rho_t,k,divu_t,
+                  vortMag_t,strainRate_t,Cvor),
     constraint(vortex_preserving_production,k,kw_tmu) {
-    const real O = max<real>($vortMag + $Cvor*(min<real>($strainRate-$vortMag,0.0)),0.) ;
-    const real S = $strainRate ;
-    $stress_scalar = max<real>($kw_tmu*(S*O-2./3.*$divu*$divu)-2./3.*$rho*$k*$divu,
+    const real O = max<real>($vortMag_t + $Cvor*(min<real>($strainRate_t-$vortMag_t,0.0)),0.) ;
+    const real S = $strainRate_t ;
+    $stress_scalar = max<real>($kw_tmu*(S*O-2./3.*$divu_t*$divu_t)-2./3.*$rho_t*$k*$divu_t,
                          0.0);
   }    
 
@@ -765,9 +831,9 @@ namespace flowPsi {
   //----------------------------------------------------------------------
   // Turbulence Production, P_k, definition
 
-  $rule pointwise(P_k<-sst1m,stress_scalar,Kprod_clip,k,w,rho,fBetaS) {
+  $rule pointwise(P_k<-sst1m,stress_scalar,Kprod_clip,k,w,rho_t,fBetaS) {
     const real BetaS = $sst1m.betas*$fBetaS ;
-    $P_k = min($stress_scalar, ($Kprod_clip)*$rho*BetaS*$k*$w) ;
+    $P_k = min($stress_scalar, ($Kprod_clip)*$rho_t*BetaS*$k*$w) ;
   }
 
 
@@ -803,27 +869,27 @@ namespace flowPsi {
 #ifdef TURBULENT_K_DIFFUSION
   // K equation diffusion term
   $type k_nu_f store<real> ;
-  $rule pointwise(k_nu_f<-mu_f,kw_tmu_f,sigmak_f) {
-    $k_nu_f = ($mu_f+$kw_tmu_f*$sigmak_f) ;
+  $rule pointwise(k_nu_f<-mu_lam_f,kw_tmu_f,sigmak_f) {
+    $k_nu_f = ($mu_lam_f+$kw_tmu_f*$sigmak_f) ;
   }
-  $rule pointwise(wilcox08::k_nu_f<-mu_f,rho_f,k_f,w_f,sigmak_f),
+  $rule pointwise(wilcox08::k_nu_f<-mu_lam_f,rho_t_f,k_f,w_f,sigmak_f),
     constraint(k_f,Wilcox08Model) {
-    const real kw_tmu_f = $rho_f*$k_f/max<real>($w_f,1e-30) ;
-    $k_nu_f=($mu_f+kw_tmu_f*$sigmak_f) ;
+    const real kw_tmu_f = $rho_t_f*$k_f/max<real>($w_f,1e-30) ;
+    $k_nu_f=($mu_lam_f+kw_tmu_f*$sigmak_f) ;
   }
 #endif
   
 #ifdef TURBULENT_W_DIFFUSION
   $type w_nu_f store<real> ;
   // omega equation diffusion term
-  $rule pointwise(w_nu_f<-mu_f,kw_tmu_f,sigmae_f) {
-    $w_nu_f=($mu_f+$kw_tmu_f*$sigmae_f) ;
+  $rule pointwise(w_nu_f<-mu_lam_f,kw_tmu_f,sigmae_f) {
+    $w_nu_f=($mu_lam_f+$kw_tmu_f*$sigmae_f) ;
   }
 
-  $rule pointwise(wilcox08::w_nu_f<-mu_f,rho_f,k_f,w_f,sigmae_f),
+  $rule pointwise(wilcox08::w_nu_f<-mu_lam_f,rho_t_f,k_f,w_f,sigmae_f),
     constraint(w_f,Wilcox08Model) {
-    const real kw_tmu_f = $rho_f*$k_f/max<real>($w_f,1e-30) ;
-    $w_nu_f=($mu_f+kw_tmu_f*$sigmae_f) ;
+    const real kw_tmu_f = $rho_t_f*$k_f/max<real>($w_f,1e-30) ;
+    $w_nu_f=($mu_lam_f+kw_tmu_f*$sigmae_f) ;
   }    
 #endif
 
@@ -835,9 +901,9 @@ namespace flowPsi {
 
   // omega production term
   $type D_w store<real> ;
-  $rule pointwise(D_w<-sst,stress_scalar,rho,kw_tmu) {
+  $rule pointwise(D_w<-sst,stress_scalar,rho_t,kw_tmu) {
     const real tsrc = $stress_scalar ;
-    const real nut = $kw_tmu/$rho ;
+    const real nut = $kw_tmu/$rho_t ;
     $D_w = ($sst.gama/(nut+EPSILON))*tsrc ;
   }
 
@@ -853,21 +919,21 @@ namespace flowPsi {
   }
 
   // turbulent kinetic energy and omega destruction terms
-  $rule apply(k_src<-k,w,sst,sst1m,vol,rho,fBetaS)[Loci::Summation] {
+  $rule apply(k_src<-k,w,sst,sst1m,vol,rho_t,fBetaS)[Loci::Summation] {
     const real BetaS = $sst1m.betas*$fBetaS ;
 
-    $k_src -= BetaS*$rho*$w*$k*$vol ;
+    $k_src -= BetaS*$rho_t*$w*$k*$vol ;
   }
-  $rule apply(w_src<-w,sst,vol,rho)[Loci::Summation] {
-    $w_src -= $sst.beta*$rho*$w*$w*$vol ;
+  $rule apply(w_src<-w,sst,vol,rho_t)[Loci::Summation] {
+    $w_src -= $sst.beta*$rho_t*$w*$w*$vol ;
   }
 
   // Apply scalar eqn destruction jacobians
-  $rule apply(k_srcJ<-vol,k,w,sst,sst1m,fBetaS,rho)[Loci::Summation] {
-    join($k_srcJ,-$sst1m.betas*$fBetaS*$rho*$w*$vol) ;
+  $rule apply(k_srcJ<-vol,k,w,sst,sst1m,fBetaS,rho_t)[Loci::Summation] {
+    join($k_srcJ,-$sst1m.betas*$fBetaS*$rho_t*$w*$vol) ;
   }
-  $rule apply(w_srcJ<-vol,k,w,sst,sst1m,fBetaS,rho)[Loci::Summation] {
-    join($w_srcJ, -2.0*$sst.beta*$rho*$w*$vol) ;
+  $rule apply(w_srcJ<-vol,k,w,sst,sst1m,fBetaS,rho_t)[Loci::Summation] {
+    join($w_srcJ, -2.0*$sst.beta*$rho_t*$w*$vol) ;
   }
 #endif
 
@@ -884,19 +950,19 @@ namespace flowPsi {
 
 #ifdef CROSS_DIFFUSION_JACOBIAN
   // Cross diffusion term approximate jacobian (scalar equation jacobian)
-  $rule apply(w_srcJ<-grads(k),grads(w),sst2,bF1,vol,w,rho)[Loci::Summation] {
+  $rule apply(w_srcJ<-grads(k),grads(w),sst2,bF1,vol,w,rho_t)[Loci::Summation] {
     real crossterm = max(dot($grads(k),$grads(w)),0.0) ;
     // Cross diffusion term limiting for small w
     real sigmae = $sst2.sigmae ;
-    const real blend = (1.0-$bF1)*$rho ;
+    const real blend = (1.0-$bF1)*$rho_t ;
     join($w_srcJ,-2.*blend*sigmae*crossterm*$vol/($w*$w)) ;
   }
 
-  $rule apply(w_srcJ<-grads(k),grads(w),vol,w,rho)[Loci::Summation],
+  $rule apply(w_srcJ<-grads(k),grads(w),vol,w,rho_t)[Loci::Summation],
     constraint(Wilcox08Model,geom_cells) {
     real crossterm = dot($grads(k),$grads(w)) ;
     const real sigma_d = crossterm<=0?0.0:0.125 ;
-    join($w_srcJ, -$rho*sigma_d*crossterm*$vol/($w*$w) );
+    join($w_srcJ, -$rho_t*sigma_d*crossterm*$vol/($w*$w) );
   }
 #endif
 #endif
@@ -905,11 +971,11 @@ namespace flowPsi {
   // Compressibility Correction term
   $rule apply(k_src<-
               wilcox_xi,wilcox_Mto,wilcox_om,fBetaS,k,w,sst1m,
-              rho,soundSpeed,vol)[Loci::Summation] {
+              rho_t,soundSpeed_t,vol)[Loci::Summation] {
     // Compute Sarkar Compressibility Correction with Wilcox Correction
 
     // Turbulent mach Number
-    const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
+    const real Mt2 = 2.0*$k/($soundSpeed_t*$soundSpeed_t) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
     const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
@@ -921,15 +987,15 @@ namespace flowPsi {
     const real BetaF = $sst1m.betas*$fBetaS*psi*fmt ;
 
     // destruction of k due to compressibility
-    $k_src -= BetaF*$rho*$w*$k*$vol ;
+    $k_src -= BetaF*$rho_t*$w*$k*$vol ;
   }
   $rule apply(w_src<-
               wilcox_xi,wilcox_Mto,wilcox_om,fBetaS,k,w,sst1m,
-              rho,soundSpeed,vol)[Loci::Summation] {
+              rho_t,soundSpeed_t,vol)[Loci::Summation] {
     // Compute Sarkar Compressibility Correction with Wilcox Correction
 
     // Turbulent mach Number
-    const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
+    const real Mt2 = 2.0*$k/($soundSpeed_t*$soundSpeed_t) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
     const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
@@ -941,7 +1007,7 @@ namespace flowPsi {
     const real BetaF = $sst1m.betas*$fBetaS*psi*fmt ;
 
     // Add in the omega compressibility adjustment here as well.
-    $w_src -= -BetaF*$rho*$w*$w*$vol*$wilcox_om ;
+    $w_src -= -BetaF*$rho_t*$w*$w*$vol*$wilcox_om ;
   }
 #endif
   OUTPUT_SCALAR("cell2node(k)",k) ;

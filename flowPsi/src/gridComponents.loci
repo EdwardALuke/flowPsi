@@ -1283,7 +1283,8 @@ if(req_queue.size() > 0 || self_send) {
               cerr << "wrong type in radius list for geometry of component '" << tag << "'" << endl ;
               Loci::Abort() ;
             }
-        }
+        } else
+	  fail = true ;
         if(ol.optionExists("offsets")) {
           Loci::option_value_type ovt= ol.getOptionValueType("offsets") ;
           if(ovt != Loci::LIST) {
@@ -1302,7 +1303,12 @@ if(req_queue.size() > 0 || self_send) {
               cerr << "wrong type in offset list for geometry of component '" << tag << "'" << endl ;
               Loci::Abort() ;
             }
-        }
+        } else
+	  fail = true ;
+	if(fail) {
+	  cerr << "component revolution needs to have specified 'p1', 'p2', 'radius', 'offsets'." <<endl ;
+	  Loci::Abort() ;
+	}
         if(radius.size() != offsets.size()) {
           cerr << "radius and offset should have same number of entries in geometry for component '" << tag << "'" << endl ;
           Loci::Abort() ;

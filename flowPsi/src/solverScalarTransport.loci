@@ -34,6 +34,16 @@ namespace flowPsi {
   using std::cerr ;
   using std::endl ;
   using std::ofstream ;
+
+  $type dt_multi param<real> ;
+  $rule default(dt_multi) { $dt_multi=1.0; }
+
+  $type scalarVolDT store<real> ;
+
+  $rule pointwise(scalarVolDT<-vol,dtmax,dt_multi) {
+    $scalarVolDT = $vol/real(real($dtmax)*$dt_multi) ;
+  }
+
   $type inviscid_flux(X) store<real> ;
 
   $type scalar_mdot_f store<real> ;
@@ -551,38 +561,49 @@ namespace flowPsi {
     $ci->$X_srcJ -= jdiff ;
   }
 
-  $type rhon store<real> ;
-  $type rhonp1 store<real> ;
-  $type rhonm1 store<real> ;
+  $type scalarRhon store<real> ;
+  $type scalarRhonm1 store<real> ;
+  
+  // Density at n timestep
+  $rule pointwise(scalarRhon{n,it}<-temperature{n},gagePressure{n},Rtilde{n,it},Pambient{n,it}) {
+    $scalarRhon{n,it} = ($gagePressure{n}+$Pambient{n,it})/
+		    ($Rtilde{n,it}*$temperature{n}) ;
+  }
 
+  $rule pointwise(scalarRhonm1{n,it}<-temperature{n-1},gagePressure{n-1},Rtilde{n,it},Pambient{n,it}) {
+    $scalarRhonm1{n,it} = ($gagePressure{n-1}+$Pambient{n,it})/
+		    ($Rtilde{n,it}*$temperature{n-1}) ;
+  }
+
+  
   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtau{n,it},X_src{n,it},
-                  X{n},X{n,it},rhon{n,it}),
+                  X{n},X{n,it},scalarRhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},C,timeStepSteadyState),
     parametric(scalarTransportP(X,C)) {
     real factor = $vol{n,it}/$dtau{n,it} ;
-    $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$rhon{n,it} - $X_src{n,it} ; 
+    $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$scalarRhon{n,it} - $X_src{n,it} ; 
   }
 
-   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
-                   X{n},X{n,it},X_np1{n,it},rhon{n,it}),
+   $rule pointwise(X_rhs{n,it}<-scalarVolDT{n,it},X_src{n,it},
+                   X{n},X{n,it},X_np1{n,it},scalarRhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,timeStepSchemeKEC,C),
     parametric(scalarTransportP(X,C)) {
-     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
+     const real factor = $scalarVolDT{n,it} ;
     
-     const real rn = $rhon{n,it} ;
+     const real rn = $scalarRhon{n,it} ;
      $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
    }
 
-  $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
-		  X{n-1},X{n},X{n,it},rhon{n,it},rhonm1{n,it},rhonp1{n,it}),
+  $rule pointwise(X_rhs{n,it}<-scalarVolDT{n,it},X_src{n,it},
+		  X{n-1},X{n},X{n,it},scalarRhon{n,it},scalarRhonm1{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,timeStepSchemeBDF2,C),
     parametric(scalarTransportP(X,C)) {
-     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
+    const real factor = $scalarVolDT{n,it} ;
      const real w = 0.5 ;
      const real w1 = (1.+w)*factor ;
      const real w2 = w*factor ;
-     const real rn = $rhon{n,it} ;
-     const real rnm1 = $rhonm1{n,it} ;
+     const real rn = $scalarRhon{n,it} ;
+     const real rnm1 = $scalarRhonm1{n,it} ;
      
      $X_rhs{n,it} = w1*($X{n,it}-$X{n})*rn + w2*($X{n}*rn-$X{n-1}*rnm1) -
 		      factor*$X{n,it}*(rn-rnm1) - $X_src{n,it} ;
@@ -651,36 +672,36 @@ namespace flowPsi {
       $X_srcJ += li->$X_fjm ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
     parametric(scalarTransportP(X,C)) {
 
     // compute diagonal block d from srcJ (input in d) time step
-    const real sd = $rhon{n,it}*($vol{n,it}/$dtau{n,it}) ;
+    const real sd = $scalarRhon{n,it}*($vol{n,it}/$dtau{n,it}) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
     if($iblank{n,it} > 1) 
       $X_D{n,it} = 1 ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeKEC{n,it},X_srcJ{n,it},C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeKEC{n,it},X_srcJ{n,it},C),
      parametric(scalarTransportP(X,C)) {
 
     // compute diagonal block d from srcJ (input in d) time step
-    const real sd = (2.*$rhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
+    const real sd = (2.*$scalarRhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
     if($iblank{n,it} > 1) 
       $X_D{n,it} = 1 ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it},rhonm1{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeBDF2{n,it},X_srcJ{n,it},C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it},scalarRhonm1{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeBDF2{n,it},X_srcJ{n,it},C),
      parametric(scalarTransportP(X,C)) {
 
      const real factor = $vol{n,it}/real($dtau{n,it}) ;
      const real w = 0.5 ;
      const real w1 = (1.+w)*factor ;
-     const real rn = $rhon{n,it} ;
-     const real rnm1 = $rhonm1{n,it} ;
+     const real rn = $scalarRhon{n,it} ;
+     const real rnm1 = $scalarRhonm1{n,it} ;
      const real sd = w1*rn+factor*(rn-rnm1) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
@@ -1097,39 +1118,37 @@ namespace flowPsi {
     $ci->$X_srcJ -= jdiff ;
   }
 
-  $type rhon store<real> ;
-
   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtau{n,it},X_src{n,it},
-                  X{n},X{n,it},rhon{n,it}),
+                  X{n},X{n,it},scalarRhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},C,timeStepSteadyState),
     parametric(scalarTransport(X,C)) {
     real factor = $vol{n,it}/$dtau{n,it} ;
-    $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$rhon{n,it} - $X_src{n,it} ; 
+    $X_rhs{n,it} = factor*($X{n,it}-$X{n})*$scalarRhon{n,it} - $X_src{n,it} ; 
   }
 
-   $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
-                   X{n},X{n,it},X_np1{n,it},rhon{n,it}),
+   $rule pointwise(X_rhs{n,it}<-scalarVolDT{n,it},X_src{n,it},
+                   X{n},X{n,it},X_np1{n,it},scalarRhon{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,timeStepSchemeKEC,C),
     parametric(scalarTransport(X,C)) {
-     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
+     const real factor = $scalarVolDT{n,it} ;
     
-     const real rn = $rhon{n,it} ;
+     const real rn = $scalarRhon{n,it} ;
      $X_rhs{n,it} = factor*(($X_np1{n,it}-$X{n})*rn) - $X_src{n,it} ;
    }
 
-  $rule pointwise(X_rhs{n,it}<-vol{n,it},dtmax{n,it},X_src{n,it},
-		  X{n-1},X{n},X{n,it},rhon{n,it},rhonm1{n,it},rhonp1{n,it}),
+  $rule pointwise(X_rhs{n,it}<-scalarVolDT{n,it},X_src{n,it},
+		  X{n-1},X{n},X{n,it},scalarRhon{n,it},scalarRhonm1{n,it}),
     constraint(X_src{n,it},geom_cells{n,it},timeStepAccurate,timeStepSchemeBDF2,C),
     parametric(scalarTransport(X,C)) {
-     const real factor = $vol{n,it}/real($dtmax{n,it}) ;
-     const real w = 0.5 ;
-     const real w1 = (1.+w)*factor ;
-     const real w2 = w*factor ;
-     const real rn = $rhon{n,it} ;
-     const real rnm1 = $rhonm1{n,it} ;
+    const real factor = $scalarVolDT{n,it};
+    const real w = 0.5 ;
+    const real w1 = (1.+w)*factor ;
+    const real w2 = w*factor ;
+    const real rn = $scalarRhon{n,it} ;
+    const real rnm1 = $scalarRhonm1{n,it} ;
      
-     $X_rhs{n,it} = w1*($X{n,it}-$X{n})*rn + w2*($X{n}*rn-$X{n-1}*rnm1) -
-		      factor*$X{n,it}*(rn-rnm1) - $X_src{n,it} ;
+    $X_rhs{n,it} = w1*($X{n,it}-$X{n})*rn + w2*($X{n}*rn-$X{n-1}*rnm1) -
+		     factor*$X{n,it}*(rn-rnm1) - $X_src{n,it} ;
   }
 
 
@@ -1197,36 +1216,36 @@ namespace flowPsi {
       $X_srcJ += li->$X_fjm ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it}),constraint(X_srcJ{n,it},timeStepSteadyState,C),
     parametric(scalarTransport(X,C)) {
 
     // compute diagonal block d from srcJ (input in d) time step
-    const real sd = $rhon{n,it}*($vol{n,it}/$dtau{n,it}) ;
+    const real sd = $scalarRhon{n,it}*($vol{n,it}/$dtau{n,it}) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
     if($iblank{n,it} > 1) 
       $X_D{n,it} = 1 ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeKEC{n,it},X_srcJ{n,it},C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeKEC{n,it},X_srcJ{n,it},C),
      parametric(scalarTransport(X,C)) {
 
     // compute diagonal block d from srcJ (input in d) time step
-    const real sd = (2.*$rhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
+    const real sd = (2.*$scalarRhon{n,it})*($vol{n,it}/$dtau{n,it}) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
     if($iblank{n,it} > 1) 
       $X_D{n,it} = 1 ;
   }
 
-  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},rhon{n,it},rhonm1{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeBDF2{n,it},X_srcJ{n,it},C),
+  $rule pointwise(X_D{n,it}<-X_srcJ{n,it},dtau{n,it},vol{n,it},iblank{n,it},scalarRhon{n,it},scalarRhonm1{n,it}),constraint(timeStepAccurate{n,it},timeStepSchemeBDF2{n,it},X_srcJ{n,it},C),
      parametric(scalarTransport(X,C)) {
 
      const real factor = $vol{n,it}/real($dtau{n,it}) ;
      const real w = 0.5 ;
      const real w1 = (1.+w)*factor ;
-     const real rn = $rhon{n,it} ;
-     const real rnm1 = $rhonm1{n,it} ;
+     const real rn = $scalarRhon{n,it} ;
+     const real rnm1 = $scalarRhonm1{n,it} ;
      const real sd = w1*rn+factor*(rn-rnm1) ;
 
     $X_D{n,it} = -$X_srcJ{n,it} + sd ;
