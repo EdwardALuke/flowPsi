@@ -581,8 +581,8 @@ namespace flowPsi {
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
     kec_flux($iflux,pg_ll,t_ll,u_ll,pg_r,t_r,u_r,an,coef,
 	     $Pambient,$Rtilde,$gamma,$us_n) ;
-//#define CUBIC_SCHEME
-#define QUICK_SCHEME
+#define CUBIC_SCHEME
+//#define QUICK_SCHEME
 //#define WENO_SCHEME
 #ifdef CUBIC_SCHEME
     const double alpha0 =  1./3. ;
