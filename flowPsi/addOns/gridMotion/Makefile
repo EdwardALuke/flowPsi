@@ -40,7 +40,7 @@ VOGDEFOBJS =  vogdeform.o \
 	couplingLevel.o \
 	constrainedSurfaces.o
 
-MODULE_NAME = gridMotionFPSI
+MODULE_NAME = gridMotion
 
 LOCAL_LIBS = 
 
@@ -48,12 +48,12 @@ JUNK = *~  core ti_files ii_files rii_files
 
 LIB_OBJS=$(OBJS:.o=_lo.o)
 
-$(MODULE_NAME)_m.so: $(LIB_OBJS)
-	$(SHARED_LD) $(SHARED_LD_FLAGS) $(MODULE_NAME)_m.so $(LIB_FLAGS) $(LIB_OBJS) $(LIBS)
-	mv $(MODULE_NAME)_m.so ../../lib/$(MODULE_NAME)_m.so
+$(MODULE_NAME)FPSI_m.so: $(LIB_OBJS)
+	$(SHARED_LD) $(SHARED_LD_FLAGS) $(MODULE_NAME)FPSI_m.so $(LIB_FLAGS) $(LIB_OBJS) $(LIBS)
+	mv $(MODULE_NAME)FPSI_m.so ../../lib/$(MODULE_NAME)FPSI_m.so
 
 
-all: $(MODULE_NAME)_m.so vogdeform
+all: $(MODULE_NAME)FPSI_m.so vogdeform
 
 
 vogdeform: $(VOGDEFOBJS)
@@ -62,14 +62,14 @@ vogdeform: $(VOGDEFOBJS)
 FRC : 
 
 clean:
-	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(VOGDEFOBJS) $(JUNK)
+	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)FPSI_m.so $(VOGDEFOBJS) $(JUNK)
 
 LOCI_FILES = $(wildcard *.loci)
 LOCI_LPP_FILES = $(LOCI_FILES:.loci=.cc)
 
 distclean: 
-	rm $(DEPEND_FILES)
-	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(VOGDEFOBJS) $(JUNK) $(LOCI_LPP_FILES)
+	rm -fr $(DEPEND_FILES)
+	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)FPSI_m.so $(VOGDEFOBJS) $(JUNK) $(LOCI_LPP_FILES)
 
 DEPEND_FILES=$(subst .o,.d,$(OBJS)) 
 
