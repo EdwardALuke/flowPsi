@@ -99,6 +99,7 @@
 #include "readGrid.h"
 #include "bcTools.h"
 #include "kOmega_param.h"
+#include "periodic.h"
 
 $include "FVM.lh"
 $include "flowPsi.lh"
@@ -188,8 +189,11 @@ namespace flowPsi {
 
   $rule pointwise(u_avg<-vect3dFavreMean(u),u)
   { $u_avg =$vect3dFavreMean(u) ;}
-  $rule pointwise(cr->u_avg<-pmap->cl->u_avg)
-  {$cr->$u_avg = $pmap->$cl->$u_avg ;}
+  $rule pointwise(cr->u_avg<-pmap->cl->u_avg,pmap->ref->periodicTransform)
+  { 
+    const rigid_transform &frame = $pmap->$ref->$periodicTransform ;
+    $cr->$u_avg = frame.rotate_vec($pmap->$cl->$u_avg) ;
+  }
   $rule pointwise(u_avg_f<-(cl,cr)->(u_avg,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
     $u_avg_f = rvols*($cr->$vol*$cl->$u_avg+$cl->$vol*$cr->$u_avg) ;
