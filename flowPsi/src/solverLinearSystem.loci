@@ -375,8 +375,14 @@ namespace flowPsi {
     }
   }
 
+  $type pseudo_cflmax param<real> ;
+  
+  $rule default(pseudo_cflmax) {
+    $pseudo_cflmax = 10 ;
+  }
+  
   $rule pointwise(fluid_D<-Pambient,vol,dtau,srcJ,u,gagePressure,temperature,
-		  Rtilde,gamma,Eta_p,iblank),
+		  Rtilde,gamma,Eta_p,iblank,pseudo_cflmax,cflpdt),
     constraint(geom_cells,timeStepAccurate,timeStepSchemeBDF2), inplace(fluid_D|srcJ) {
     
     for(int i=0;i<5;++i)
@@ -394,7 +400,9 @@ namespace flowPsi {
     const real fT = rT*q ;
     const real g = $gamma ;
     const real fP = (1./(g-1) + rP*q) ;
-    const real reta = 1./$Eta_p;
+    const real pseudo_dt = $pseudo_cflmax/$cflpdt ;
+    const real w = 1./(1.+pseudo_dt/$dtau) ;
+    const real reta = 1./(1.+w*($Eta_p-1.)) ; //1./$Eta_p;
     const real a2 = g*Rt*T ;
     const real pterm = (1.-reta)*(g-1.)/a2 ;
     $fluid_D[0][0] += coef*rT ;
