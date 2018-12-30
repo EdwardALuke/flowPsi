@@ -105,11 +105,41 @@ namespace flowPsi {
       $Mlim2 = $etaT*2.*M2/(1.-2.*M2) ;
   }
   
-  $rule pointwise(Eta_p<-Mref,Minf,Mlim2),
-    constraint(geom_cells) {
-    real M = $Mref ;
-    real M2 = 2.*min<real>(0.25,M*M) ;
-    $Eta_p = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
+  $type Eta_l store<real> ;
+  $rule pointwise(Eta_l<-Mref,Minf,Mlim2), constraint(geom_cells) {
+    real M2 = 2.*min<real>(0.25,$Mref*$Mref) ;
+    $Eta_l = max(M2/(1.-M2),$Mlim2) ;
+  }
+
+  $rule pointwise(cr->Eta_l<-pmap->cl->Eta_l) {
+    $cr->$Eta_l = $pmap->$cl->$Eta_l ;
+  }
+
+  $type Eta_ll store<real> ;
+  $rule pointwise(Eta_ll<-Eta_l,(lower->cl->Eta_l,upper->cr->Eta_l)),constraint(geom_cells) {
+    real b = $Eta_l ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      b = max(b,$lower[i]->$cl->$Eta_l) ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      b = max(b,$upper[i]->$cr->$Eta_l) ;
+    $Eta_ll = b ;
+  }
+
+  $rule pointwise(cr->Eta_ll<-pmap->cl->Eta_ll) {
+    $cr->$Eta_ll = $pmap->$cl->$Eta_ll ;
+  }
+
+  $rule pointwise(Eta_p<-Eta_ll,(lower->cl->Eta_ll,upper->cr->Eta_ll)),constraint(geom_cells) {
+    real b = $Eta_ll ;
+    int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i)
+      b = max(b,$lower[i]->$cl->$Eta_ll) ;
+    int usz = $upper.size() ;
+    for(int i=0;i<usz;++i)
+      b = max(b,$upper[i]->$cr->$Eta_ll) ;
+    $Eta_p = b ;
   }
 
   $rule pointwise(Eta_bc<-ci->(u,soundSpeed),area,Mlim2) {
