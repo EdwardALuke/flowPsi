@@ -108,19 +108,19 @@ namespace flowPsi {
   $rule pointwise(Eta_p<-Mref,Minf,Mlim2),
     constraint(geom_cells) {
     real M = $Mref ;
-    real M2 = min<real>(0.5,M*M) ;
+    real M2 = 2.*min<real>(0.25,M*M) ;
     $Eta_p = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
   }
 
   $rule pointwise(Eta_bc<-ci->(u,soundSpeed),area,Mlim2) {
     real M = norm($ci->$u)/$ci->$soundSpeed ;
-    real M2 = min<real>(0.5,M*M) ;
+    real M2 = 2.*min<real>(0.25,M*M) ;
     $Eta_bc = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
   }
   
   $rule pointwise(Eta_pf<-ci->u,ci->soundSpeed,Minf,Mlim2) {
     real M = norm($ci->$u)/$ci->$soundSpeed ;
-    real M2 = min<real>(0.5,M*M) ;
+    real M2 = 2.*min<real>(0.25,M*M) ;
     $Eta_pf = min<real>(1.0,max(M2/(1.-M2),$Mlim2)) ;
   } ;
 		  

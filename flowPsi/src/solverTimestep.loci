@@ -258,21 +258,32 @@ namespace flowPsi {
   // Compute local timestep by using linearization of change in pressure and temperature by
   // urelax factor
   // using  \delta q = \delta t * \partial q/\partial Q src
-  $rule pointwise(dtau<-vol,src,temperature,gagePressure,u,gamma,urelax,dtcfl,Pambient,Rtilde) {
+  $rule pointwise(dtau<-vol,src,temperature,gagePressure,u,gamma,urelax,dtcfl,Pambient,Rtilde,Eta_p) {
     real dt = $dtcfl ;
-    const real q = 0.5*dot($u,$u) ;
+
+    const real rvol = 1./$vol ;
+
     const real p = $gagePressure+$Pambient ;
     const real T = $temperature ;
-    const real gm1 = $gamma -1. ;
-    const real coeft = T/(p*gm1) ;
-    const real coeft2 = T*$Rtilde*gm1 ;
-    const real rvol = 1./$vol ;
-    real factor = rvol*(q*$src[0]-$u.x*$src[1]-$u.y*$src[2]-$u.z*$src[3]+
-			  $src[4]) ;
-    const real trate = coeft*(factor - coeft2*$src[0]) ;
-    dt = min(dt,$urelax*T/(fabs(trate)+1e-30)) ;
-    const real prate = factor/gm1 ;
-    dt = min(dt,$urelax*p/(fabs(prate)+1e-30)) ;
+    const real Rt = $Rtilde ;
+    const real rP = 1./(Rt*T) ;
+    const real rho = ($gagePressure+$Pambient)*rP ;
+    const real rT = -rho/T ;
+    const real g = $gamma ;
+    const vect3d U = $u ;
+    const real q = 0.5*dot(U,U) ;
+    const real fT = rT*q ;
+    const real fP = (1./(g-1) + rP*q) ;
+    const real reta = 1./$Eta_p;
+    const real a2 = g*Rt*T ;
+    const real pterm = (1.-reta)*(g-1.)/a2 ;
+    const real cterm = fP*rT*reta-fT*rP*reta ;
+    const real q2 = 2.*q ;
+    const real dsu = $src[1]*U.x + $src[2]*U.y + $src[3]*U.z ;
+    const real dtemp = rvol*($src[0]*(fP*rT*reta+fT*pterm)+(dsu-$src[4]-q2*$src[0])*(rT*(pterm+rP*reta)))/(cterm*rT) ;
+    dt = min(dt,$urelax*T/(fabs(dtemp)+1e-30)) ;
+    const real dp = rvol*(rT*(q2*$src[0]-dsu+$src[4])-fT*$src[0]) ;
+    dt = min(dt,$urelax*p/(fabs(dp)+1e-30)) ;
     $dtau = dt ;
   }
 
