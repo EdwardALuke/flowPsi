@@ -32,6 +32,9 @@
 #include <fcntl.h>
 
 #include <vector>
+#ifdef LOCI_V5
+#include <GLoci.h>
+#endif
 
 using std::vector ;
 
@@ -465,10 +468,16 @@ int main(int ac, char *av[]) {
       exit(-1) ;
     }
     restartDir += "/" ;
+#ifdef LOCI_V5
+    gParam<string> icfile ;
+    *icfile = restartDir ;
+    facts.create_gfact("icfile",icfile) ;
+#else
     param<string> icfile ;
 
     *icfile = restartDir ;
     facts.create_fact("icfile",icfile) ;
+#endif
   }
 
   // Dump out parameters from fact database
