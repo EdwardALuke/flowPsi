@@ -156,6 +156,13 @@ $rule constraint(componentMRFRotation_X,componentMRFStationary_X<-volumeTag(X),c
     }
   }
 
+  $rule singleton(componentMRFRotationAxis_X,componentMRFRotationCenter_X,
+                  componentMRFRotationSpeed_X<-componentMRF,componentName_X),
+    constraint(componentMRFStationary_X), parametric(volumeTag(X)) {
+    $componentMRFRotationAxis_X = vect3d(1,0,0) ;
+    $componentMRFRotationCenter_X= vect3d(0,0,0) ;
+    $componentMRFRotationSpeed_X = 0 ;
+  }
   // First component is the 1/2 degree revolution, second is the delta
   // t required to get the half degree revolution
   $type componentMRFData_X blackbox<std::pair<componentXform,real> > ;
