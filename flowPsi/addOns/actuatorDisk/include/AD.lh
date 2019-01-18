@@ -1,0 +1,25 @@
+
+namespace flowPsi {
+  struct actuatorDisk {
+    real thrust ;
+    real torque ;
+    vect3d center ;
+    vect3d axis ;
+    real hub_radius ;
+    real rotor_radius ;
+    real thickness ;
+    int type ;
+  } ;
+  typedef std::vector<actuatorDisk> actuatorDiskList ;
+}
+
+$type actuatorDiskRegions param<Loci::options_list> ;
+$type ActuatorDiskList blackbox<flowPsi::actuatorDiskList>  ;
+$type ActuatorID store<int> ;
+$type ActuatorWeightThrust store<flowPsi::real> ;
+$type ActuatorWeightTorque store<flowPsi::real> ;
+$type ActuatorThrustFactor param< std::vector<flowPsi::real> >;
+$type ActuatorTorqueFactor param< std::vector<flowPsi::real> > ;
+$type bodyForce store<flowPsi::vect3d> ;
+$type bodyForce_f store<flowPsi::vect3d> ;
+

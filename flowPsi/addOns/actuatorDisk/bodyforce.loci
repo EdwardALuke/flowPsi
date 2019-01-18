@@ -1,0 +1,235 @@
+#include <iostream>
+#include <Loci.h>
+#include <flowTypes.h>
+#include <flowPsiIO.h>
+$include "flowPsi.lh"
+$include "AD.lh"
+
+using std::cerr ;
+using std::endl ;
+
+namespace flowPsi {
+
+
+  $rule optional(actuatorDiskRegions) {}
+
+  $rule singleton(ActuatorDiskList<-actuatorDiskRegions) {
+    std::vector<actuatorDisk> adl ;
+    const options_list &ol = $actuatorDiskRegions ;
+
+    Loci::options_list::option_namelist nl = ol.getOptionNameList() ;
+    Loci::options_list::option_namelist::const_iterator ii ;
+    for(ii=nl.begin();ii!=nl.end();++ii) {
+      string n = *ii ;
+      Loci::option_value_type vt = ol.getOptionValueType(n) ;
+      Loci::option_values ov = ol.getOption(n) ;
+      if(vt == Loci::FUNCTION) {
+	string name ;
+	ov.get_value(name) ;
+	options_list::arg_list value_list ;
+	ov.get_value(value_list) ;
+	options_list of ;
+	of.Input(value_list) ;
+
+	actuatorDisk ad ;
+	ad.type = 0 ;
+	if(name == "uniform") {
+	  ad.type = 0 ;
+	} else if(name == "goldstein") {
+	  ad.type = 1 ;
+	} else {
+	  cerr << "only uniform or goldstein actuator disks types supported"
+	       << endl ;
+	} 
+	
+        ad.axis= vect3d(1,0,0) ;
+        if(of.optionExists("axis")){
+	  of.getOptionUnits("axis","",ad.axis) ;
+	  ad.axis = ad.axis/(norm(ad.axis)+1e-30) ;
+        } else {
+	  cerr << "warning, actuator disk missing definition of 'axis'"
+	       << endl ;
+	}
+       
+        ad.center = vect3d(0,0,0) ;
+        if(of.optionExists("center")) {
+	  of.getOptionUnits("center","m",ad.center) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'center'"
+	       << endl ;
+	}
+
+        ad.hub_radius = 0.0 ;
+        if(of.optionExists("hub_radius")) {
+	  of.getOptionUnits("hub_radius","m",ad.hub_radius) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'hub_radius'"
+	       << endl ;
+	}
+	
+        ad.thrust = 0.0 ;
+        if(of.optionExists("thrust")) {
+	  of.getOptionUnits("thrust","N",ad.thrust) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'thrust'"
+	       << endl ;
+	}
+	
+
+        ad.torque = 0.0 ;
+        if(of.optionExists("torque")) {
+	  of.getOptionUnits("torque","N*m",ad.torque) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'torque'"
+	       << endl ;
+        }
+
+        ad.rotor_radius = 1.0 ;
+        if(of.optionExists("rotor_radius")) {
+	  of.getOptionUnits("rotor_radius","m",ad.rotor_radius) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'rotor_radius'"
+	       << endl ;
+        }
+ 
+        ad.thickness = 0.1 ;
+        if(of.optionExists("thickness")) {
+	  of.getOptionUnits("thickness","m",ad.thickness) ;
+        } else {
+	  cerr << "warning actuator disk missing definition of 'thickness'"
+	       << endl ;
+        }
+	
+	adl.push_back(ad) ;
+      } else {
+	cerr << "error in actuator disk specification" << endl ;
+      }
+    }
+    $ActuatorDiskList = adl ;
+  }
+
+  $rule pointwise(ActuatorWeightThrust,ActuatorWeightTorque,ActuatorID<-
+		  cellcenter,ActuatorDiskList) {
+    int id = -1 ;
+    for(size_t i=0;i<$ActuatorDiskList.size();++i) {
+      vect3d pt = $cellcenter - $ActuatorDiskList[i].center ;
+      real dist = dot(pt,$ActuatorDiskList[i].axis) ;
+      if(dist < 0 || dist > $ActuatorDiskList[i].thickness)
+	continue ;
+      real r = norm(pt-dist*$ActuatorDiskList[i].axis) ;
+      if( r < $ActuatorDiskList[i].hub_radius ||
+	  r > $ActuatorDiskList[i].rotor_radius )
+	continue ;
+      if(id != -1) {
+	cerr << "overlapping actuator disks!" << endl ;
+      }
+      id = i ;
+      $ActuatorWeightThrust = 1 ;
+      $ActuatorWeightTorque = 1 ;
+      if($ActuatorDiskList[i].type == 1) {
+	real rp = r/$ActuatorDiskList[i].rotor_radius ;
+	real rhp = $ActuatorDiskList[i].hub_radius/$ActuatorDiskList[i].rotor_radius ;
+	real rst = (rp-rhp)/(1.-rhp) ;
+	$ActuatorWeightThrust = rst*sqrt(1.-rst) ;
+	$ActuatorWeightTorque = $ActuatorWeightThrust/(rst*(1-rhp)+rhp) ;
+      }
+    }
+    $ActuatorID = id ;
+  }
+
+  template <class T> struct vectorSumOp {
+    void operator()(T &lhs, const T &rhs) {
+      const int sz = min(lhs.size(),rhs.size()) ;
+      for(int i=0;i<sz;++i) {
+	lhs[i] += rhs[i] ;
+      }
+    }
+  } ;
+
+  $rule unit(ActuatorThrustFactor <- ActuatorDiskList) {
+    std::vector<real> tmp($ActuatorDiskList.size(),0) ;
+    $ActuatorThrustFactor.swap(tmp) ;
+  }
+
+  $rule apply(ActuatorThrustFactor<-ActuatorWeightThrust,ActuatorID,vol)[vectorSumOp] {
+    int id = $ActuatorID ;
+    if(id>=0) {
+      $ActuatorThrustFactor[id] += $vol*$ActuatorWeightThrust ;
+    }
+  }
+  
+  $rule unit(ActuatorTorqueFactor <- ActuatorDiskList) {
+    std::vector<real> tmp($ActuatorDiskList.size(),0) ;
+    $ActuatorTorqueFactor.swap(tmp) ;
+  }  
+
+  $rule apply(ActuatorTorqueFactor<-ActuatorWeightTorque,ActuatorID,vol,ActuatorDiskList,cellcenter)[vectorSumOp] {
+    int id = $ActuatorID ;
+    if(id>=0) {
+      vect3d pt = $cellcenter - $ActuatorDiskList[id].center ;
+      real dist = dot(pt,$ActuatorDiskList[id].axis) ;
+      real r = norm(pt-dist*$ActuatorDiskList[id].axis) ;
+      $ActuatorTorqueFactor[id] += r*$vol*$ActuatorWeightTorque ;
+    }
+  }
+
+  $type firstOrderCells store<char> ;
+  $rule apply((cl,cr)->firstOrderCells<-(cl,cr)->ActuatorID)[Loci::Maximum],
+  constraint((cl,cr)->geom_cells) {
+    if(min($cl->$ActuatorID,$cr->$ActuatorID) < 0) {
+      char tmp = 1 ;
+      join($cl->$firstOrderCells,tmp) ;
+      join($cr->$firstOrderCells,tmp) ;
+    }
+  }
+  
+  $rule pointwise(bodyForce<-ActuatorID,cellcenter,ActuatorDiskList,
+		  ActuatorWeightThrust,ActuatorThrustFactor,
+		  ActuatorWeightTorque,ActuatorTorqueFactor) {
+    vect3d bf(0,0,0) ;
+    int id = $ActuatorID ;
+    if(id >=0) {
+      const vect3d pt = $cellcenter - $ActuatorDiskList[id].center ;
+      const vect3d n = $ActuatorDiskList[id].axis ;
+      const real dist = dot(pt,n) ;
+      const vect3d radial = pt-dist*n ;
+      vect3d nt = cross(n,radial) ;
+      nt *= 1./max(norm(nt),1e-30) ;
+      const real tr = $ActuatorDiskList[id].thrust ;
+      const real tq = $ActuatorDiskList[id].torque ;
+      bf = n*tr*$ActuatorWeightThrust/$ActuatorThrustFactor[id] ;
+      bf += nt*tq*$ActuatorWeightTorque/$ActuatorTorqueFactor[id] ;
+    }
+    $bodyForce = bf ;
+  }
+
+  
+  $rule apply(src<- bodyForce,vol,u)[Loci::Summation],
+    constraint(bodyForce,geom_cells) {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    $src[mi+0] += $bodyForce.x*$vol ;
+    $src[mi+1] += $bodyForce.y*$vol ;
+    $src[mi+2] += $bodyForce.z*$vol ;
+    $src[ei] += dot($bodyForce,$u)*$vol ;
+  }
+
+  // Add source term jacobian (energy dependency on u)
+  // Since both primitive variable formulations are in terms of u the
+  // jacobian is the same.
+  $rule apply(srcJ<-bodyForce,vol)[Loci::Summation] {
+    const int mi = 1 ;
+    const int ei = 4 ;
+    $srcJ[ei][mi+0] += $vol*$bodyForce.x ;
+    $srcJ[ei][mi+1] += $vol*$bodyForce.y ;
+    $srcJ[ei][mi+2] += $vol*$bodyForce.z ;
+  }
+
+  $rule pointwise(bodyForce_f),constraint(ci->vol) {
+    $bodyForce_f = vect3d(0,0,0) ;
+  }
+
+  
+  OUTPUT_VECTOR("cell2node_v3d(bodyForce)",bodyForce) ;
+}
+
