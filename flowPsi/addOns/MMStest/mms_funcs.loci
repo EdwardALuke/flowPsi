@@ -69,7 +69,7 @@ namespace Loci {
 $type stime_mms param<real> ;
 
 $rule singleton(stime_mms{n}<-stime{n},dtmax{n}) {
-  $stime_mms{n} = $stime{n}+$dtmax{n} ;
+  $stime_mms{n} = $stime{n}+real($dtmax{n}) ;
 }
 
 // Determine if the prescribed function is time dependent.
@@ -102,19 +102,19 @@ $rule singleton(MMS_rhoFunc<-operatorDefs) {
 $rule pointwise(mmsRho(location)<-location,MMS_rhoFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $mmsRho(location) = ($MMS_rhoFunc)->evaluate(varmap) ;
 }
 
 $rule pointwise(mmsRho(location)<-location,stime_mms,MMS_rhoFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $mmsRho(location) = ($MMS_rhoFunc)->evaluate(varmap) ;
 }
 
@@ -127,9 +127,9 @@ $rule pointwise(mmsVelocity(location)<-location,MMS_velFunc),
   constraint(MMSSteadyState,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($MMS_velFunc)->expr_list.begin() ;
   $mmsVelocity(location).x = (*li)->evaluate(varmap) ;
@@ -143,10 +143,10 @@ $rule pointwise(mmsVelocity(location)<-location,stime_mms,MMS_velFunc),
   constraint(MMSTimeDependent,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($MMS_velFunc)->expr_list.begin() ;
   $mmsVelocity(location).x = (*li)->evaluate(varmap) ;
@@ -165,9 +165,9 @@ $rule pointwise(mmsPressure(location)<-location,MMS_pFunc),
   constraint(MMSSteadyState,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $mmsPressure(location) = ($MMS_pFunc)->evaluate(varmap) ;
 }
 
@@ -176,10 +176,10 @@ $rule pointwise(mmsPressure(location)<-location,stime_mms,MMS_pFunc),
   constraint(MMSTimeDependent,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $mmsPressure(location) = ($MMS_pFunc)->evaluate(varmap) ;
 }
 
@@ -255,9 +255,9 @@ $rule singleton(meanFlowSrcFunc<-flowOperator,operatorDefs) {
 
 $rule pointwise(mms::dist_noslip<-cellcenter,wallDistanceFunction) {
   map<string,double> varmap ;
-  varmap["x"] = $cellcenter.x ;
-  varmap["y"] = $cellcenter.y ;
-  varmap["z"] = $cellcenter.z ;
+  varmap["x"] = realToDouble($cellcenter.x) ;
+  varmap["y"] = realToDouble($cellcenter.y) ;
+  varmap["z"] = realToDouble($cellcenter.z) ;
   $dist_noslip = ($wallDistanceFunction)->evaluate(varmap) ;
 }
 // SST blending functions
@@ -266,25 +266,25 @@ $type bF2               store<flowPsi::real> ;
 
 $rule pointwise(mms::sst::bF2<-cellcenter,SSTBlendingF2Function) {
   map<string,double> varmap ;
-  varmap["x"] = $cellcenter.x ;
-  varmap["y"] = $cellcenter.y ;
-  varmap["z"] = $cellcenter.z ;
+  varmap["x"] = realToDouble($cellcenter.x) ;
+  varmap["y"] = realToDouble($cellcenter.y) ;
+  varmap["z"] = realToDouble($cellcenter.z) ;
   $bF2 = ($SSTBlendingF2Function)->evaluate(varmap) ;
 }
 $rule pointwise(mms::sst::bF1<-cellcenter,SSTBlendingF1Function) {
   map<string,double> varmap ;
-  varmap["x"] = $cellcenter.x ;
-  varmap["y"] = $cellcenter.y ;
-  varmap["z"] = $cellcenter.z ;
+  varmap["x"] = realToDouble($cellcenter.x) ;
+  varmap["y"] = realToDouble($cellcenter.y) ;
+  varmap["z"] = realToDouble($cellcenter.z) ;
   $bF1 = ($SSTBlendingF1Function)->evaluate(varmap) ;
 }
   
 $rule pointwise(massGeneralSrc(location)<-location,meanFlowSrcFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   
@@ -294,10 +294,10 @@ $rule pointwise(massGeneralSrc(location)<-location,meanFlowSrcFunc),
 $rule pointwise(massGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   
@@ -308,9 +308,9 @@ $rule pointwise(momentumGeneralSrc(location)<-location,meanFlowSrcFunc),
   constraint(MMSSteadyState,location) {
   // Momemtum source term  in  Kg/(m^2 sec^2)
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   li++ ;
@@ -325,10 +325,10 @@ $rule pointwise(momentumGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc
   constraint(MMSTimeDependent,location) {
   // Momemtum source term  in  Kg/(m^2 sec^2)
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   
@@ -344,9 +344,9 @@ $rule pointwise(momentumGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc
 $rule pointwise(energyGeneralSrc(location)<-location,meanFlowSrcFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   
@@ -361,10 +361,10 @@ $rule pointwise(energyGeneralSrc(location)<-location,meanFlowSrcFunc),
 $rule pointwise(energyGeneralSrc(location)<-location,stime_mms,meanFlowSrcFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   Loci::expression::exprList::const_iterator li ;
   li = ($meanFlowSrcFunc)->expr_list.begin() ;
   
@@ -393,9 +393,9 @@ $rule pointwise(mms_k(location)<-location,MMS_tkeFunc),
   constraint(MMSSteadyState,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $mms_k(location) = ($MMS_tkeFunc)->evaluate(varmap) ;
 }
 
@@ -404,10 +404,10 @@ $rule pointwise(mms_k(location)<-location,stime_mms,MMS_tkeFunc),
   constraint(MMSTimeDependent,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $mms_k(location) = ($MMS_tkeFunc)->evaluate(varmap) ;
 }
 
@@ -415,9 +415,9 @@ $rule pointwise(mms_w(location)<-location,MMS_omegaFunc),
   constraint(MMSSteadyState,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $mms_w(location) = ($MMS_omegaFunc)->evaluate(varmap) ;
 }
 
@@ -426,10 +426,10 @@ $rule pointwise(mms_w(location)<-location,stime_mms,MMS_omegaFunc),
   constraint(MMSTimeDependent,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $mms_w(location) = ($MMS_omegaFunc)->evaluate(varmap) ;
 }
 
@@ -455,19 +455,19 @@ $rule singleton(tkeSrcFunc<-tkeEqnOperator,operatorDefs) {
 $rule pointwise(rkGeneralSrc(location)<-location,tkeSrcFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $rkGeneralSrc(location) = ($tkeSrcFunc)->evaluate(varmap) ;
 }
 
 $rule pointwise(rkGeneralSrc(location)<-location,stime_mms,tkeSrcFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $rkGeneralSrc(location) = ($tkeSrcFunc)->evaluate(varmap) ;
 }
 
@@ -492,19 +492,19 @@ $rule singleton(omegaSrcFunc<-omegaEqnOperator,operatorDefs) {
 $rule pointwise(rwGeneralSrc(location)<-location,omegaSrcFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $rwGeneralSrc(location) = ($omegaSrcFunc)->evaluate(varmap) ;
 }
 
 $rule pointwise(rwGeneralSrc(location)<-location,stime_mms,omegaSrcFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $rwGeneralSrc(location) = ($omegaSrcFunc)->evaluate(varmap) ;
 }
 
@@ -519,9 +519,9 @@ $rule pointwise(mms_nu_t(location)<-location,MMS_nu_tFunc),
   constraint(MMSSteadyState,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $mms_nu_t(location) = ($MMS_nu_tFunc)->evaluate(varmap) ;
 }
 
@@ -530,10 +530,10 @@ $rule pointwise(mms_nu_t(location)<-location,stime_mms,MMS_nu_tFunc),
   constraint(MMSTimeDependent,location)
 {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $mms_nu_t(location) = ($MMS_nu_tFunc)->evaluate(varmap) ;
 }
 
@@ -559,19 +559,19 @@ $rule singleton(SASrcFunc<-SAOperator,operatorDefs) {
 $rule pointwise(SAGeneralSrc(location)<-location,SASrcFunc),
   constraint(MMSSteadyState,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
   $SAGeneralSrc(location) = ($SASrcFunc)->evaluate(varmap) ;
 }
 
 $rule pointwise(SAGeneralSrc(location)<-location,stime_mms,SASrcFunc),
   constraint(MMSTimeDependent,location) {
   map<string,double> varmap ;
-  varmap["x"] = $location.x ;
-  varmap["y"] = $location.y ;
-  varmap["z"] = $location.z ;
-  varmap["t"] = $stime_mms ;
+  varmap["x"] = realToDouble($location.x) ;
+  varmap["y"] = realToDouble($location.y) ;
+  varmap["z"] = realToDouble($location.z) ;
+  varmap["t"] = realToDouble($stime_mms) ;
   $SAGeneralSrc(location) = ($SASrcFunc)->evaluate(varmap) ;
 }
 

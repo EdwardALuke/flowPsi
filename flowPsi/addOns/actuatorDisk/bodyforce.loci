@@ -194,7 +194,7 @@ namespace flowPsi {
       const real dist = dot(pt,n) ;
       const vect3d radial = pt-dist*n ;
       vect3d nt = cross(n,radial) ;
-      nt *= 1./max(norm(nt),1e-30) ;
+      nt *= 1./max<real>(norm(nt),1e-30) ;
       const real tr = $ActuatorDiskList[id].thrust ;
       const real tq = $ActuatorDiskList[id].torque ;
       bf = n*tr*$ActuatorWeightThrust/$ActuatorThrustFactor[id] ;
