@@ -486,11 +486,11 @@ namespace flowPsi {
     prelude {
   } ;
 
-  $type X store<real> ;
-  $rule pointwise(scalarMeanAll_f(X){n,it}<-scalarMeanFaceAll_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
+  $type X_f store<real> ;
+  $rule pointwise(scalarMeanAll_f(X){n,it}<-scalarMeanFaceAll_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
     $scalarMeanAll_f(X){n,it} = $scalarMeanFaceAll_X{n,it} ;
     if($lastNewton{n,it}) {
-      real delta = $X{n,it}-$scalarMeanAll_f(X){n,it} ;
+      real delta = $X_f{n,it}-$scalarMeanAll_f(X){n,it} ;
       $scalarMeanAll_f(X){n,it} += delta/$meanCount{n,it} ;
     }
   }
