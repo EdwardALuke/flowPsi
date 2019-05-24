@@ -4,10 +4,10 @@
 //
 // D. Keith Walters
 //
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 //
 // To implement baseline DHRL, modify .vars file as follows:
-//
+// 
 // loadModule: KOmegaModel
 // loadModule: XXXX (where 'XXXX' is the name of the module compiled using this
 //                   source file)
@@ -16,75 +16,77 @@
 // meanFreq: 1000000000000 (any number larger than the total expected time
 //                          steps)
 //
-// ---------------------------------------------------------------------------
-//
-// By default, the RANS contributions to the turbulent stress, heat
-// flux, and mass flux terms (RANS source terms) are active. This can
-// be controlled using the following:
+// ----------------------------------------------------------------------------
+// 
+// By default, the RANS contributions to the turbulent stress, heat flux, and
+// mass flux terms (RANS source terms) are active. This can be controlled using
+// the following:
 //
 // dhrl_source_terms: off (default is 'on')
 //
 // In effect this yields pure MILES.
 //
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 //
-// By default, baseline DHRL applies the same blending function
-// (alpha_dhrl) to the momentum, energy, and species transport
-// equations. The blending function is based on turbulent kinetic
-// energy production only, i.e. the resolved and modeled turbulent
-// stress tensor.
+// By default, baseline DHRL applies the same blending function (alpha_dhrl) to 
+// the momentum, energy, and species transport equations. The blending function
+// is based on turbulent kinetic energy production only, i.e. the resolved and
+// modeled turbulent stress tensor.
 //
-// To implement a separate blending function for the energy equation,
-// based on the resolved and modeled turbulent heat flux vector, add
-// in .vars file:
-//
+// To implement a separate blending function for the energy equation, based on
+// the resolved and modeled turbulent heat flux vector, add in .vars file:
+// 
 // dhrl_energy_alpha: yes (default is 'no')
 //
-// ---------------------------------------------------------------------------
+// 
+// To implement a separate blending function for the species equations, based
+// on the resolved and modeled turbulent mass flux vector, add in .vars file:
 //
-// To implement the modified calculation for alpha_dhrl, include in
-// the .vars file:
+// dhrl_mixture_alpha: yes (default is 'no')
+//
+// ----------------------------------------------------------------------------
+//
+// To implement the modified calculation for alpha_dhrl, include in the .vars
+// file:
 //
 // dhrl_modified_alpha: yes (default is 'no')
+// 
+// Note the the modified version is used to switch the model to "pure" MILES
+// in regions where the scales of motion are well resolved, regardless of the
+// ratio of modeled to resolved production. This is intended to mitigate
+// potential errors when the RANS significantly overpredicts TKE production,
+// which might lead to a RANS component being added even when it is not
+// appropriate. The modified switch is based on the ratio of  resolved
+// fluctuating strainrate to the "large-eddy" inverse timescale (s_ratio). The 
+// "large-eddy" inverse timescale is assumed to scale with the mean strainrate.
+// In regions of low mean strainrate (e.g. the freestream region), the inverse
+// turbulent time scale is assumed to scale with the RANS model estimate
+// (omega). When the fluctuating content of the flow is well resolved, the
+// value of s_ratio becomes large, indicating that an LES model is appropriate.
+// Conceptually, this can be viewed as dividing the flowfield into two regions,
+// an LES zone (in which s_ratio is large), and a hybrid RANS-LES zone in
+// which the original DHRL model is used to balance LES and RANS contributions.
 //
-// Note the the modified version is used to switch the model to "pure"
-// MILES in regions where the scales of motion are well resolved,
-// regardless of the ratio of modeled to resolved production. This is
-// intended to mitigate potential errors when the RANS significantly
-// overpredicts TKE production, which might lead to a RANS component
-// being added even when it is not appropriate. The modified switch is
-// based on the ratio of resolved fluctuating strainrate to the
-// "large-eddy" inverse timescale (s_ratio). The "large-eddy" inverse
-// timescale is assumed to scale with the mean strainrate. In regions
-// of low mean strainrate (e.g. the freestream region), the inverse
-// turbulent time scale is assumed to scale with the RANS model
-// estimate (omega). When the fluctuating content of the flow is well
-// resolved, the value of s_ratio becomes large, indicating that an
-// LES model is appropriate. Conceptually, this can be viewed as
-// dividing the flowfield into two regions, an LES zone (in which
-// s_ratio is large), and a hybrid RANS-LES zone in which the original
-// DHRL model is used to balance LES and RANS contributions.
+// ----------------------------------------------------------------------------
 //
-// ---------------------------------------------------------------------------
-//
-// For baseline DHRL, the RANS component of the turbulent stress, heat
-// flux, and mass flux is based on the mean (Favre-averaged) variable
-// fields. This version allows the RANS transport terms to be weighted
-// between the mean and instantaneous variable fields. In general
-// using mean fields allows greater resolution of fluctuating flow and
-// more rapid growth of fluid instabilities and "breakdown" to LES
-// type flow. Using instantaneous fields increases stability. To
-// implement, in .vars file:
+// For baseline DHRL, the RANS component of the turbulent stress, heat flux,
+// and mass flux is based on the mean (Favre-averaged) variable fields. This
+// version allows the RANS transport terms to be weighted between the mean and
+// instantaneous variable fields. In general using mean fields allows greater
+// resolution of fluctuating flow and more rapid growth of fluid instabilities
+// and "breakdown" to LES type flow. Using instantaneous fields increases
+// stability. To implement, in .vars file:
 //
 // ransFluxBlendMomentum: X
 // ransFluxBlendEnergy: X
+// ransFluxBlendMixture: X
 //
-// Here X is any value between 0 and 1, where 0 corresponds to use of
-// only instantaneous variable fields, and 1 (default) corresponds to
-// use of only mean variable fields. Numbers between 0 and 1 result in
-// a weighted blend of mean and instantaneous.
+// Here X is any value between 0 and 1, where 0 corresponds to use of only 
+// instantaneous variable fields, and 1 (default) corresponds to use of only
+// mean variable fields. Numbers between 0 and 1 result in a weighted blend
+// of mean and instantaneous.
 //
-// ---------------------------------------------------------------------------
+// ----------------------------------------------------------------------------
 //
 // To reset the counter used for computing mean (time-averaged) values:
 //
@@ -115,50 +117,53 @@ using std::cout ;
 using std::endl ;
 using std::string ;
 
-//#define OUTPUT_AVERAGES
+#define TURBULENT_K_DIFFUSION
+#define TURBULENT_W_DIFFUSION
+#define TURBULENT_PRODUCTION_DESTRUCTION
+#define TURBULENT_CROSS_DIFFUSION
+#define TURBULENT_COMPRESIBILITY_CORRECTION
+#define OUTPUT_AVERAGES
 
 // Note that this version is only compatible with the use of MILES
 // for the LES component. If an SGS model is added, then the treatment
-// of the instantaneous heat fluxes and species diffusion terms must be modified.
+// of the instantaneous heat fluxes and species diffusion terms must be
+// modified.
 // -- DKW
 
 namespace flowPsi {
 
+#define EPSILON (1e-20)
+  // Variable declarations
+
+  $type cpT store<real> ;
+  $type enthalpy_avg store<real> ;
+  $type scalar_mdot_avg store<real> ; // Reynolds-averaged face mass flux
+
   // DHRL model version controls
   $rule constraint(DHRL_SST_BSL_KW<-multi_scale) {
     $DHRL_SST_BSL_KW = EMPTY ;
-    if($multi_scale == "DHRL" || $multi_scale == "dhrl") {
-      $DHRL_SST_BSL_KW = $*multi_scale.domain() ;
-    } else {
-      $[Once] {
-	cerr << "Warning, 'multi_scale' not set to DHRL, DHRL terms not active!" << endl ;
-      }
-    }
-  }
+    if($multi_scale == "DHRL") {$DHRL_SST_BSL_KW = $*multi_scale.domain() ;} 
+  } 
 
   $rule default(dhrl_source_terms) {
     $dhrl_source_terms = "on" ;
   }
+
   $rule constraint(DHRL_SRC<-dhrl_source_terms) {
     $DHRL_SRC = EMPTY ;
     if($dhrl_source_terms == "on") {
       $DHRL_SRC = $*dhrl_source_terms.domain() ;
     } else if($dhrl_source_terms == "off") {
       $DHRL_SRC = EMPTY ;
-      $[Once] {
-	cout << "Note, DHRL source terms are disabled!"<< endl ;
-      }
     } else {
-      $[Once] {
-	cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
-	$DHRL_SRC = $*dhrl_source_terms.domain() ;
-      }
+      cerr << "dhrl_source_terms = " << $dhrl_source_terms << " not understood, defaulting to 'on'" << endl;
+      $DHRL_SRC = $*dhrl_source_terms.domain() ;
     }
   }
 
   $rule default(dhrl_modified_alpha) {
     $dhrl_modified_alpha = "no" ;
-  }
+  } 
   $rule constraint(DHRL_ALPHA_MOD<-dhrl_modified_alpha) {
     $DHRL_ALPHA_MOD = EMPTY ;
     if($dhrl_modified_alpha == "yes" || $dhrl_modified_alpha == "on") {$DHRL_ALPHA_MOD = $*dhrl_modified_alpha.domain() ;}
@@ -172,83 +177,117 @@ namespace flowPsi {
     if($dhrl_energy_alpha == "yes" || $dhrl_energy_alpha == "on") {$DHRL_ALPHA_ENERGY = $*dhrl_energy_alpha.domain() ;}
   }
 
-// Default use mean gradients for RANS flux terms
-  $rule default(ransFluxBlendMomentum) { $ransFluxBlendMomentum = 1. ; }
-  $rule default(ransFluxBlendEnergy) { $ransFluxBlendEnergy = 1. ; }
+  // Default use mean gradients for RANS flux terms
+  $rule default(ransFluxBlendMomentum) {
+    $ransFluxBlendMomentum = 1. ; 
+  }
+
+  $rule default(ransFluxBlendEnergy) {
+    $ransFluxBlendEnergy = 1. ;
+  }
 
   // Time-averaged variables
-  $rule pointwise(rho_avg<-scalarMean(rho),rho) {$rho_avg = $scalarMean(rho)>1e-30?$scalarMean(rho):$rho ;}
-  $rule pointwise(cr->rho_avg<-pmap->cl->rho_avg) {$cr->$rho_avg = $pmap->$cl->$rho_avg ;}
-  $rule pointwise(dhrl::rho_t<-rho_avg) {$rho_t = $rho_avg; }
+  $rule pointwise(rho_avg<-scalarMean(rho)) {$rho_avg = $scalarMean(rho) ;}
 
-  $rule pointwise(dhrl::rho_t_f<-(cl,cr)->(rho_t,vol)) {
+  $rule pointwise(rho_avg_f<-(cl,cr)->(rho_avg,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
-    $rho_t_f = rvols*($cr->$vol*$cl->$rho_t+$cl->$vol*$cr->$rho_t) ;
+    $rho_avg_f = rvols*($cr->$vol*$cl->$rho_avg+$cl->$vol*$cr->$rho_avg) ;
   }
-  $rule pointwise(dhrl::rho_t_f<-ci->rho_t) { $rho_t_f = $ci->$rho_t ; }
+  $rule pointwise(rho_avg_f<-ci->rho_avg) {
+    $rho_avg_f = $ci->$rho_avg ;
+  } 
 
-  $rule pointwise(u_avg<-vect3dFavreMean(u),u)
-  { $u_avg =$vect3dFavreMean(u) ;}
-  $rule pointwise(cr->u_avg<-pmap->cl->u_avg,pmap->ref->periodicTransform)
-  { 
-    const rigid_transform &frame = $pmap->$ref->$periodicTransform ;
-    $cr->$u_avg = frame.rotate_vec($pmap->$cl->$u_avg) ;
+  $rule pointwise(mu_avg<-scalarMean(mu)) {$mu_avg = $scalarMean(mu) ;}
+
+  $rule pointwise(mu_avg_f<-(cl,cr)->(mu_avg,vol)) {
+    real rvols = 1./($cl->$vol+$cr->$vol) ;
+    $mu_avg_f = rvols*($cr->$vol*$cl->$mu_avg+$cl->$vol*$cr->$mu_avg) ;
   }
+  $rule pointwise(mu_avg_f<-ci->mu_avg) {
+    $mu_avg_f = $ci->$mu_avg ;
+  }
+
+  $rule pointwise(u_avg<-vect3dFavreMean(u)) {$u_avg = $vect3dFavreMean(u) ;}
+
   $rule pointwise(u_avg_f<-(cl,cr)->(u_avg,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
     $u_avg_f = rvols*($cr->$vol*$cl->$u_avg+$cl->$vol*$cr->$u_avg) ;
   }
-  $rule pointwise(u_avg_f<-vect3dFavreMean_f(u)){
-    $u_avg_f = $vect3dFavreMean_f(u);
+  $rule pointwise(u_avg_f<-vect3dFavreMean_f(u),ci->u_avg) {
+    $u_avg_f = $vect3dFavreMean_f(u) ;
+  }
+  //  $rule pointwise(noslip::u_avg_f<-wallVelocity), constraint(viscousWall_BC) {
+  //  $u_avg_f = $wallVelocity ;
+  //  }
+
+  $rule pointwise(strainRateMag_avg<-gradv3d(u_avg)) {
+      const real dudx = $gradv3d(u_avg).x.x ;
+      const real dvdy = $gradv3d(u_avg).y.y ;
+      const real dwdz = $gradv3d(u_avg).z.z ;
+      const real dvdx = $gradv3d(u_avg).y.x ;
+      const real dwdx = $gradv3d(u_avg).z.x ;
+      const real dwdy = $gradv3d(u_avg).z.y ;
+      const real dudy = $gradv3d(u_avg).x.y ;
+      const real dudz = $gradv3d(u_avg).x.z ;
+      const real dvdz = $gradv3d(u_avg).y.z ;
+
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRateMag_avg = sqrt(S2) ;
   }
 
-  $rule pointwise(dhrl::u_t_f<-u_avg_f) {$u_t_f = $u_avg_f ; }
-  $rule pointwise(dhrl::ui_t<-ci->u_avg) { $ui_t=$ci->$u_avg; }
+  $rule pointwise(axi::strainRateMag_avg<-u_avg,gradv3d(u_avg),cellcenter),
+      constraint(u_avg,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y ;
+      const real dudx = $gradv3d(u_avg).x.x ;
+      const real dvdy = $gradv3d(u_avg).y.y ;
+      const real dwdz = $u_avg.y/y ;
+      const real dvdx = $gradv3d(u_avg).y.x ;
+      const real dwdx = $gradv3d(u_avg).z.x ;
+      const real dwdy = $gradv3d(u_avg).z.y-$u_avg.z/y ;
+      const real dudy = $gradv3d(u_avg).x.y ;
+      const real dudz = 0.0 ;
+      const real dvdz = 0.0 ;
 
-  $rule pointwise(mu_avg<-scalarMean(mu),mu)
-  {$mu_avg = $scalarMean(mu)>1e-30?$scalarMean(mu):$mu ;}
-  $rule pointwise(cr->mu_avg<-pmap->cl->mu_avg)
-  {$cr->$mu_avg = $pmap->$cl->$mu_avg ;}
-  $rule pointwise(dhrl::mu_lam<-mu_avg) { $mu_lam = $mu_avg; }
-
-  $rule pointwise(dhrl::mu_lam_f<-(cl,cr)->(mu_lam,vol)) {
-    real rvols = 1./($cl->$vol+$cr->$vol) ;
-    $mu_lam_f = rvols*($cr->$vol*$cl->$mu_lam+$cl->$vol*$cr->$mu_lam) ;
-  }
-  $rule pointwise(dhrl::mu_lam_f<-ci->mu_lam) { $mu_lam_f = $ci->$mu_lam ;}
-
-  $rule pointwise(dhrl::soundSpeed_t<-scalarMean(soundSpeed),soundSpeed)
-  { $soundSpeed_t = $scalarMean(soundSpeed)>1e-30?$scalarMean(soundSpeed):$soundSpeed ; }
-
-  $rule pointwise(dhrl::strainRate_t<-gradv3d(u_avg)) {
-    const real dudx = $gradv3d(u_avg).x.x ;
-    const real dvdy = $gradv3d(u_avg).y.y ;
-    const real dwdz = $gradv3d(u_avg).z.z ;
-    const real dvdx = $gradv3d(u_avg).y.x ;
-    const real dwdx = $gradv3d(u_avg).z.x ;
-    const real dwdy = $gradv3d(u_avg).z.y ;
-    const real dudy = $gradv3d(u_avg).x.y ;
-    const real dudz = $gradv3d(u_avg).x.z ;
-    const real dvdz = $gradv3d(u_avg).y.z ;
-
-    const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
-      + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
-      + (dvdz+dwdy)*(dvdz+dwdy) ;
-    $strainRate_t = sqrt(S2) ;
+      const real S2 = 2.*(dudx*dudx + dvdy*dvdy + dwdz*dwdz)
+        + (dudy+dvdx)*(dudy+dvdx) + (dudz+dwdx)*(dudz+dwdx)
+        + (dvdz+dwdy)*(dvdz+dwdy) ;
+      $strainRateMag_avg = sqrt(S2) ;
   }
 
-  $rule pointwise(dhrl::vortMag_t<-gradv3d(u_avg)) {
-    vect3d vort($gradv3d(u_avg).z.y-$gradv3d(u_avg).y.z,
-		$gradv3d(u_avg).x.z-$gradv3d(u_avg).z.x,
-		$gradv3d(u_avg).y.x-$gradv3d(u_avg).x.y) ;
-    $vortMag_t = norm(vort) ;
+  $rule pointwise(vort_avg<-gradv3d(u_avg)) {
+    $vort_avg.x=$gradv3d(u_avg).z.y-$gradv3d(u_avg).y.z ;
+    $vort_avg.y=$gradv3d(u_avg).x.z-$gradv3d(u_avg).z.x ;
+    $vort_avg.z=$gradv3d(u_avg).y.x-$gradv3d(u_avg).x.y ;
   }
 
-  $rule pointwise(dhrl::divu_t<-gradv3d(u_avg)) {
-    const real dvdy = $gradv3d(u_avg).y.y ;
-    const real dwdz = $gradv3d(u_avg).z.z ;
-    const real dudx = $gradv3d(u_avg).x.x ;
-    $divu_t = (dudx+dvdy+dwdz) ;
+  $rule pointwise(axi::vort_avg<-gradv3d(u_avg),u_avg,cellcenter),
+    constraint(u_avg,axisymmetricCoordinateModel) {
+    real y = $cellcenter.y ;
+    $vort_avg.x=$gradv3d(u_avg).z.y+$u_avg.z/y ;
+    $vort_avg.y=-$gradv3d(u_avg).z.x ;
+    $vort_avg.z=$gradv3d(u_avg).y.x-$gradv3d(u_avg).x.y ;
+  }
+
+  $rule pointwise(vortMag_avg<-vort_avg) {
+    $vortMag_avg = norm($vort_avg) ;
+  }
+
+  $rule pointwise(divu_avg<-gradv3d(u_avg)) {
+      const real dvdy = $gradv3d(u_avg).y.y ;
+      const real dwdz = $gradv3d(u_avg).z.z ;
+      const real dudx = $gradv3d(u_avg).x.x ;
+      $divu_avg = (dudx+dvdy+dwdz) ;
+  }
+
+  $rule pointwise(axi::divu_avg<-u_avg,gradv3d(u_avg),cellcenter),
+      constraint(u_avg,axisymmetricCoordinateModel) {
+      const real y = $cellcenter.y;
+      const real dudx = $gradv3d(u_avg).x.x ;
+      const real dvdy = $gradv3d(u_avg).y.y ;
+      const real dwdz = $u_avg.y/y ;
+      $divu_avg = (dudx+dvdy+dwdz) ;
   }
 
   $rule pointwise(uv_avg<-vect3dFavreVar(u),vect3dFavreCoVar(u)) {
@@ -261,149 +300,77 @@ namespace flowPsi {
   }
 
   $rule pointwise(temp_avg<-scalarFavreMean(temperature)) {$temp_avg = $scalarFavreMean(temperature) ;}
-  $rule pointwise(cr->temp_avg<-pmap->cl->temp_avg) {$cr->$temp_avg = $pmap->$cl->$temp_avg ;}
 
   $rule pointwise(temp_avg_f<-(cl,cr)->(temp_avg,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
     $temp_avg_f = rvols*($cr->$vol*$cl->$temp_avg+$cl->$vol*$cr->$temp_avg) ;
   }
-  $rule pointwise(temp_avg_f<-ci->temp_avg) { $temp_avg_f = $ci->$temp_avg ; }
+  $rule pointwise(temp_avg_f<-scalarFavreMean_f(temperature)) {
+    $temp_avg_f = $scalarFavreMean_f(temperature) ;
+  }
+
+  $rule pointwise(cpT<-Cp,temperature) {
+    $cpT = $Cp*$temperature ;
+  }
+
+  $rule pointwise(enthalpy_avg<-scalarFavreMean(cpT)) {$enthalpy_avg = $scalarFavreMean(cpT) ;}
+
+  $rule pointwise(cput<-Cp,u,temperature) {
+    $cput = $Cp*$u*$temperature ;
+  }
+
+  $rule pointwise(cput_avg<-vect3dFavreMean(cput),u_avg,enthalpy_avg) {
+    $cput_avg = $vect3dFavreMean(cput) - $u_avg*$enthalpy_avg ;
+  }
+
+  $rule pointwise(cp_avg<-Cp) {
+    $cp_avg = $Cp ;
+  }
+
+  $rule pointwise(scalar_mdot_avg<-scalarMeanAll_f(scalar_mdot)) {$scalar_mdot_avg = $scalarMeanAll_f(scalar_mdot) ;}
+
+
+  // Periodic mapping
+  $rule pointwise(cr->rho_avg<-pmap->cl->rho_avg) {$cr->$rho_avg = $pmap->$cl->$rho_avg ;}
+  $rule pointwise(cr->u_avg<-pmap->cl->u_avg) {$cr->$u_avg = $pmap->$cl->$u_avg ;}
+  $rule pointwise(cr->temp_avg<-pmap->cl->temp_avg) {$cr->$temp_avg = $pmap->$cl->$temp_avg ;}
+  $rule pointwise(cr->mu_avg<-pmap->cl->mu_avg) {$cr->$mu_avg = $pmap->$cl->$mu_avg ;}
 
   // DHRL hooks
 
   // Modify instantaneous turbulent viscosity
   $rule pointwise(dhrl::kw::tmu<-alpha_dhrl,tmu_sgs),
-    constraint(k,w,SST_BSL_KW,DHRL_SST_BSL_KW)
-  { $tmu = $alpha_dhrl*$tmu_sgs ; }
+    constraint(k,w,SST_BSL_KW,DHRL_SST_BSL_KW) {
+    $tmu = $alpha_dhrl*$tmu_sgs ;
+  }
 
   $rule pointwise(dhrl::wilcox08::kw::tmu<-alpha_dhrl,tmu_sgs),
-    constraint(k,w,Wilcox08Model,NOT_MS_SST_BSL_KW,DHRL_SST_BSL_KW)
-  { $tmu = $alpha_dhrl*$tmu_sgs ; }
-
-
-  //round jet parameter
-  $type chiw store<real> ;
-  $rule pointwise(dhrl::chiw<-sst1m,gradv3d(u_avg),divu_t,w),
-    constraint(divu_t,w,SST_BSL) {
-    const real dudx = $gradv3d(u_avg).x.x ;
-    const real dvdy = $gradv3d(u_avg).y.y ;
-    const real dwdz = $gradv3d(u_avg).z.z ;
-    const real dvdx = $gradv3d(u_avg).y.x ;
-    const real dwdx = $gradv3d(u_avg).z.x ;
-    const real dwdy = $gradv3d(u_avg).z.y ;
-    const real dudy = $gradv3d(u_avg).x.y ;
-    const real dudz = $gradv3d(u_avg).x.z ;
-    const real dvdz = $gradv3d(u_avg).y.z ;
-
-    const real wx = dwdy-dvdz ;
-    const real wy = dudz-dwdx ;
-    const real wz = dvdx-dudy ;
-    const real s12 = dudy+dvdx ;
-    const real s13 = dudz+dwdx ;
-    const real s23 = dvdz+dwdy ;
-
-    const real oms = (s12*wx*wy+s13*wx*wz+s23*wy*wz)-
-      (dudx-0.5*$divu_t)*(wy*wy+wz*wz) -
-      (dvdy-0.5*$divu_t)*(wx*wx+wz*wz) -
-      (dwdz-0.5*$divu_t)*(wx*wx+wy*wy) ;
-
-    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
+    constraint(k,w,Wilcox08Model,NOT_MS_SST_BSL_KW,DHRL_SST_BSL_KW) {
+    $tmu = $alpha_dhrl*$tmu_sgs ;
   }
 
-  $rule pointwise(dhrl::wilcox98::chiw<-sst1m,gradv3d(u_avg),w),
-    constraint(Wilcox98Model,w,gradv3d(u_avg)) {
-    const real dudx = $gradv3d(u_avg).x.x ;
-    const real dvdy = $gradv3d(u_avg).y.y ;
-    const real dwdz = $gradv3d(u_avg).z.z ;
-    const real dvdx = $gradv3d(u_avg).y.x ;
-    const real dwdx = $gradv3d(u_avg).z.x ;
-    const real dwdy = $gradv3d(u_avg).z.y ;
-    const real dudy = $gradv3d(u_avg).x.y ;
-    const real dudz = $gradv3d(u_avg).x.z ;
-    const real dvdz = $gradv3d(u_avg).y.z ;
-
-    const real wx = dwdy-dvdz ;
-    const real wy = dudz-dwdx ;
-    const real wz = dvdx-dudy ;
-    const real s12 = dudy+dvdx ;
-    const real s13 = dudz+dwdx ;
-    const real s23 = dvdz+dwdy ;
-
-    const real oms = dudx*(wy*wy+wz*wz) + dvdy*(wx*wx+wz*wz) +
-      dwdz*(wx*wx+wy*wy) - (s12*wx*wy+s13*wx*wz+s23*wy*wz) ;
-
-    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
-  }
-
-  $type kw_tmu store<real> ;
-  $type kw_tmu_f store<real> ;
-
-  $rule pointwise(dhrl::shear::stress_scalar<-gradv3d(u_avg),kw_tmu),
-    constraint(shear_production,kw_tmu,gradv3d(u_avg),DHRL_SST_BSL_KW) {
-    const real tmu = $kw_tmu ;
-    const real dvdx = $gradv3d(u_avg).y.x ;
-    const real dwdx = $gradv3d(u_avg).z.x ;
-    const real dwdy = $gradv3d(u_avg).z.y ;
-    const real dudy = $gradv3d(u_avg).x.y ;
-    const real dudz = $gradv3d(u_avg).x.z ;
-    const real dvdz = $gradv3d(u_avg).y.z ;
-
-    $stress_scalar = tmu*((dudy+dvdx)*(dudy+dvdx)+(dudz+dwdx)*(dudz+dwdx)
-			  +(dvdz+dwdy)*(dvdz+dwdy)) ;
-  }
-
-  $rule pointwise(dhrl::lam_tau_w<-gradv3d_f(u_avg),mu_lam_f,area),
-    constraint(viscousWall_BC){
-    symmetricTensor tau ;
-    real mu_lam = $mu_lam_f ;
-
-    real dudx = $gradv3d_f(u_avg).x.x ;
-    real dvdy = $gradv3d_f(u_avg).y.y ;
-    real dwdz = $gradv3d_f(u_avg).z.z ;
-    real dvdx = $gradv3d_f(u_avg).y.x ;
-    real dwdx = $gradv3d_f(u_avg).z.x ;
-    real dwdy = $gradv3d_f(u_avg).z.y ;
-    real dudy = $gradv3d_f(u_avg).x.y ;
-    real dudz = $gradv3d_f(u_avg).x.z ;
-    real dvdz = $gradv3d_f(u_avg).y.z ;
-
-    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
-    tau.xx = 2.0*mu_lam*(dudx-divm) ;
-    tau.yy = 2.0*mu_lam*(dvdy-divm) ;
-    tau.zz = 2.0*mu_lam*(dwdz-divm) ;
-
-    tau.xy = mu_lam*(dudy+dvdx) ;
-    tau.xz = mu_lam*(dudz+dwdx) ;
-    tau.yz = mu_lam*(dvdz+dwdy) ;
-
-    const vect3d an = $area.n ;
-    const vect3d tau_w = vect3d(tau.xx*an.x + tau.xy*an.y + tau.xz*an.z,
-                                tau.xy*an.x + tau.yy*an.y + tau.yz*an.z,
-                                tau.xz*an.x + tau.yz*an.y + tau.zz*an.z) ;
-    $lam_tau_w = sqrt(dot(tau_w,tau_w)) ;
-  }
 
   // Compute DHRL blending parameters
   // --Momentum
-  $rule pointwise(prod_rans<-P_k), constraint(rho_t) { $prod_rans = $P_k ; }
-
-  $rule pointwise(prod_les<-rho_t,uv_avg,gradv3d(u_avg)),
-    constraint(uv_avg) {
-    $prod_les =  - $rho_t * ($uv_avg.xx*$gradv3d(u_avg).x.x
-		 + $uv_avg.xy*($gradv3d(u_avg).x.y+$gradv3d(u_avg).y.x)
-		 + $uv_avg.xz*($gradv3d(u_avg).x.z+$gradv3d(u_avg).z.x)
-		 + $uv_avg.yy*$gradv3d(u_avg).y.y
-		 + $uv_avg.yz*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y)
-		 + $uv_avg.zz*$gradv3d(u_avg).z.z) ;
+  $rule pointwise(prod_rans<-P_k), constraint(rho_avg) {
+    $prod_rans = $P_k ;
   }
 
-  // MILES default
-  $rule pointwise(prod_sgs), constraint(geom_cells) {$prod_sgs = 0. ;} 
+  $rule pointwise(prod_les<-rho_avg,uv_avg,gradv3d(u_avg)),
+    constraint(uv_avg) {
+    $prod_les =  - $rho_avg * ($uv_avg.xx*$gradv3d(u_avg).x.x
+                 + $uv_avg.xy*($gradv3d(u_avg).x.y+$gradv3d(u_avg).y.x)
+                 + $uv_avg.xz*($gradv3d(u_avg).x.z+$gradv3d(u_avg).z.x)
+                 + $uv_avg.yy*$gradv3d(u_avg).y.y    
+                 + $uv_avg.yz*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y) 
+                 + $uv_avg.zz*$gradv3d(u_avg).z.z) ;     
+  }
 
-  $rule pointwise(alpha_star_dhrl<-prod_les,prod_rans,prod_sgs),
-    constraint(prod_les) {
-    const real denom = max<real>($prod_rans-$prod_sgs,1.e-16) ;
-    $alpha_star_dhrl = min<real>(max<real>($prod_les/denom,0.),1.) ;
+  $rule pointwise(prod_sgs), constraint(geom_cells) {$prod_sgs = 0. ;} // MILES default
+
+  $rule pointwise(alpha_star_dhrl<-prod_les,prod_rans,prod_sgs), constraint(prod_les) { 
+    const real denom = max($prod_rans-$prod_sgs,1.e-16) ; 
+    $alpha_star_dhrl = min(max($prod_les/denom,0.),1.) ; 
   }
 
   $rule pointwise(alpha_dhrl<-alpha_star_dhrl) { // Original DHRL formulation
@@ -432,29 +399,31 @@ namespace flowPsi {
     const real s13_avg = 0.5*($gradv3d(u_avg).x.z+$gradv3d(u_avg).z.x) ;
     const real s23_avg = 0.5*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y) ;
     const real s_avg_2 = s11_avg*s11_avg+s22_avg*s22_avg+s33_avg*s33_avg
-      + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
-    // Use SST estimate for large-eddy time scale in low strainrate regions
-    const real denom = max<real>(s_avg_2,0.09*$w*$w)+1.e-16 ; 
+                       + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
+    const real denom = max(s_avg_2,0.09*$w*$w)+1.e-16 ; // Use SST estimate for large-eddy time scale in low strainrate regions
     $s_ratio = ($sij_sij_avg-s_avg_2)/denom ;
   }
 
-  $rule pointwise(s_ratio_f<-ci->s_ratio) { $s_ratio_f = $ci->$s_ratio ; }
+  $rule pointwise(s_ratio_f<-ci->s_ratio) {
+    $s_ratio_f = $ci->$s_ratio ;
+  }
 
-  $rule pointwise(gamma_dhrl<-s_ratio)
-  { $gamma_dhrl = 1. - 1./(1.+pow($s_ratio/4.,4.)) ; }
+  $rule pointwise(gamma_dhrl<-s_ratio) {
+    $gamma_dhrl = 1. - 1./(1.+pow($s_ratio/4.,4.)) ;
+  }
 
   // Modified DHRL formulation
-  $rule pointwise(modified::alpha_dhrl<-alpha_star_dhrl,gamma_dhrl),
-    constraint(DHRL_ALPHA_MOD,geom_cells)   
-  { $alpha_dhrl = max($alpha_star_dhrl,$gamma_dhrl) ; }
+  $rule pointwise(modified::alpha_dhrl<-alpha_star_dhrl,gamma_dhrl), constraint(DHRL_ALPHA_MOD,geom_cells) {  
+    $alpha_dhrl = max($alpha_star_dhrl,$gamma_dhrl) ;
+  }
+
 
   //--Energy
   // Original DHRL -- use same alpha for both momentum and energy
-  $rule pointwise(alpha_star_energy_dhrl<-alpha_dhrl)
-  {$alpha_star_energy_dhrl = $alpha_dhrl ;} 
+  $rule pointwise(alpha_star_energy_dhrl<-alpha_dhrl) {$alpha_star_energy_dhrl = $alpha_dhrl ;} 
 
-  $rule pointwise(hflux_scalar_les<-cput_avg,rho_t,grads(temp_avg)) {
-    const vect3d heat_flux_les = -$rho_t*$cput_avg ;
+  $rule pointwise(hflux_scalar_les<-cput_avg,rho_avg,grads(temp_avg)) {
+    const vect3d heat_flux_les = -$rho_avg*$cput_avg ;
     $hflux_scalar_les = dot(heat_flux_les,$grads(temp_avg)) ;
   }
 
@@ -462,39 +431,43 @@ namespace flowPsi {
     $hflux_scalar_rans = $kcond_rans*dot($grads(temp_avg),$grads(temp_avg)) ;
   }
 
-  // THIS IS ONLY VALID FOR MILES!!!!
-  $rule pointwise(hflux_scalar_sgs), constraint(geom_cells)
-  { $hflux_scalar_sgs = 0. ; }
 
-  // Original (non-modified) alpha
-  $rule pointwise(alpha_energy_dhrl<-alpha_star_energy_dhrl),
-    constraint(geom_cells)
-  { $alpha_energy_dhrl = $alpha_star_energy_dhrl ; }
+  // THIS IS ONLY VALID FOR MILES!!!!
+  $rule pointwise(hflux_scalar_sgs), constraint(geom_cells) { 
+    $hflux_scalar_sgs = 0. ;
+  }
 
   $rule pointwise(separate::alpha_star_energy_dhrl<-hflux_scalar_les,hflux_scalar_rans,hflux_scalar_sgs), constraint(geom_cells,DHRL_ALPHA_ENERGY) {
-    const real denom = max<real>($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ;
-    $alpha_star_energy_dhrl = min<real>(max<real>($hflux_scalar_les/denom,0.),1.) ;
+    const real denom = max($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ; 
+    $alpha_star_energy_dhrl = min(max($hflux_scalar_les/denom,0.),1.) ; 
+  }
+
+  // Original (non-modified) alpha
+  $rule pointwise(alpha_energy_dhrl<-alpha_star_energy_dhrl), constraint(geom_cells) { 
+    $alpha_energy_dhrl = $alpha_star_energy_dhrl ; 
   }
 
   $rule pointwise(modified::alpha_energy_dhrl<-alpha_star_energy_dhrl,gamma_dhrl), constraint(geom_cells,DHRL_ALPHA_MOD) {
     $alpha_energy_dhrl = max($alpha_star_energy_dhrl,$gamma_dhrl) ;
   }
 
+
   // Compute RANS diffusion contribution to momentum, energy and mass equations
   $rule pointwise(vis_flux_rans<-area,tau_rans),
     constraint(no_symmetry_BC) {
+
     const vect3d an=$area.n ;
     const real sada=$area.sada ;
 
     $vis_flux_rans.x = ($tau_rans.xx*an.x +$tau_rans.xy*an.y
-			+$tau_rans.xz*an.z)*sada ;
+			    +$tau_rans.xz*an.z)*sada ;
     $vis_flux_rans.y = ($tau_rans.xy*an.x +$tau_rans.yy*an.y
-			+$tau_rans.yz*an.z)*sada ;
+			    +$tau_rans.yz*an.z)*sada ;
     $vis_flux_rans.z = ($tau_rans.xz*an.x +$tau_rans.yz*an.y
-			+$tau_rans.zz*an.z)*sada ;
+			    +$tau_rans.zz*an.z)*sada ;
   }
 
-  // Compute RANS stress term on faces
+    // Compute RANS stress term on faces
   $rule pointwise(tau_rans<-tmu_rans_eff_f,gradv3d_f(u_avg),gradv3d_f(u),ransFluxBlendMomentum) {
     const real c_avg = $ransFluxBlendMomentum ;
     real dudx = c_avg*$gradv3d_f(u_avg).x.x + (1.-c_avg)*$gradv3d_f(u).x.x ;
@@ -513,27 +486,37 @@ namespace flowPsi {
     $tau_rans.xy = $tmu_rans_eff_f*(dudy+dvdx) ;
     $tau_rans.xz = $tmu_rans_eff_f*(dudz+dwdx) ;
     $tau_rans.yz = $tmu_rans_eff_f*(dvdz+dwdy) ;
-  }
+    }
 
   $rule pointwise(vis_energy_flux_rans<-vis_flux_rans,u_f),
-    constraint(no_symmetry_BC)
-  { $vis_energy_flux_rans = dot($vis_flux_rans,$u_f) ; }
+      constraint(no_symmetry_BC) {
+      $vis_energy_flux_rans = dot($vis_flux_rans,$u_f) ;
+  }
 
   $rule pointwise(heat_flux_rans<-area,grads_f(temp_avg),grads_f(temperature),ransFluxBlendEnergy,kcond_rans_eff_f),
-    constraint(no_symmetry_BC) {
-    const vect3d an = $area.n ;
-    const real sada = $area.sada ;
+      constraint(no_symmetry_BC) {
 
-    const real c_avg = $ransFluxBlendEnergy ;
-    const vect3d grad_eff = c_avg*$grads_f(temp_avg) + (1.-c_avg)*$grads_f(temperature) ;
+      const vect3d an = $area.n ;
+      const real sada = $area.sada ;
 
-    $heat_flux_rans = $kcond_rans_eff_f*dot(grad_eff,an)*sada ;
-  }
+      const real c_avg = $ransFluxBlendEnergy ;
+      const vect3d grad_eff = c_avg*$grads_f(temp_avg) + (1.-c_avg)*$grads_f(temperature) ;
+
+      $heat_flux_rans = $kcond_rans_eff_f*dot(grad_eff,an)*sada ;
+    }
+
 
   $rule pointwise(cr->tmu_rans<-pmap->cl->tmu_rans) {$cr->$tmu_rans = $pmap->$cl->$tmu_rans ;}
 
-  $rule pointwise(tmu_rans_f<-kw_tmu_f) {
-    $tmu_rans_f = $kw_tmu_f;
+  $rule pointwise(tmu_rans_f<-(cl,cr)->(tmu_rans,vol)) {
+    real rvols = 1./($cl->$vol+$cr->$vol) ;
+    $tmu_rans_f = rvols*($cr->$vol*$cl->$tmu_rans+$cl->$vol*$cr->$tmu_rans) ;
+  }
+  $rule pointwise(tmu_rans_f<-ci->tmu_rans) {
+    $tmu_rans_f = $ci->$tmu_rans ;
+  }
+  $rule pointwise(wall::tmu_rans_f), constraint(ci->geom_cells,viscousWall_BC) {
+    $tmu_rans_f = 0. ;
   }
 
   $rule pointwise(cr->alpha_dhrl<-pmap->cl->alpha_dhrl) {$cr->$alpha_dhrl = $pmap->$cl->$alpha_dhrl ;}
@@ -551,28 +534,25 @@ namespace flowPsi {
     $tmu_rans_eff_f = (1.-$alpha_dhrl_f)*$tmu_rans_f ;
   }
 
-  //  $rule pointwise(cr->kcond_rans<-pmap->cl->kcond_rans) {$cr->$kcond_rans = $pmap->$cl->$kcond_rans ;}
+  $rule pointwise(cr->kcond_rans<-pmap->cl->kcond_rans) {$cr->$kcond_rans = $pmap->$cl->$kcond_rans ;}
 
   $rule pointwise(kcond_rans_f<-(cl,cr)->(kcond_rans,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
     $kcond_rans_f = rvols*($cr->$vol*$cl->$kcond_rans+$cl->$vol*$cr->$kcond_rans) ;
   }
+  $rule pointwise(kcond_rans_f<-ci->kcond_rans) {
+    $kcond_rans_f = $ci->$kcond_rans ;
+  }
+  $rule pointwise(wall::kcond_rans_f), constraint(ci->geom_cells,viscousWall_BC) {
+    $kcond_rans_f = 0. ;
+  }  
 
-  $rule pointwise(kcond_rans_f<-ci->kcond_rans)
-  { $kcond_rans_f = $ci->$kcond_rans ; }
-
-  $rule pointwise(wall::kcond_rans_f),
-    constraint(ci->geom_cells,viscousWall_BC)
-  { $kcond_rans_f = 0. ; }
-
-  $rule pointwise(cr->alpha_energy_dhrl<-pmap->cl->alpha_energy_dhrl)
-  {$cr->$alpha_energy_dhrl = $pmap->$cl->$alpha_energy_dhrl ;}
+  $rule pointwise(cr->alpha_energy_dhrl<-pmap->cl->alpha_energy_dhrl) {$cr->$alpha_energy_dhrl = $pmap->$cl->$alpha_energy_dhrl ;}
 
   $rule pointwise(alpha_energy_dhrl_f<-(cl,cr)->(alpha_energy_dhrl,vol)) {
     real rvols = 1./($cl->$vol+$cr->$vol) ;
     $alpha_energy_dhrl_f = rvols*($cr->$vol*$cl->$alpha_energy_dhrl+$cl->$vol*$cr->$alpha_energy_dhrl) ;
   }
-
   $rule pointwise(alpha_energy_dhrl_f<-ci->alpha_energy_dhrl) {
     $alpha_energy_dhrl_f = $ci->$alpha_energy_dhrl ;
   }
@@ -582,22 +562,413 @@ namespace flowPsi {
   }
 
   // Modifications specific to particular RANS models used
-
   // ----- SST/BSL/Wilcox KW Models ----- //
 
-  // Definition of RANS turbulence viscosity
-  $rule pointwise(tmu_rans<-kw_tmu),
-    constraint(rho_t,k,geom_cells) {
-    $tmu_rans = $kw_tmu ;
+    // Definition of RANS turbulence viscosity  
+  $rule pointwise(tmu_rans<-tmu_clip,rho_avg,k,w,sst1m,bF2,bF3,strainRateMag_avg),
+    constraint(rho_avg,k,geom_cells,SST_BSL_KW) {
+    $tmu_rans = min($rho_avg*$sst1m.a1*$k/max($sst1m.a1*$w,$strainRateMag_avg*$bF2*$bF3),$tmu_clip);
   }
 
-  $rule pointwise(kcond_rans<-turbulentPrandtlNumber,tmu_rans,cp_avg) {
+  $rule pointwise(wilcox08::tmu_rans<-tmu_clip,rho_avg,k,w,sst1m,strainRateMag_avg,gradv3d(u_avg),divu_avg),
+    constraint(rho_avg,k,w,geom_cells,Wilcox08Model,NOT_MS_SST_BSL_KW) {
+    const real clim = 7./8. ;
+    const real S2 = $strainRateMag_avg*$strainRateMag_avg ;
+    const real Sbar = S2 - 2./3.*$divu_avg*$divu_avg ;
+    const real wbar = max($w,clim*sqrt(Sbar/$sst1m.betas)) ;
+    $tmu_rans = min($rho_avg*$k/(wbar+EPSILON),$tmu_clip);
+  }
+
+  $rule pointwise(kcond_rans<-turbulentPrandtlNumber,tmu_rans,cp_avg),constraint(geom_cells,tmu_rans) {
     const real prt = $turbulentPrandtlNumber ;
     $kcond_rans = $tmu_rans*$cp_avg/prt ;
   }
 
+  // Modify newton iteration to use average density -- use Euler stepping for k and w
+  $type scalarVolDT store<real> ;
+  $rule pointwise(dhrl::k_rhs{n,it}<-scalarVolDT{n,it},k_src{n,it},
+                  k{n},k{n,it},rho_avg{n,it}),
+    constraint(k_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
+    real factor = $scalarVolDT{n,it} ;
+    
+    real rn = $rho_avg{n,it} ;
+
+    $k_rhs{n,it} = factor*($k{n,it}-$k{n})*rn - $k_src{n,it} ;
+  }
+
+  $rule pointwise(dhrl::w_rhs{n,it}<-scalarVolDT{n,it},w_src{n,it},
+                  w{n},w{n,it},rho_avg{n,it}),
+    constraint(w_src{n,it},geom_cells{n,it},DHRL_SST_BSL_KW) {
+    real factor = $scalarVolDT{n,it} ;
+    
+    real rn = $rho_avg{n,it} ;
+
+    $w_rhs{n,it} = factor*($w{n,it}-$w{n})*rn - $w_src{n,it} ;
+  }
+
+  // Modify RANS model convective terms to be based on averaged fluxes
+  $rule pointwise(dhrl::k_mdot_f<-scalar_mdot_avg), constraint(DHRL_SST_BSL_KW,scalar_mdot_avg) {$k_mdot_f =  $scalar_mdot_avg ;}
+  $rule pointwise(dhrl::w_mdot_f<-scalar_mdot_avg), constraint(DHRL_SST_BSL_KW,scalar_mdot_avg) {$w_mdot_f =  $scalar_mdot_avg ;}
+
+#define ALTERNATIVE_CROSS_DIFFUSION
+#ifdef ALTERNATIVE_CROSS_DIFFUSION
+  $rule pointwise(dhrl::crossDiffusionTerm<-sst2,rho_avg,w,laplace_k,div_w_grad_k,vol),
+    constraint(geom_cells,DHRL_SST_BSL_KW,rho_avg) {
+    // cross diffusion term
+    // t1 = dot(grad(k),grad(w))/w 
+    const real  t1 = ($div_w_grad_k/$w-$laplace_k)/$vol ;
+    $crossDiffusionTerm = 2.*$rho_avg*$sst2.sigmae*t1 ;
+  }
+#else
+  $rule pointwise(dhrl::crossDiffusionTerm<-sst2,rho_avg,w,limitw,
+                  grads(k),grads(w),crossDiffusionCorrection),
+                  constraint(geom_cells,DHRL_SST_BSL_KW,rho_avg) {
+    const real crossterm = $sst2.sigmae*dot($grads(k),$grads(w)) ;
+    // Cross diffusion term limiting for small w
+    const real cdlimit = crossterm<0?($crossDiffusionCorrection):0.0 ;
+    // If term is in destruction mode, limit if omega gradients too severe
+    real lw = crossterm<0?($limitw):1.0 ;
+    $crossDiffusionTerm = lw*2.*$rho_avg*crossterm/($w+cdlimit) ;
+  }
+  $rule pointwise(wilcox08::dhrl::crossDiffusionTerm<-rho_avg,w,grads(k),grads(w)),
+    constraint(vol,Wilcox08Model,DHRL_SST_BSL_KW) {
+    const real crossterm = dot($grads(k),$grads(w)) ;
+    const real sigma_d = crossterm<=0?0.0:0.125 ;
+    $crossDiffusionTerm = sigma_d*$rho_avg*crossterm/$w ;
+  }
+#endif
+
+  // Blending function for BSL model with wall
+  $rule pointwise(dhrl::wall::bF1<-dist_noslip,rho_avg,mu_avg,k,w,crossDiffusionTerm,sst2),
+    constraint(k,w,dist_noslip,geom_cells,SST_BSL,DHRL_SST_BSL_KW,rho_avg) {
+    const real sigma_w2 = $sst2.sigmae ;
+    const real CDmin = 1.0e-10 ; // Menter's new suggested value
+    const real CD = max(CDmin,$crossDiffusionTerm) ;
+    const real y = $dist_noslip ;
+    const real nu = $mu_avg/($rho_avg+EPSILON) ;
+    const real ls = max(sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)) ;
+    const real arg1= min(ls, 4.*$rho_avg*sigma_w2*$k/(CD*y*y)) ;
+    const real arg1_2 = arg1*arg1 ;
+    const real arg1_4 = arg1_2*arg1_2 ;
+    $bF1 = tanh(arg1_4) ;
+  }
+
+  // blending function if there is a wall and it is the SST model
+  $rule pointwise(dhrl::sst::bF2<-k,dist_noslip,w,mu_avg,rho_avg),
+    constraint(SSTModel,dist_noslip,geom_cells,DHRL_SST_BSL_KW,rho_avg) {
+      const real y = $dist_noslip ;
+      const real nu = $mu_avg/($rho_avg+EPSILON) ;
+      real arg2 =max(2.0*sqrt($k)/(0.09*$w*y),500.0*nu/($w*y*y)) ;
+      $bF2 = tanh(arg2*arg2) ;
+  }
+
+  $rule optional(hellstenCorrection) { } 
+  // additional SST correction from Hellsten, aiaa-98-2554
+  $rule pointwise(dhrl::sst::bF3<-k,dist_noslip,w,mu_avg,rho_avg),
+    constraint(SSTModel,geom_cells,hellstenCorrection,dist_noslip,DHRL_SST_BSL_KW,rho_avg) {
+      const real y = $dist_noslip ;
+      const real nu = $mu_avg/($rho_avg+EPSILON) ;
+      const real arg = 150.0*nu/($w*y*y) ;
+      const real arg4 = pow(arg,4) ;
+      $bF3 = 1.-tanh(arg4) ;
+  }
+
+  //round jet parameter
+  $rule pointwise(dhrl::chiw<-sst1m,gradv3d(u_avg),divu_avg,w),
+    constraint(w,DHRL_SST_BSL_KW) { 
+    const real dudx = $gradv3d(u_avg).x.x ;
+    const real dvdy = $gradv3d(u_avg).y.y ;
+    const real dwdz = $gradv3d(u_avg).z.z ;
+    const real dvdx = $gradv3d(u_avg).y.x ;
+    const real dwdx = $gradv3d(u_avg).z.x ;
+    const real dwdy = $gradv3d(u_avg).z.y ;
+    const real dudy = $gradv3d(u_avg).x.y ;
+    const real dudz = $gradv3d(u_avg).x.z ;
+    const real dvdz = $gradv3d(u_avg).y.z ;
+
+    const real wx = dwdy-dvdz ;
+    const real wy = dudz-dwdx ;
+    const real wz = dvdx-dudy ;
+    const real s12 = dudy+dvdx ;
+    const real s13 = dudz+dwdx ;
+    const real s23 = dvdz+dwdy ;
+
+    const real oms = (s12*wx*wy+s13*wx*wz+s23*wy*wz)-
+                     (dudx-0.5*$divu_avg)*(wy*wy+wz*wz) -
+                     (dvdy-0.5*$divu_avg)*(wx*wx+wz*wz) -
+                     (dwdz-0.5*$divu_avg)*(wx*wx+wy*wy) ;
+
+    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
+  }
+
+  $rule pointwise(dhrl::axi::chiw<-sst1m,u_avg,gradv3d(u_avg),divu_avg,w,cellcenter),
+    constraint(w,axisymmetricCoordinateModel,DHRL_SST_BSL_KW) {
+    const real y = $cellcenter.y ;
+    const real dudx = $gradv3d(u_avg).x.x ;
+    const real dvdy = $gradv3d(u_avg).y.y ;
+    const real dwdz = $u_avg.y/y ;
+    const real dvdx = $gradv3d(u_avg).y.x ;
+    const real dwdx = $gradv3d(u_avg).z.x ;
+    const real dwdy = $gradv3d(u_avg).z.y-$u_avg.z/y ;
+    const real dudy = $gradv3d(u_avg).x.y ;
+    const real dudz = 0.0 ;
+    const real dvdz = 0.0 ;
+
+    const real wx = dwdy-dvdz ;
+    const real wy = dudz-dwdx ;
+    const real wz = dvdx-dudy ;
+    const real s12 = dudy+dvdx ;
+    const real s13 = dudz+dwdx ;
+    const real s23 = dvdz+dwdy ;
+
+    const real oms = (s12*wx*wy+s13*wx*wz+s23*wy*wz)-
+                     (dudx-0.5*$divu_avg)*(wy*wy+wz*wz) -
+                     (dvdy-0.5*$divu_avg)*(wx*wx+wz*wz) -
+                     (dwdz-0.5*$divu_avg)*(wx*wx+wy*wy) ;
+
+    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
+  }
+
+  $rule pointwise(dhrl::wilcox98::chiw<-sst1m,gradv3d(u_avg),w),
+    constraint(Wilcox98Model,w,gradv3d(u_avg),DHRL_SST_BSL_KW) {
+    const real dudx = $gradv3d(u_avg).x.x ;
+    const real dvdy = $gradv3d(u_avg).y.y ;
+    const real dwdz = $gradv3d(u_avg).z.z ;
+    const real dvdx = $gradv3d(u_avg).y.x ;
+    const real dwdx = $gradv3d(u_avg).z.x ;
+    const real dwdy = $gradv3d(u_avg).z.y ;
+    const real dudy = $gradv3d(u_avg).x.y ;
+    const real dudz = $gradv3d(u_avg).x.z ;
+    const real dvdz = $gradv3d(u_avg).y.z ;
+
+    const real wx = dwdy-dvdz ;
+    const real wy = dudz-dwdx ;
+    const real wz = dvdx-dudy ;
+    const real s12 = dudy+dvdx ;
+    const real s13 = dudz+dwdx ;
+    const real s23 = dvdz+dwdy ;
+
+    const real oms = dudx*(wy*wy+wz*wz) + dvdy*(wx*wx+wz*wz) +
+      dwdz*(wx*wx+wy*wy) - (s12*wx*wy+s13*wx*wz+s23*wy*wz) ;
+
+    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
+  }
+
+  $rule pointwise(dhrl::axi::wilcox98::chiw<-sst1m,gradv3d(u_avg),w,cellcenter,u_avg),
+    constraint(Wilcox98Model,axisymmetricCoordinateModel,w,gradv3d(u_avg),DHRL_SST_BSL_KW) {
+
+    const real y = $cellcenter.y ;
+    const real dudx = $gradv3d(u_avg).x.x ;
+    const real dvdy = $gradv3d(u_avg).y.y ;
+    const real dwdz = $u_avg.y/y ;
+    const real dvdx = $gradv3d(u_avg).y.x ;
+    const real dwdx = $gradv3d(u_avg).z.x ;
+    const real dwdy = $gradv3d(u_avg).z.y-$u_avg.z/y ;
+    const real dudy = $gradv3d(u_avg).x.y ;
+    const real dudz = 0.0 ;
+    const real dvdz = 0.0 ;
+
+    const real wx = dwdy-dvdz ;
+    const real wy = dudz-dwdx ;
+    const real wz = dvdx-dudy ;
+    const real s12 = dudy+dvdx ;
+    const real s13 = dudz+dwdx ;
+    const real s23 = dvdz+dwdy ;
+
+    const real oms = dudx*(wy*wy+wz*wz) + dvdy*(wx*wx+wz*wz) +
+      dwdz*(wx*wx+wy*wy) - (s12*wx*wy+s13*wx*wz+s23*wy*wz) ;
+
+    $chiw = 0.25*abs(oms/pow($sst1m.betas*$w,3)) ;
+  }
+
+#ifdef TURBULENT_K_DIFFUSION
+  // K equation diffusion term
+  $rule pointwise(dhrl::k_nu_f<-mu_avg_f,tmu_rans_f,sigmak_f),
+    constraint(DHRL_SST_BSL_KW,mu_avg_f) {
+    $k_nu_f = ($mu_avg_f+$tmu_rans_f*$sigmak_f) ;
+  }
+  $rule pointwise(dhrl::wilcox08::k_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmak_f),
+    constraint(k_f,Wilcox08Model,DHRL_SST_BSL_KW) {
+    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    $k_nu_f=($mu_avg_f+kw_tmu_f*$sigmak_f) ;
+  }
+#endif
+
+#ifdef TURBULENT_W_DIFFUSION
+  // omega equation diffusion term
+  $rule pointwise(dhrl::w_nu_f<-mu_avg_f,tmu_rans_f,sigmae_f),
+    constraint(DHRL_SST_BSL_KW,mu_avg_f) {
+    $w_nu_f=($mu_avg_f+$tmu_rans_f*$sigmae_f) ;
+  }
+
+  $rule pointwise(dhrl::wilcox08::w_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmae_f),
+    constraint(w_f,Wilcox08Model,DHRL_SST_BSL_KW) {
+    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    $w_nu_f=($mu_avg_f+kw_tmu_f*$sigmae_f) ;
+  }    
+#endif
+
+#ifdef TURBULENT_PRODUCTION_DESTRUCTION
+  // omega production term
+  $rule pointwise(dhrl::D_w<-sst,P_k,rho_avg,tmu_rans),
+    constraint(DHRL_SST_BSL_KW,rho_avg) {
+    const real tsrc = $P_k ;
+    const real nut = $tmu_rans/($rho_avg+EPSILON) ;
+    $D_w = ($sst.gama/(nut+EPSILON))*tsrc ;
+  }
+
+  $rule pointwise(dhrl::wilcox08::D_w<-sst,P_k,k,w),
+    constraint(vol,Wilcox08Model,DHRL_SST_BSL_KW) {
+    const real tsrc = $P_k ;
+    $D_w = ($sst.gama*$w/($k+EPSILON))*tsrc ;
+  }
+
+  // Modify turbulent kinetic energy and omega destruction terms
+  $rule apply(k_src<-k,w,sst1m,vol,rho,rho_avg,fBetaS)[Loci::Summation],
+    constraint(DHRL_SST_BSL_KW,vol) {
+    const real BetaS = $sst1m.betas*$fBetaS ;
+    
+    $k_src -= BetaS*($rho_avg-$rho)*$w*$k*$vol ;
+  }
+
+  $rule apply(w_src<-k,w,sst,vol,rho,rho_avg)[Loci::Summation],
+    constraint(DHRL_SST_BSL_KW,vol) {
+    $w_src -= $sst.beta*($rho_avg-$rho)*$w*$w*$vol ;
+  }
+
+  // Modify destruction jacobian
+  $rule apply(k_srcJ<-vol,k,w,sst1m,fBetaS,rho,rho_avg)[Loci::Summation],
+    constraint(DHRL_SST_BSL_KW,vol) {
+    $k_srcJ += -$sst1m.betas*$fBetaS*($rho_avg-$rho)*$w*$vol ;
+  }
+
+  $rule apply(w_srcJ<-vol,k,w,sst,rho,rho_avg)[Loci::Summation],
+    constraint(DHRL_SST_BSL_KW,vol) {
+    $w_srcJ += -2.0*$sst.beta*($rho_avg-$rho)*$w*$vol ;
+  }
+#endif
+
+
+#ifdef CROSS_DIFFUSION_JACOBIAN
+  // Cross diffusion term approximate jacobian
+  $rule apply(w_srcJ<-grads(k),grads(w),sst2,bF1,vol,w,rho,rho_avg)[Loci::Summation],
+    constraint(SST_BSL,DHRL_SST_BSL_KW,vol) {
+    real crossterm = max(dot($grads(k),$grads(w)),0.) ;
+    // Cross diffusion term limiting for small w
+    //    const real cdtmp = *crossDiffusionCorrection ;
+    //      const real cdlimit = crossterm<0?cdtmp:0.0 ;
+    real sigmae = $sst2.sigmae ;
+    const real blend = (1.0-$bF1)*($rho_avg-$rho) ;
+    $w_srcJ += -2.*blend*sigmae*crossterm*$vol/($w*$w) ;
+  }
+
+  $rule apply(w_srcJ<-grads(k),grads(w),vol,w,rho,rho_avg)[Loci::Summation],
+    constraint(vol,Wilcox08Model,DHRL_SST_BSL_KW) {
+    real crossterm = dot($grads(k),$grads(w)) ;
+    const real sigma_d = crossterm<=0?0.0:0.125 ;
+    $w_srcJ -= ($rho_avg-$rho)*sigma_d*crossterm*$vol/($w*$w) ;
+  }
+#endif
+
+
+#ifdef TURBULENT_COMPRESIBILITY_CORRECTION
+  // Compressibility Correction term
+  $rule pointwise(Dk_Corr,Dw_Corr<-wilcox_xi,wilcox_Mto,wilcox_om,fBetaS,k,w,sst1m,
+                  rho,soundSpeed,vol), constraint(geom_cells,DHRL_SST_BSL_KW) {
+    // Compute Sarkar Compressibility Correction with Wilcox Correction
+
+    // Turbulent mach Number
+    const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
+    // Turblent mach number cutoff
+    const real mt0 = $wilcox_Mto ;
+    const real fmt = max(Mt2-mt0*mt0,0.0) ;
+    // compressibility dissipation constant (adjusted from Sarkars original
+    // value
+    const real psi = $wilcox_xi ;
+
+    // The result is an adjustment to the beta's in the k and omega
+    const real BetaF = $sst1m.betas*$fBetaS*psi*fmt ;
+
+    // destruction of k due to compressibility
+    $Dk_Corr = BetaF*$rho*$w*$k*$vol ;
+    $Dw_Corr = -BetaF*$rho*$w*$w*$vol*$wilcox_om ;
+  }
+
+  $rule pointwise(Dk_Corr_avg<-scalarMean(Dk_Corr)) {
+    $Dk_Corr_avg = $scalarMean(Dk_Corr) ;
+  }
+
+  $rule pointwise(Dw_Corr_avg<-scalarMean(Dw_Corr)) {
+    $Dw_Corr_avg = $scalarMean(Dw_Corr) ;
+  }
+
+  $rule apply(k_src<-Dk_Corr,Dk_Corr_avg)[Loci::Summation], 
+    constraint(DHRL_SST_BSL_KW,Dk_Corr) {
+    $k_src -= ($Dk_Corr_avg - $Dk_Corr) ;
+  }
+
+  $rule apply(w_src<-Dw_Corr,Dw_Corr_avg)[Loci::Summation],
+    constraint(DHRL_SST_BSL_KW,Dw_Corr) {
+    $w_src -= ($Dw_Corr_avg - $Dw_Corr) ;
+  }
+#endif
+
+  // Computation of stress_scalar term found in turbulence production
+  $rule pointwise(dhrl::stress_scalar<-strainRateMag_avg,divu_avg,vortMag_avg,tmu_rans,rho_avg,k),
+    constraint(DHRL_SST_BSL_KW,k,tmu_rans) {
+    const real S = $strainRateMag_avg ;
+    const real Omega = $vortMag_avg ;
+    $stress_scalar=max($tmu_rans*(S*Omega-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+                       0.0) ;
+  }
+  
+  $rule pointwise(dhrl::total::stress_scalar<-rho_avg,k,divu_avg,tmu_rans,strainRateMag_avg),
+    constraint(tmu_rans,k,total_production,DHRL_SST_BSL_KW) {
+    const real S2 = $strainRateMag_avg*$strainRateMag_avg ;
+    $stress_scalar =  $tmu_rans*(S2 - 2./3.*$divu_avg*$divu_avg) - 2./3.*$rho_avg*$k*$divu_avg ;
+  }
+
+  $rule pointwise(dhrl::vorticity::stress_scalar<-tmu_rans,rho_avg,k,divu_avg,vortMag_avg),
+    constraint(vorticity_production,k,tmu_rans,DHRL_SST_BSL_KW) {
+    const real O2 = $vortMag_avg*$vortMag_avg ;
+    
+    $stress_scalar = max($tmu_rans*(O2-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+                         0.0) ;
+  }    
+
+  $rule pointwise(dhrl::vortex_correction::stress_scalar<-tmu_rans,rho_avg,k,divu_avg,
+                  vortMag_avg,strainRateMag_avg,Cvor),
+    constraint(vortex_preserving_production,k,tmu_rans,DHRL_SST_BSL_KW) {
+    const real O = max($vortMag_avg + $Cvor*(min($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
+    const real S = $strainRateMag_avg ;
+    $stress_scalar = max($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+                         0.0);
+  }    
+
+  $rule pointwise(dhrl::shear::stress_scalar<-gradv3d(u_avg),tmu_rans),
+    constraint(shear_production,tmu_rans,gradv3d(u_avg),DHRL_SST_BSL_KW) {
+    const real tmu = $tmu_rans ;
+    const real dvdx = $gradv3d(u_avg).y.x ;
+    const real dwdx = $gradv3d(u_avg).z.x ;
+    const real dwdy = $gradv3d(u_avg).z.y ;
+    const real dudy = $gradv3d(u_avg).x.y ;
+    const real dudz = $gradv3d(u_avg).x.z ;
+    const real dvdz = $gradv3d(u_avg).y.z ;
+
+    $stress_scalar = tmu*((dudy+dvdx)*(dudy+dvdx)+(dudz+dwdx)*(dudz+dwdx)
+                             +(dvdz+dwdy)*(dvdz+dwdy)) ;
+  }
+
+  $rule pointwise(dhrl::P_k<-sst1m,stress_scalar,Kprod_clip,k,w,rho_avg,fBetaS),
+    constraint(DHRL_SST_BSL_KW,rho_avg) {
+    const real BetaS = $sst1m.betas*$fBetaS ;
+    $P_k = min($stress_scalar, ($Kprod_clip)*$rho_avg*BetaS*$k*$w) ;
+  }
+
   // Modifications specific to particular LES models used
+
   // MILES
   $rule pointwise(tmu_sgs<-mu) {$tmu_sgs = 1.e-12*$mu ;}
+
 
 }

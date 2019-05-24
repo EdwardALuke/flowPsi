@@ -38,87 +38,31 @@ $include "dhrl.lh"
 
 namespace flowPsi {
 
-  $type enthalpy_avg store<real> ;
-  $type cput store<vect3d> ;
-  $type cp_avg store<real> ; // Favre-averaged specific heat
-  $type cput_avg store<vect3d> ;
-
-  $type kcond_rans_eff_f store<real> ;
-  $type kcond_rans store<real> ;
-  $type kcond_rans_f store<real> ;
-  $type turbulent_transport param<turbulent_transport> ; 
-
-
-  $type vis_flux_rans store<vect3d> ; // RANS component viscous flux contributions ...
-  $type vis_energy_flux_rans store<real> ;
-  $type heat_flux_rans store<real> ;
-
-  $type ransFluxBlendMomentum param<real> ; // Weight mean versus instantaneous gradients to be used
-  $type ransFluxBlendEnergy param<real> ;   // in RANS flux terms. 0 = pure instantaneous, 1 = pure mean (default)
-
-
-  $type qf_f store<real> ; // Face mass flux
-  $rule pointwise(qf_f<-iflux) { $qf_f = $iflux[0] ; }
-  $type scalar_mdot_f store<real> ;
-  // Reynolds-averaged face mass flux
-  $rule pointwise(dhrl::scalar_mdot_f<-scalarMeanAll_f(qf_f))
-  { $scalar_mdot_f = $scalarMeanAll_f(qf_f) ; }
-
-    $type scalarRhon store<real> ;
-  $type scalarRhonm1 store<real> ;
-
-  $rule pointwise(dhrl::scalarRhon{n,it}<-rho_t{n,it}) {
-    $scalarRhon{n,it} = $rho_t{n,it} ;
-  }
-  $rule pointwise(dhrl::scalarRhonm1{n,it}<-rho_t{n,it}) {
-    $scalarRhonm1{n,it} = $rho_t{n,it} ;
-  }
-
-    $rule pointwise(enthalpy_avg<-Cp,scalarFavreMean(temperature)) {
-    $enthalpy_avg = $Cp*$scalarFavreMean(temperature) ;
-  }
-
-  $rule pointwise(cput<-Cp,u,temperature) {
-    $cput = $Cp*$u*$temperature ;
-  }
-
-  $rule pointwise(cput_avg<-vect3dFavreMean(cput),u_avg,enthalpy_avg) {
-    $cput_avg = $vect3dFavreMean(cput) - $u_avg*$enthalpy_avg ;
-  }
-
-  $rule pointwise(cp_avg<-Cp) {
-    $cp_avg = $Cp ;
-  }
-
   // Implement RANS terms in governing equations 
 
   //Add RANS flux at face fc to cl[fc] cells
   $rule apply(cl->src<-vis_flux_rans,vis_energy_flux_rans,heat_flux_rans)[Loci::Summation],
     constraint(cl->geom_cells,no_symmetry_BC,DHRL_SST_BSL_KW,DHRL_SRC) {
+
     const int mi = 1 ;
     const int ei = 4;
-
-    $cl->$src[mi+0] += $vis_flux_rans.x ;
-    $cl->$src[mi+1] += $vis_flux_rans.y ;
-    $cl->$src[mi+2] += $vis_flux_rans.z ;
+    $cl->$src[mi+0] += $vis_flux_rans[0] ;
+    $cl->$src[mi+1] += $vis_flux_rans[1] ;
+    $cl->$src[mi+2] += $vis_flux_rans[2] ;
     $cl->$src[ei] += $vis_energy_flux_rans + $heat_flux_rans ;
   }
-  //Add RANS flux at face fc to cr[fc] cells
+    //Add RANS flux at face fc to cr[fc] cells
   $rule apply(cr->src<-vis_flux_rans,vis_energy_flux_rans,heat_flux_rans)[Loci::Summation],
     constraint(cr->geom_cells,no_symmetry_BC,DHRL_SST_BSL_KW,DHRL_SRC) {
 
     const int mi = 1 ;
-    const int ei = 4 ;
-
-    $cr->$src[mi+0] -= $vis_flux_rans.x ;
-    $cr->$src[mi+1] -= $vis_flux_rans.y ;
-    $cr->$src[mi+2] -= $vis_flux_rans.z ;
+    const int ei = 4;
+    $cr->$src[mi+0] -= $vis_flux_rans[0] ;
+    $cr->$src[mi+1] -= $vis_flux_rans[1] ;
+    $cr->$src[mi+2] -= $vis_flux_rans[2] ;
     $cr->$src[ei] -= $vis_energy_flux_rans + $heat_flux_rans ;
   }
 
-  // compute analytical viscous flux Jacobian at interior faces based on
-  // thin layer linear approximation of gradients
-  // Include contribution to Jacobian from instantaneous part of RANS flux
   $rule apply(fjm<-u_f,vis_flux_rans,area,tmu_rans_eff_f,ransFluxBlendMomentum,
               kcond_rans_eff_f,ransFluxBlendEnergy,cr->u,(cr,cl)->cellcenter,us_n)[Loci::Summation],
     constraint(vis_flux_rans,(cr,cl)->vol) {
@@ -259,9 +203,6 @@ namespace flowPsi {
   }
 
   // Output controls
-
-
-
   $type machNumber store<real> ;
   $rule pointwise(machNumber<-u,soundSpeed) {
     $machNumber = norm($u)/$soundSpeed ;
@@ -274,28 +215,94 @@ namespace flowPsi {
   $type mach_avg_f store<real> ;
   $rule pointwise(mach_avg_f<-ci->mach_avg) {
     $mach_avg_f = $ci->$mach_avg ;
-  }
+  } 
+
+  
 
 #ifdef OUTPUT_AVERAGES
-  OUTPUT_SCALAR_ALWAYS("cell2nodeMaxMag(k_resid)",k_resid) ;
+  $type u_mean store<real> ;
+  $type u_mean_f store<real> ;
+  $rule pointwise(u_mean<-u_avg) {$u_mean = $u_avg.x ;}
+  $rule pointwise(u_mean_f<-ci->u_mean) {$u_mean_f = $ci->$u_mean ;}
+  $rule pointwise(wall::u_mean_f), constraint(viscousWall_BC) {$u_mean_f = 0. ;}
+  $type v_mean store<real> ;
+  $type v_mean_f store<real> ;
+  $rule pointwise(v_mean<-u_avg) {$v_mean = $u_avg.y ;}
+  $rule pointwise(v_mean_f<-ci->v_mean) {$v_mean_f = $ci->$v_mean ;}
+  $rule pointwise(wall::v_mean_f), constraint(viscousWall_BC) {$v_mean_f = 0. ;}
+  $type w_mean store<real> ;
+  $type w_mean_f store<real> ;
+  $rule pointwise(w_mean<-u_avg) {$w_mean = $u_avg.z ;}
+  $rule pointwise(w_mean_f<-ci->w_mean) {$w_mean_f = $ci->$w_mean ;}
+  $rule pointwise(wall::w_mean_f), constraint(viscousWall_BC) {$w_mean_f = 0. ;}
+  $type vel_avg store<real> ;
+  $rule pointwise(vel_avg<-u_mean,v_mean,w_mean) {
+    $vel_avg = sqrt($u_mean*$u_mean+$v_mean*$v_mean+$w_mean*$w_mean) ;
+  }
+  $type vel_avg_f store<real> ;
+  $rule pointwise(vel_avg_f<-u_mean_f,v_mean_f,w_mean_f) {
+    $vel_avg_f = sqrt($u_mean_f*$u_mean_f+$v_mean_f*$v_mean_f+$w_mean_f*$w_mean_f) ;
+  }
+  $type p_avg store<real> ;
+  $rule pointwise(p_avg<-scalarMean(pressure)) {$p_avg = $scalarMean(pressure) ;}
+  $type p_avg_f store<real> ;
+  $rule pointwise(p_avg_f<-ci->p_avg) {
+    $p_avg_f = $ci->$p_avg ;
+  }  
+
+  $type tau_wall_mean store<vect3d> ;
+  $rule pointwise(tau_wall_mean<-gradv3d_f(u_avg),mu_avg_f,area), constraint(viscousWall_BC) {
+    symmetricTensor tauw ;
+    const vect3d an = $area.n ;
+    real mu = $mu_avg_f ;
+
+    real dudx = $gradv3d_f(u_avg).x.x ;
+    real dvdy = $gradv3d_f(u_avg).y.y ;
+    real dwdz = $gradv3d_f(u_avg).z.z ;
+    real dvdx = $gradv3d_f(u_avg).y.x ;
+    real dwdx = $gradv3d_f(u_avg).z.x ;
+    real dwdy = $gradv3d_f(u_avg).z.y ;
+    real dudy = $gradv3d_f(u_avg).x.y ;
+    real dudz = $gradv3d_f(u_avg).x.z ;
+    real dvdz = $gradv3d_f(u_avg).y.z ;
+
+    real divm = (dudx+dvdy+dwdz)*(1./3.) ;
+    tauw.xx = 2.0*mu*(dudx-divm) ;
+    tauw.yy = 2.0*mu*(dvdy-divm) ;
+    tauw.zz = 2.0*mu*(dwdz-divm) ;
+    tauw.xy = mu*(dudy+dvdx) ;
+    tauw.xz = mu*(dudz+dwdx) ;
+    tauw.yz = mu*(dvdz+dwdy) ;
+
+    $tau_wall_mean.x = tauw.xx*an.x + tauw.xy*an.y + tauw.xz*an.z ;
+    $tau_wall_mean.y = tauw.xy*an.x + tauw.yy*an.y + tauw.yz*an.z ;
+    $tau_wall_mean.z = tauw.xz*an.x + tauw.yz*an.y + tauw.zz*an.z ;
+  }
+
+  OUTPUT_SCALAR_ALWAYS("cell2node(u_mean)",u_mean) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(v_mean)",v_mean) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(w_mean)",w_mean) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(rho_avg)",rho_avg) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(p_avg)",p_avg) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(temp_avg)",temp_avg) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(alpha_dhrl)",alpha_dhrl) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(alpha_energy_dhrl)",alpha_energy_dhrl) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(alpha_mass_dhrl)",alpha_mass_dhrl) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(s_ratio)",s_ratio) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(mach_avg)",mach_avg) ;
-  OUTPUT_SCALAR_ALWAYS("cell2node(tmuu_rans)",tmuu_rans) ;
-  OUTPUT_SCALAR_ALWAYS("cell2nodeMaxMag(k_src)",k_src) ;
+  OUTPUT_SCALAR("cell2node(tmu_rans)",tmu_rans) ;
+  OUTPUT_BNDRY_VECTOR("tau_wall_mean",tau_wall_mean,"AllViscousBCs") ;
 #else
-  OUTPUT_SCALAR_ALWAYS("cell2node(mach_avg)",mach_avg) ;
-  OUTPUT_SCALAR("cell2node(temp_avg)",temp_avg) ;
   OUTPUT_SCALAR("cell2node(alpha_dhrl)",alpha_dhrl) ;
   OUTPUT_SCALAR("cell2node(alpha_energy_dhrl)",alpha_energy_dhrl) ;
+  OUTPUT_SCALAR("cell2node(alpha_mass_dhrl)",alpha_mass_dhrl) ;
   OUTPUT_SCALAR("cell2node(s_ratio)",s_ratio) ;
-  OUTPUT_SCALAR("cell2node(tmuu_rans)",tmuu_rans) ;
+  OUTPUT_SCALAR("cell2node(tmu_rans)",tmu_rans) ;
+  OUTPUT_SCALAR_ALWAYS("cell2node(mach_avg)",mach_avg) ;
 #endif
 
 
-  //#define TEST_OUTPUT
+//#define TEST_OUTPUT
 #ifdef TEST_OUTPUT
   $type sij_sij_avg_f store<real> ;
   $rule pointwise(sij_sij_avg_f<-ci->sij_sij_avg) {
@@ -311,7 +318,7 @@ namespace flowPsi {
     const real s13_avg = 0.5*($gradv3d(u_avg).x.z+$gradv3d(u_avg).z.x) ;
     const real s23_avg = 0.5*($gradv3d(u_avg).y.z+$gradv3d(u_avg).z.y) ;
     $s_mean_2 = s11_avg*s11_avg+s22_avg*s22_avg+s33_avg*s33_avg
-      + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
+                       + 2.*(s12_avg*s12_avg+s13_avg*s13_avg+s23_avg*s23_avg) ;
   }
   $type s_mean_2_f store<real> ;
   $rule pointwise(s_mean_2_f<-ci->s_mean_2) {
@@ -321,6 +328,4 @@ namespace flowPsi {
   OUTPUT_SCALAR_ALWAYS("cell2node(sij_sij_avg)",sij_sij_avg) ;
   OUTPUT_SCALAR_ALWAYS("cell2node(s_mean_2)",s_mean_2) ;
 #endif
-
 }
-

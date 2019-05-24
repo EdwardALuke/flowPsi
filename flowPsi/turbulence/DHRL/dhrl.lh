@@ -66,6 +66,7 @@
   $type hflux_scalar_rans store<real> ;
   $type hflux_scalar_sgs store<real> ;
   $type cp_avg store<real> ;
+  $type cput store<vect3d> ;
   $type cput_avg store<vect3d> ;
   $type scalar_mdot_avg store<real> ;
   $type alpha_energy_dhrl store<real> ; // DHRL blending parameter (energy)
