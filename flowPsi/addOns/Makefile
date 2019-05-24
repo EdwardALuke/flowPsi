@@ -9,7 +9,7 @@ gridMotion: FRC
 onlineStats: FRC
 	$(MAKE) -C onlineStats FLOWPSI_BASE="$(FLOWPSI_BASE)" all     
 
-onlineStats: FRC
+actuatorDisk: FRC
 	$(MAKE) -C actuatorDisk FLOWPSI_BASE="$(FLOWPSI_BASE)" all     
 
 clean: FRC
