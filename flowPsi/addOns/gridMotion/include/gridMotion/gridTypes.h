@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -39,6 +39,24 @@ namespace gridMotion {
   using Loci::const_Mat ;
   using Loci::Mat ;
   using Loci::stopWatch ;
+
+#ifdef USE_AUTODIFF
+  typedef Loci::real_t real ;
+  typedef Loci::real_t realF ;
+
+#define REAL_MPI_TYPE Loci::MPI_FADD 
+#define REALF_MPI_TYPE Loci::MPI_FADD 
+#else	
+  typedef double real ;
+  typedef float realF ;
+#define REAL_MPI_TYPE MPI_DOUBLE
+#define REALF_MPI_TYPE MPI_FLOAT
+#endif
+
+typedef Loci::vector3d<real> vect3d ;
+typedef vector3d<real> vect3d;
+typedef tensor3d<real> tens3d;
+
 }
 #else
 #include <iostream>
@@ -1118,9 +1136,8 @@ namespace gridMotion {
 #endif
 namespace gridMotion {
   struct Quaternion {
-    typedef vector3d<double> vect3d;
-    typedef tensor3d<double> tens3d;
-    typedef double real;
+    typedef vector3d<real> vect3d;
+    typedef tensor3d<real> tens3d;
     real x,y,z,w ;
     Quaternion() {}
     Quaternion(real xi, real yi, real zi, real wi):x(xi),y(yi),z(zi),w(wi) {}

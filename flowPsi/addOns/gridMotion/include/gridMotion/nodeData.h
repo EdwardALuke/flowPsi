@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -24,16 +24,16 @@
 namespace gridMotion {
 
   struct nodeDataBase {
-    vector3d<float> pos ;
-    float weight ;
+    vector3d<realF> pos ;
+    realF weight ;
     int order ;
   } ;
 
   struct NodeData {
-    vector3d<double> pos;
-    vector3d<float> disp;
+    vector3d<real> pos;
+    vector3d<realF> disp;
     Rotor            rot;
-    float           weight ;
+    realF           weight ;
   };
 
   inline std::ostream & operator<<(std::ostream & lhs, const NodeData & rhs) {

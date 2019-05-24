@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -58,8 +58,8 @@ namespace gridMotion {
   Rotor::Rotor(const vect3d & u, const vect3d & v)
     : alpha(1), beta(0,0,0) {
 
-    const double uSq = dot(u,u);
-    const double vSq = dot(v,v);
+    const real uSq = dot(u,u);
+    const real vSq = dot(v,v);
     if (uSq == 0.0 || vSq == 0.0) {
       // Degenerate vectors so rotation is zero
       return ;
@@ -76,7 +76,8 @@ namespace gridMotion {
       // Both vectors are oriented in opposite directions.
       // This implies a Pi-radian rotation about an axis perpendicular
       // to the two given vectors.
-      vect3d n(randf(), randf(), randf());
+      //      vect3d n(randf(), randf(), randf());
+      vect3d n(drand48(),drand48(),drand48()) ;
       // Orthogonalize this vector with respect to U.
       n = n - dot(n,U)*U;
       alpha = 0;
@@ -260,11 +261,11 @@ namespace gridMotion {
                       pow(alpha,2)-pow(beta.x,2)-pow(beta.y,2)+pow(beta.z,2)));
 
       // Required for nomalization
-      double ralpha = 1.0/((alpha>0)?(alpha+1e-30):(alpha-1e-30));
+      real ralpha = 1.0/((alpha>0)?(alpha+1e-30):(alpha-1e-30));
       // Required for chain rule to eliminate alpha
-      double dAlphadBetaX = (-ralpha)*beta.x;
-      double dAlphadBetaY = (-ralpha)*beta.y;
-      double dAlphadBetaZ = (-ralpha)*beta.z;
+      real dAlphadBetaX = (-ralpha)*beta.x;
+      real dAlphadBetaY = (-ralpha)*beta.y;
+      real dAlphadBetaZ = (-ralpha)*beta.z;
       // Components of the Jacobian of the rotation matrix
       tens3d dRdAlpha( vect3d(  2*alpha,  -2*beta.z,  2*beta.y ),
                        vect3d(  2*beta.z,  2*alpha,  -2*beta.z ),
@@ -281,7 +282,7 @@ namespace gridMotion {
 
       // Jacobian matrix of Rotation operator
       // Chain in alpha dependence on beta to eliminate alpha from Jacobian
-      vector3d< vector3d<double> > dRdQ[3];
+      vector3d< vector3d<real> > dRdQ[3];
       dRdQ[0] = dRdBetaX + dRdAlpha*dAlphadBetaX;
       dRdQ[1] = dRdBetaY + dRdAlpha*dAlphadBetaY;
       dRdQ[2] = dRdBetaZ + dRdAlpha*dAlphadBetaZ;
@@ -289,18 +290,18 @@ namespace gridMotion {
       // Construct transpose(A)*A and transpose(A)*b
 
       // LHS (Jacobian) of the system of equations to be solved
-      double M[9] = {
+      real M[9] = {
         0, 0, 0,
         0, 0, 0,
         0, 0, 0
       };
-      Mat<double> ATA(M, 3);
+      Mat<real> ATA(M, 3);
       // RHS (residual) of the system of equations to be solved
-      double ATb[3] = {
+      real ATb[3] = {
         0, 0, 0
       };
       // Sum of the squares of the magnitudes of the residual vectors
-      double bTb = 0.0;
+      real bTb = 0.0;
       vector< pair<vect3d,vect3d> >::const_iterator itr;
       for (itr=edgeData.begin(); itr!=edgeData.end(); ++itr) {
         const vect3d u  = itr->first;
@@ -338,13 +339,13 @@ namespace gridMotion {
       }
 #endif
 
-      double x[3] = {
+      real x[3] = {
         0, 0, 0
       };
 
       pivot_type piv[6];
       ATA.decompose_lu_pivot(piv);
-      double mindiag = min(min(fabs(ATA[0][0]),fabs(ATA[1][1])),
+      real mindiag = min(min(fabs(ATA[0][0]),fabs(ATA[1][1])),
                            fabs(ATA[2][2])) ;
       if(mindiag < 1e-10) { // matrix singular, abort with no rotation
         beta = vect3d(0,0,0) ;
@@ -354,9 +355,9 @@ namespace gridMotion {
         
       ATA.solve_lu_pivot(ATb, x, piv);
 
-      double del = x[0]*x[0]+x[1]*x[1]+x[2]*x[2] ;
-      double err = 0 ;
-      double scale = 1.0 ;
+      real del = x[0]*x[0]+x[1]*x[1]+x[2]*x[2] ;
+      real err = 0 ;
+      real scale = 1.0 ;
 
       // Don't allow too much change in one step
       if(del > 0.01) 
@@ -366,10 +367,10 @@ namespace gridMotion {
       int nsearch = 16 ;
       for(int i=0;i<nsearch;++i) {
 	vect3d betat(beta.x+scale*x[0],beta.y+scale*x[1],beta.z+scale*x[2]) ;
-	double beta2t = dot(betat,betat);
-	double alphat = 0.0 ;
+	real beta2t = dot(betat,betat);
+	real alphat = 0.0 ;
 	if (beta2t > 1.) {
-	  double rbeta = 1.0/(sqrt(beta2t));
+	  real rbeta = 1.0/(sqrt(beta2t));
 	  betat *= rbeta;
 	} else {
 	  alphat = sqrt(1.-beta2t);
@@ -385,7 +386,7 @@ namespace gridMotion {
 			2*(betat.z*betat.y + alphat*betat.x),
 			pow(alphat,2)-pow(betat.x,2)-pow(betat.y,2)+pow(betat.z,2)));
 	
-	double bTbt= 0 ;
+	real bTbt= 0 ;
 	for (itr=edgeData.begin(); itr!=edgeData.end(); ++itr) {
 	  const vect3d u  = itr->first;
 	  const vect3d du = itr->second;
@@ -411,9 +412,9 @@ namespace gridMotion {
 
 
       // compute normalized quaternion
-      double beta2 = dot(beta,beta);
+      real beta2 = dot(beta,beta);
       if (beta2 > 1) {
-        double rbeta = 1.0/(sqrt(beta2)+1e-30);
+        real rbeta = 1.0/(sqrt(beta2)+1e-30);
         beta *= rbeta;
         alpha = 0.0;
       }
@@ -431,8 +432,8 @@ namespace gridMotion {
     beta.x = (fabs(beta.x)<1e-9)?0.0:beta.x ;
     beta.y = (fabs(beta.y)<1e-9)?0.0:beta.y ;
     beta.z = (fabs(beta.z)<1e-9)?0.0:beta.z ;
-    double beta2 = dot(beta,beta);
-    alpha = sqrt(max(1.-beta2,0.));
+    real beta2 = dot(beta,beta);
+    alpha = sqrt(max<real>(1.-beta2,0.));
   }
 
   /**
@@ -458,8 +459,8 @@ namespace gridMotion {
     }
 
     const int maxNewtonIter = 25;
-    const double absTol = 1e-14;
-    const double relTol = 1e-7;
+    const real absTol = 1e-14;
+    const real relTol = 1e-7;
 
     // Normalize the desired axis of rotation
     const vect3d ax = axis/norm(axis);
@@ -467,7 +468,7 @@ namespace gridMotion {
     const vect3d zx(0,0,1);
     const vect3d wx = ax+zx/norm(ax+zx);
     const Rotor R0(ax,wx);
-    double alp(1), bet(0);
+    real alp(1), bet(0);
     // Construct an initial guess for alp and bet
     vector< pair<vect3d,vect3d> >::const_iterator itr;
     for (itr=edgeData.begin(); itr!=edgeData.end(); ++itr) {
@@ -502,30 +503,30 @@ namespace gridMotion {
     }
 
     bool converged = false;
-    double prevErr = 1e30;
+    real prevErr = 1e30;
     for (int n=0; n<maxNewtonIter && !converged; ++n) {
-      double R[2][2] = {
+      real R[2][2] = {
         { alp, -bet },
         { bet,  alp }
       };
 
       // Required for nomalization
-      double ralp = 1.0/alp;
+      real ralp = 1.0/alp;
       // Required for chain rule to eliminate alpha
-      double dAlpdBet = (-ralp)*bet;
+      real dAlpdBet = (-ralp)*bet;
       // Components of the Jacobian of the rotation matrix
-      double dRdAlp[2][2] = {
+      real dRdAlp[2][2] = {
         {  1,  0 },
         {  0,  1 }
       };
-      double dRdBet[2][2] = {
+      real dRdBet[2][2] = {
         {  0, -1 },
         {  1,  0 }
       };
 
       // Jacobian matrix of Rotation operator
       // Chain in alpha dependence on beta to eliminate alpha from Jacobian
-      double dRdQ[2][2];
+      real dRdQ[2][2];
       for (int i=0; i<2; ++i) {
         for (int j=0; j<2; ++j) {
           dRdQ[i][j] = dRdBet[i][j] + dRdAlp[i][j]*dAlpdBet;
@@ -535,13 +536,13 @@ namespace gridMotion {
       // Construct transpose(A)*A and transpose(A)*b
 
       // LHS (Jacobian) of the system of equations to be solved
-      double ATA = 0;
+      real ATA = 0;
 
       // RHS (residual) of the system of equations to be solved
-      double ATb = 0;
+      real ATb = 0;
 
       // Sum of the squares of the magnitudes of the residual vectors
-      double bTb = 0.0;
+      real bTb = 0.0;
       vector< pair<vect3d,vect3d> >::const_iterator itr;
       for (itr=edgeData.begin(); itr!=edgeData.end(); ++itr) {
         vect3d u  = itr->first;
@@ -573,8 +574,8 @@ namespace gridMotion {
                           0.0), b);
       }
 
-      double absErr = sqrt(bTb);
-      double relErr = fabs(prevErr-absErr)/prevErr;
+      real absErr = sqrt(bTb);
+      real relErr = fabs(prevErr-absErr)/prevErr;
 
 //         cout << "Iteration: " << n << endl;
 //         cerr << "Current Rotation Matrix:" << endl;
@@ -608,12 +609,12 @@ namespace gridMotion {
 
       prevErr = absErr;
 
-      double x = ATb/ATA;
+      real x = ATb/ATA;
       bet += x;
 
-      double bet2 = bet*bet;
+      real bet2 = bet*bet;
       if (bet2 > 1) {
-        double rbet = 1.0/sqrt(bet2);
+        real rbet = 1.0/sqrt(bet2);
         bet *= rbet;
         alp = 0.0;
       }
@@ -631,8 +632,8 @@ namespace gridMotion {
     const vect3d Z = axis/norm(axis);
     const vect3d w1 = v1 - dot(v1,Z)*Z;
     const vect3d w2 = v2 - dot(v2,Z)*Z;
-    //    const double w1Sq = dot(w1,w1);
-    //    const double w2Sq = dot(w2,w2);
+    //    const real w1Sq = dot(w1,w1);
+    //    const real w2Sq = dot(w2,w2);
 //     if (w1Sq == 0.0 || w2Sq == 0.0) {
 //       cerr << "Failed to project vectors onto plane of rotation\n";
 //       cerr << "axis: " << axis << endl;

@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -25,9 +25,6 @@
 #include "gridTypes.h"
 
 namespace gridMotion {
-  typedef vector3d<double> vect3d;
-  typedef tensor3d<double> tens3d;
-  typedef double real;
 
   using std::cerr;
   using std::endl;
@@ -35,20 +32,20 @@ namespace gridMotion {
   using std::vector;
   using std::pair;
   using std::make_pair ;
-  inline
-  double randf() {
-    return (double)rand()/(double)RAND_MAX;
-  }
+  //  inline
+  //  double randf() {
+  //    return (double)rand()/(double)RAND_MAX;
+  //  }
 
   struct Rotor {
-    float alpha;
-    vector3d<float> beta;
+    realF alpha;
+    vector3d<realF> beta;
 
   public:
     Rotor()
       : alpha(1), beta(0,0,0) {
     }
-    Rotor(const double a, const vect3d & b)
+    Rotor(const real a, const vect3d & b)
       : alpha(a), beta(b) {
     }
     /**
@@ -155,7 +152,7 @@ namespace gridMotion {
      * Addition with assign
      */
     Rotor & operator+=(const Rotor & rhs) {
-      double dotProd = dot(beta,rhs.beta);
+      real dotProd = dot(beta,rhs.beta);
       if (dotProd < 0) {
         alpha -= rhs.alpha;
         beta   = beta - rhs.beta;
@@ -175,13 +172,13 @@ namespace gridMotion {
     /**
      * Scale the rotation angle by a constant factor.
      */
-    Rotor & scaleAngle(const double s) {
+    Rotor & scaleAngle(const real s) {
       // Note: With the quaternion representation,
       //        alpha  = cos(theta/2)
       //        |beta| = sin(theta/2).
-      const double cosHalfThetaSq = alpha*alpha;
-      const double sinHalfThetaSq = dot(beta,beta);
-      const double theta(sinHalfThetaSq < 1e-30 ? 0.0 :
+      const real cosHalfThetaSq = alpha*alpha;
+      const real sinHalfThetaSq = dot(beta,beta);
+      const real theta(sinHalfThetaSq < 1e-30 ? 0.0 :
                          (cosHalfThetaSq < 1e-30 ? M_PI :
                           2*atan2(sqrt(sinHalfThetaSq),sqrt(cosHalfThetaSq))));
       alpha = cos(0.5*s*theta);
@@ -191,13 +188,13 @@ namespace gridMotion {
     /**
      * Return the rotation angle.
      */
-    double angle() const {
+    real angle() const {
       // Note: With the quaternion representation,
       //        alpha  = cos(theta/2)
       //        |beta| = sin(theta/2).
-      const double cosHalfThetaSq = alpha*alpha;
-      const double sinHalfThetaSq = dot(beta,beta);
-      const double theta(sinHalfThetaSq < 1e-30 ? 0.0 :
+      const real cosHalfThetaSq = alpha*alpha;
+      const real sinHalfThetaSq = dot(beta,beta);
+      const real theta(sinHalfThetaSq < 1e-30 ? 0.0 :
                          (cosHalfThetaSq < 1e-30 ? M_PI :
                           2*atan2(sqrt(sinHalfThetaSq),sqrt(cosHalfThetaSq))));
       return theta;
@@ -206,7 +203,7 @@ namespace gridMotion {
      * Return the rotation axis.
      */
     vect3d axis() const {
-      const double sinHalfThetaSq = dot(beta,beta);
+      const real sinHalfThetaSq = dot(beta,beta);
       if (sinHalfThetaSq < 1e-30) {
         // Rotation axis is undefined, assume no rotation.
         return vect3d(0,0,0);
@@ -219,10 +216,10 @@ namespace gridMotion {
      * Return the rotation matrix
      */
     tens3d matrix() const {
-      const double & a  = alpha;
-      const double & bx = beta.x;
-      const double & by = beta.y;
-      const double & bz = beta.z;
+      const real & a  = alpha;
+      const real & bx = beta.x;
+      const real & by = beta.y;
+      const real & bz = beta.z;
       const tens3d R(vect3d((a*a + bx*bx - by*by - bz*bz),
                             (2*bx*by - 2*a*bz),
                             (2*bx*bz + 2*a*by)),
@@ -251,8 +248,8 @@ namespace gridMotion {
    * Rotor norm
    */
   inline
-  double norm(const Rotor & R) {
-    const double lenSq = pow(R.alpha,2) + dot(R.beta,R.beta);
+  real norm(const Rotor & R) {
+    const real lenSq = pow(R.alpha,2) + dot(R.beta,R.beta);
     return ( lenSq > 0 ? sqrt(lenSq) : 0 );
   }
 
@@ -260,7 +257,7 @@ namespace gridMotion {
    * Dot product
    */
   inline
-  double dot(const Rotor & lhs, const Rotor & rhs) {
+  real dot(const Rotor & lhs, const Rotor & rhs) {
     return (lhs.alpha*rhs.alpha - lhs.beta.x*rhs.beta.x -
             lhs.beta.y*rhs.beta.y - lhs.beta.z*rhs.beta.z);
   }
@@ -303,7 +300,7 @@ namespace gridMotion {
    * Scale the Rotor by a constant factor.
    */
   inline
-  Rotor operator*(const double lhs, const Rotor & rhs) {
+  Rotor operator*(const real lhs, const Rotor & rhs) {
     return Rotor(lhs*rhs.alpha, lhs*rhs.beta);
   }
 
@@ -311,7 +308,7 @@ namespace gridMotion {
    * Scale the Rotor by a constant factor.
    */
   inline
-  Rotor operator*(const Rotor & lhs, const double rhs) {
+  Rotor operator*(const Rotor & lhs, const real rhs) {
     return Rotor(rhs*lhs.alpha, rhs*lhs.beta);
   }
 
@@ -319,7 +316,7 @@ namespace gridMotion {
    * Divide by a constant factor.
    */
   inline
-  Rotor operator/(const Rotor & lhs, const double rhs) {
+  Rotor operator/(const Rotor & lhs, const real rhs) {
     return Rotor(lhs.alpha/rhs, lhs.beta/rhs);
   }
 
@@ -338,7 +335,7 @@ namespace gridMotion {
    */
   inline
   Rotor operator+(const Rotor & lhs, const Rotor & rhs) {
-    double dotProd = dot(lhs.beta, rhs.beta);
+    real dotProd = dot(lhs.beta, rhs.beta);
     Rotor R;
     if (dotProd < 0) {
       R.alpha = lhs.alpha - rhs.alpha;
@@ -356,7 +353,7 @@ namespace gridMotion {
    */
   inline
   Rotor operator-(const Rotor & lhs, const Rotor & rhs) {
-    double dotProd = dot(lhs.beta, rhs.beta);
+    real dotProd = dot(lhs.beta, rhs.beta);
     Rotor R;
     if (dotProd < 0) {
       R.alpha = lhs.alpha + rhs.alpha;

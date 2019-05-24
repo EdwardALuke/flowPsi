@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2017, Mississippi State University
+//# Copyright 2017-2019, Mississippi State University
 //#
 //# This file is part of the flowPsi computational fluid dynamics solver.
 //#
@@ -29,130 +29,131 @@ $include "gridMover.lh"
 
 $type approxTree_X blackbox<gridMotion::deformApproxTree> ;
 
-$rule blackbox( approxTree_X<-nodeDataCollection_X),
-  parametric(volumeTag(X)), option(disable_threading ), prelude {
-  vector<gridMotion::NodeData> nodeData = *($nodeDataCollection_X) ;
-  //  int sz = nodeData.size()*sizeof(gridMotion::NodeData) ;
-  // Make sure all processors use the same data ordering
-  //  MPI_Bcast(&nodeData[0],sz,MPI_BYTE,0,MPI_COMM_WORLD) ;
+namespace gridMotion {
+  $rule blackbox( approxTree_X<-nodeDataCollection_X),
+    parametric(volumeTag(X)), option(disable_threading ), prelude {
+    vector<gridMotion::NodeData> nodeData = *($nodeDataCollection_X) ;
+    //  int sz = nodeData.size()*sizeof(gridMotion::NodeData) ;
+    // Make sure all processors use the same data ordering
+    //  MPI_Bcast(&nodeData[0],sz,MPI_BYTE,0,MPI_COMM_WORLD) ;
 
-  buildDeformApprox(*($approxTree_X),nodeData,MPI_COMM_WORLD) ;
+    buildDeformApprox(*($approxTree_X),nodeData,MPI_COMM_WORLD) ;
   
-} ;
+  } ;
 
-//--------------------------------------------------------------------
-$type gridMoveErrorTol                  param<real> ;
-//--------------------------------------------------------------------
-// Setup reporter function
+  //--------------------------------------------------------------------
+  $type gridMoveErrorTol                  param<real> ;
+  //--------------------------------------------------------------------
+  // Setup reporter function
 
-void reportToDebug(string s) {
-  Loci::debugout << s ;
-  Loci::debugout.flush() ;
-}
-
-
-$rule default(gridMoveErrorTol) {
-  gridMotion::registerReporterFunction(reportToDebug) ;
-  $gridMoveErrorTol = 0.1 ;
-}
-
-
-// Compute edge length
-$type minEdgeLength store<float> ;
-
-$rule unit(minEdgeLength),constraint(pos) {
-  $minEdgeLength=1e30 ;
-}
-
-$rule apply(face2node->minEdgeLength<-face2node->pos)[Loci::Minimum] {
-  int fsz = $face2node.size() ;
-  for(int i=0;i<fsz;++i) {
-    int n2 = (i+1)==fsz?0:i+1 ;
-    float len = norm($face2node[i]->$pos-$face2node[n2]->$pos) ;
-    join($face2node[i]->$minEdgeLength,len) ;
-    join($face2node[n2]->$minEdgeLength,len) ;
+  void reportToDebug(string s) {
+    Loci::debugout << s ;
+    Loci::debugout.flush() ;
   }
-}
 
-$rule apply(face2node->minEdgeLength<-area,cl->vol)[Loci::Minimum] {
-  float len = $cl->$vol/max<real>($area.sada,1e-30) ;
-  int fsz = $face2node.size() ;
-  for(int i=0;i<fsz;++i)
-    join($face2node[i]->$minEdgeLength,len) ;
-}
-$rule apply(face2node->minEdgeLength<-area,cr->vol)[Loci::Minimum] {
-  float len = $cr->$vol/max<real>($area.sada,1e-30) ;
-  int fsz = $face2node.size() ;
-  for(int i=0;i<fsz;++i)
-    join($face2node[i]->$minEdgeLength,len) ;
-}
+
+  $rule default(gridMoveErrorTol) {
+    gridMotion::registerReporterFunction(reportToDebug) ;
+    $gridMoveErrorTol = 0.1 ;
+  }
+
+
+  // Compute edge length
+  $type minEdgeLength store<realF> ;
+
+  $rule unit(minEdgeLength),constraint(pos) {
+    $minEdgeLength=1e30 ;
+  }
+
+  $rule apply(face2node->minEdgeLength<-face2node->pos)[Loci::Minimum] {
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i) {
+      int n2 = (i+1)==fsz?0:i+1 ;
+      realF len = norm($face2node[i]->$pos-$face2node[n2]->$pos) ;
+      join($face2node[i]->$minEdgeLength,len) ;
+      join($face2node[n2]->$minEdgeLength,len) ;
+    }
+  }
+
+  $rule apply(face2node->minEdgeLength<-area,cl->vol)[Loci::Minimum] {
+    realF len = $cl->$vol/$area.sada ;
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$minEdgeLength,len) ;
+  }
+  $rule apply(face2node->minEdgeLength<-area,cr->vol)[Loci::Minimum] {
+    realF len = $cr->$vol/$area.sada ;
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$minEdgeLength,len) ;
+  }
   
 
-//--------------------------------------------------------------------
-$rule pointwise(nodeDisp{n}<-approxTree_X{n},pos,
-		gridMotionGlobalAlpha_X{n}, gridMotionGlobalLref_X, gridMotionExpA,
-		gridMotionExpB,gridMoveErrorTol,minEdgeLength{n} ),
-  constraint(meshComponentNodes_X),
-  parametric(volumeTag(X)),
-  option(enable_dynamic_scheduling),
-  prelude {
-  entitySet dom = entitySet(seq) ;
+  //--------------------------------------------------------------------
+  $rule pointwise(nodeDisp{n}<-approxTree_X{n},pos,
+		  gridMotionGlobalAlpha_X{n}, gridMotionGlobalLref_X, gridMotionExpA,
+		  gridMotionExpB,gridMoveErrorTol,minEdgeLength{n} ),
+    constraint(meshComponentNodes_X),
+    parametric(volumeTag(X)),
+    option(enable_dynamic_scheduling),
+    prelude {
+    entitySet dom = entitySet(seq) ;
 
-  const float L = *($gridMotionGlobalLref_X) ;
-  const int a = *($gridMotionExpA) ;
-  const int b = *($gridMotionExpB) ;
-  const float alpha = *($gridMotionGlobalAlpha_X{n}) ;
-  const float aL = alpha*L ;
-  const float errpn = *($gridMoveErrorTol) ;
+    const realF L = *($gridMotionGlobalLref_X) ;
+    const int a = *($gridMotionExpA) ;
+    const int b = *($gridMotionExpB) ;
+    const realF alpha = *($gridMotionGlobalAlpha_X{n}) ;
+    const realF aL = alpha*L ;
+    const realF errpn = *($gridMoveErrorTol) ;
   
-  FORALL(dom,ii) {
-    float err_abs = errpn*$minEdgeLength{n}[ii] ;
-    $nodeDisp{n}[ii] = approxDisplacement($pos[ii],*($approxTree_X{n}),
-						  a,b,L,aL,err_abs) ;
-  } ENDFORALL ;
+    FORALL(dom,ii) {
+      realF err_abs = errpn*$minEdgeLength{n}[ii] ;
+      $nodeDisp{n}[ii] = approxDisplacement($pos[ii],*($approxTree_X{n}),
+					    a,b,L,aL,err_abs) ;
+    } ENDFORALL ;
     
-} ;
+  } ;
 
-//--------------------------------------------------------------------
-$rule pointwise( override::nodeDisp{n} <- pos, nodeDisp_bc{n} ),
-  constraint( participatingNodes) {
-  $nodeDisp{n} = $nodeDisp_bc{n} ;
-}
+  //--------------------------------------------------------------------
+  $rule pointwise( override::nodeDisp{n} <- pos, nodeDisp_bc{n} ),
+    constraint( participatingNodes) {
+    $nodeDisp{n} = $nodeDisp_bc{n} ;
+  }
 
-$rule pointwise(nodeDisp_t{n,it}<-approxTree_X{n,it},pos,
-		gridMotionGlobalAlpha_X{n,it}, gridMotionGlobalLref_X, 
-		gridMotionExpA,gridMotionExpB,gridMoveErrorTol,
-		minEdgeLength{n} ),
-  constraint(meshComponentNodes_X),
-  parametric(volumeTag(X)),
-  option(enable_dynamic_scheduling),
-  prelude {
-  entitySet dom = entitySet(seq) ;
+  $rule pointwise(nodeDisp_t{n,it}<-approxTree_X{n,it},pos,
+		  gridMotionGlobalAlpha_X{n,it}, gridMotionGlobalLref_X, 
+		  gridMotionExpA,gridMotionExpB,gridMoveErrorTol,
+		  minEdgeLength{n} ),
+    constraint(meshComponentNodes_X),
+    parametric(volumeTag(X)),
+    option(enable_dynamic_scheduling),
+    prelude {
+    entitySet dom = entitySet(seq) ;
 
-  const float L = *($gridMotionGlobalLref_X) ;
-  const int a = *($gridMotionExpA) ;
-  const int b = *($gridMotionExpB) ;
-  const float alpha = *($gridMotionGlobalAlpha_X{n,it}) ;
-  const float aL = alpha*L ;
-  const float errpn = *($gridMoveErrorTol) ;
+    const realF L = *($gridMotionGlobalLref_X) ;
+    const int a = *($gridMotionExpA) ;
+    const int b = *($gridMotionExpB) ;
+    const realF alpha = *($gridMotionGlobalAlpha_X{n,it}) ;
+    const realF aL = alpha*L ;
+    const realF errpn = *($gridMoveErrorTol) ;
   
-  FORALL(dom,ii) {
-    float err_abs = errpn*$minEdgeLength{n}[ii] ;
-    $nodeDisp_t{n,it}[ii] = approxDisplacement($pos[ii],*($approxTree_X{n,it}),
-						  a,b,L,aL,err_abs) ;
-  } ENDFORALL ;
+    FORALL(dom,ii) {
+      realF err_abs = errpn*$minEdgeLength{n}[ii] ;
+      $nodeDisp_t{n,it}[ii] = approxDisplacement($pos[ii],*($approxTree_X{n,it}),
+						 a,b,L,aL,err_abs) ;
+    } ENDFORALL ;
     
-} ;
+  } ;
 
-//--------------------------------------------------------------------
-$rule pointwise( override::nodeDisp_t{n,it} <- pos, nodeDisp_bc{n,it} ),
-  constraint( participatingNodes,GM_nonLinearCouplingMode) {
-  $nodeDisp_t{n,it} = $nodeDisp_bc{n,it} ;
+  //--------------------------------------------------------------------
+  $rule pointwise( override::nodeDisp_t{n,it} <- pos, nodeDisp_bc{n,it} ),
+    constraint( participatingNodes,GM_nonLinearCouplingMode) {
+    $nodeDisp_t{n,it} = $nodeDisp_bc{n,it} ;
+  }
+
+  $type surfaceMotionConstraintIdNode store<int> ;
+
 }
-
-$type surfaceMotionConstraintIdNode store<int> ;
-
-
 
 
 

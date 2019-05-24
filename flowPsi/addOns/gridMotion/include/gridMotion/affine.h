@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -26,7 +26,7 @@ namespace gridMotion {
 
   class AffineMatrix {
     /** Helper class - Matrix Row */
-    typedef Array<double,4> Row;
+    typedef Array<real,4> Row;
 
   public:
     Array<Row,4> M;
@@ -91,7 +91,7 @@ namespace gridMotion {
     }
     /** Multiplication with assign operator */
     AffineMatrix & operator*=( const AffineMatrix & N ) {
-      double A[4][4];
+      real A[4][4];
       for (int i=0; i<4; ++i) {
         for (int j=0; j<4; ++j) {
           A[i][j] = 0.0;
@@ -108,7 +108,7 @@ namespace gridMotion {
       return (*this);
     }
     /** Multiplication by a scalar with assign */
-    AffineMatrix & operator*=( const double s ) {
+    AffineMatrix & operator*=( const real s ) {
       for (int i=0; i<4; ++i) {
         for (int j=0; j<4; ++j) {
           M[i][j] *= s;
@@ -117,7 +117,7 @@ namespace gridMotion {
       return (*this);
     }
     /** Division by a scalar with assign */
-    AffineMatrix & operator/=( const double s ) {
+    AffineMatrix & operator/=( const real s ) {
       for (int i=0; i<4; ++i) {
         for (int j=0; j<4; ++j) {
           M[i][j] /= s;
@@ -141,7 +141,7 @@ namespace gridMotion {
      */
     AffineMatrix & rotate(const tens3d R) {
       AffineMatrix N(R);
-      double A[4][4];
+      real A[4][4];
       for (int i=0; i<4; ++i) {
         for (int j=0; j<4; ++j) {
           A[i][j] = 0.0;
@@ -171,35 +171,35 @@ namespace gridMotion {
 
   /** Matrix-Matrix Sum */
   inline AffineMatrix operator+( const AffineMatrix & M,
-                          const AffineMatrix & N ) {
+				 const AffineMatrix & N ) {
     AffineMatrix A(M);
     A += N;
     return A;
   }
   /** Matrix-Matrix Product */
   inline AffineMatrix operator*( const AffineMatrix & M,
-                          const AffineMatrix & N ) {
+				 const AffineMatrix & N ) {
     AffineMatrix A(M);
     A *= N;
     return A;
   }
   /** Scalar-Matrix Product */
-  inline AffineMatrix operator*( const double s,
-                          const AffineMatrix & M ) {
+  inline AffineMatrix operator*( const real s,
+				 const AffineMatrix & M ) {
     AffineMatrix A(M);
     A *= s;
     return A;
   }
   /** Matrix-Scalar Product */
   inline AffineMatrix operator*( const AffineMatrix & M,
-                          const double s ) {
+				 const real s ) {
     AffineMatrix A(M);
     A *= s;
     return A;
   }
   /** Matrix-Scalar Division */
   inline AffineMatrix operator/( const AffineMatrix & M,
-                          const double s ) {
+				 const real s ) {
     AffineMatrix A(M);
     A /= s;
     return A;

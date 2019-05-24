@@ -199,9 +199,9 @@ $rule pointwise( priority::moving::us_n ),
 
       int cnt = 0 ;
       FORALL(nodeSetsurf,nd) {
-        bcnodes_pts[cnt][0] = pos[nd].x ;
-        bcnodes_pts[cnt][1] = pos[nd].y ;
-        bcnodes_pts[cnt][2] = pos[nd].z ;
+        bcnodes_pts[cnt][0] = realToDouble(pos[nd].x) ;
+        bcnodes_pts[cnt][1] = realToDouble(pos[nd].y) ;
+        bcnodes_pts[cnt][2] = realToDouble(pos[nd].z) ;
         bcnodes_ids[cnt] = nd ;
         cnt++ ;
       } ENDFORALL ;
@@ -213,9 +213,9 @@ $rule pointwise( priority::moving::us_n ),
       vector<int> closest(nodeSet.size(),-1) ;
       cnt = 0 ;
       FORALL(nodeSet,nd) {
-        node_pts[cnt][0] = pos[nd].x ;
-        node_pts[cnt][1] = pos[nd].y ;
-        node_pts[cnt][2] = pos[nd].z ;
+        node_pts[cnt][0] = realToDouble(pos[nd].x) ;
+        node_pts[cnt][1] = realToDouble(pos[nd].y) ;
+        node_pts[cnt][2] = realToDouble(pos[nd].z) ;
         cnt++ ;
       } ENDFORALL ;
       

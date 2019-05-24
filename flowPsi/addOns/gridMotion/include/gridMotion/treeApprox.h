@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2017, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -51,36 +51,36 @@ namespace gridMotion {
     vector<int> proctreebase,treeptn ;
     
     // weight approximations
-    vector<float> cweight ;
-    vector<vector3d<float> > centroid ;
-    vector<float> radius ;
-    vector<Array<vector3d<float>,3> > qpts ;
-    vector<float> qerr ;
-    void build(const vector<vector3d<float> > &pnts,
-               const vector<float> &wts,
+    vector<realF> cweight ;
+    vector<vector3d<realF> > centroid ;
+    vector<realF> radius ;
+    vector<Array<vector3d<realF>,3> > qpts ;
+    vector<realF> qerr ;
+    void build(const vector<vector3d<realF> > &pnts,
+               const vector<realF> &wts,
                MPI_Comm comm) ; 
-    void WeightApprox(double &weight, double &werr,
-                      const vector3d<double> &pos, int node, 
-                      int a, int b, double L, double alphaL, double errpn) const ;
+    void WeightApprox(real &weight, real &werr,
+                      const vector3d<real> &pos, int node, 
+                      int a, int b, real L, real alphaL, real errpn) const ;
  } ;    
   class deformApproxTree : public weightApproxTree {
   public:
 
     // Deformation Info
-    vector<vector3d<float> > nodeDisp ;
+    vector<vector3d<realF> > nodeDisp ;
     vector<Rotor> nodeRotors ;
     // deformation approximations
-    vector<Array<vector3d<float>,4> > qdisp ;
-    vector<Array<tensor3d<float>,4> > qrot ;
-    vector<float> drot ;
+    vector<Array<vector3d<realF>,4> > qdisp ;
+    vector<Array<tensor3d<realF>,4> > qrot ;
+    vector<realF> drot ;
       
 
-    void computeDeformationQuadsTree(const vector<double> &weights,
+    void computeDeformationQuadsTree(const vector<real> &weights,
 				     int node) ;
 
-    void TreeApprox(vector3d<double> &disp, double &weight, double &werr,
-		    const vector3d<double> &pos, int node, 
-		    int a, int b, double L, double alphaL, double errpn) const ;
+    void TreeApprox(vector3d<real> &disp, real &weight, real &werr,
+		    const vector3d<real> &pos, int node, 
+		    int a, int b, real L, real alphaL, real errpn) const ;
   } ;
     
 
@@ -90,35 +90,35 @@ namespace gridMotion {
       
   // Return the displacement at location pos meeting the absolute error bound
   // (error no greater than the prescribed value).
-  inline vector3d<double>
-    approxDisplacement(const vector3d<double> &pos,
+  inline vector3d<real>
+    approxDisplacement(const vector3d<real> &pos,
 		       const deformApproxTree &approxTree,
 		       int a,
 		       int b,
-		       double L,
-		       double aL,
-		       double err_abs) {
-    double w = 0 ;
-    double werr = 0 ;
-    vector3d<double> disp(0,0,0) ;
-    vector3d<double> posf(pos.x,pos.y,pos.z) ;
-    double errpn = 0.1 ; // ten percent error target to get cheap estimate of
+		       real L,
+		       real aL,
+		       real err_abs) {
+    real w = 0 ;
+    real werr = 0 ;
+    vector3d<real> disp(0,0,0) ;
+    vector3d<real> posf(pos.x,pos.y,pos.z) ;
+    real errpn = 0.1 ; // ten percent error target to get cheap estimate of
     // displacement
     approxTree.TreeApprox(disp,w,werr,posf,0,a,b,L,aL,errpn) ;
-    vector3d<double> d = disp ;
+    vector3d<real> d = disp ;
     d *= 1./w ;
     // Now we have the cheap displacement and an estimate of the displacement
     // magnitude, so we can convert the absolute error into a relative
     // error
-    double disp_mag = std::max(fabs(d.x)+fabs(d.y)+fabs(d.z),1e-9) ;
+    real disp_mag = std::max<real>(fabs(d.x)+fabs(d.y)+fabs(d.z),1e-9) ;
     errpn = err_abs/disp_mag ;
     // Now check to see if we already met this relative error
     if(errpn < werr/w) {// no so redo approximation
       w = 0 ;
       werr = 0 ;
-      disp = vector3d<double>(0.,0.,0.) ;
+      disp = vector3d<real>(0.,0.,0.) ;
       approxTree.TreeApprox(disp,w,werr,posf,0,a,b,L,aL,errpn) ;
-      vector3d<double> d = disp ;
+      vector3d<real> d = disp ;
       d *= 1./w ;
     }
     return d ;

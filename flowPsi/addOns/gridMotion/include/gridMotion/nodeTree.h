@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2014-2018, Mississippi State University
+//# Copyright 2014-2019, Mississippi State University
 //#
 //# The GridMover is free software: you can redistribute it and/or modify
 //# it under the terms of the Lesser GNU General Public License as published by
@@ -25,32 +25,32 @@ namespace gridMotion {
 
   struct treeInfoBase {
     int left, right, start, end, coord ;
-    float split ;
+    realF split ;
   } ;
   
   struct treeInfoDisplacement {
-    Array<vector3d<float>,4 > displacement ;
+    Array<vector3d<realF>,4 > displacement ;
   } ;
   struct treeInfoRotation {
-    Array<tensor3d<float>,4 > rotation ;
-    float drot ;
+    Array<tensor3d<realF>,4 > rotation ;
+    realF drot ;
   } ;
       
   struct tree_info {
     // approximate displacement field values for 4 points
-    Array<vector3d<double>,4> displacement ;
-    Array<tensor3d<double>,4> rotation ;
+    Array<vector3d<real>,4> displacement ;
+    Array<tensor3d<real>,4> rotation ;
     int left,right ; // left and right tree branches
     int start,end ; // start and end pos in split_list
     int coord ; // Coordinate to split
-    float split ; // value to split
-    Array<vector3d<float>,4> q ; // quad point approximation
-    vector3d<float> centroid ; // centroid of collection
-    float weight ;
+    realF split ; // value to split
+    Array<vector3d<realF>,4> q ; // quad point approximation
+    vector3d<realF> centroid ; // centroid of collection
+    realF weight ;
     // error estimate parameters
-    float radius ;
-    float err ;
-    float drot ;
+    realF radius ;
+    realF err ;
+    realF drot ;
   } ;
 
   inline std::ostream & operator<<(std::ostream &s, const tree_info &ti) {

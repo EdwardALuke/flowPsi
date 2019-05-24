@@ -65,7 +65,7 @@ $type participatingCentroid_X             param<vect3d> ;
 $type nodeDataCollection_X              param< vector<NodeData> >;
 
 //--------------------------------------------------------------------
-$type rot_angle                         store<float> ;
+$type rot_angle                         store<realF> ;
 $type volumeChangeRatio                 store<real> ;
 //--------------------------------------------------------------------
 

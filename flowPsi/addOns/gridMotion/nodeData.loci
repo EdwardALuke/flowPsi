@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2017, Mississippi State University
+//# Copyright 2017-2019, Mississippi State University
 //#
 //# This file is part of the flowPsi computational fluid dynamics solver.
 //#
@@ -38,445 +38,455 @@ $include "gridMover.lh"
 
 $type meshComponentNodes_X store<bool> ;
 
+namespace gridMotion {
+
   $rule pointwise(face2node->meshComponentNodes_X),constraint(cl->volumeTag(X)),parametric(volumeTag(X)) {}
   $rule pointwise(face2node->right::meshComponentNodes_X),constraint(cr->volumeTag(X)),parametric(volumeTag(X)) {}
 
-$type volumeTag(X) param<string> ;
+  $type volumeTag(X) param<string> ;
 
-$rule blackbox(meshComponentName_X<-volumeTag(X)),parametric(volumeTag(X)),
-  prelude {
-  *$meshComponentName_X = *$volumeTag(X) ;
-} ;
+  $rule blackbox(meshComponentName_X<-volumeTag(X)),parametric(volumeTag(X)),
+    prelude {
+    *$meshComponentName_X = *$volumeTag(X) ;
+  } ;
 
 
-//--------------------------------------------------------------------
-$type participatingFaces                store<bool> ;
-//--------------------------------------------------------------------
-$rule pointwise(participatingFaces),
-  constraint(ref->moving_BCoption) {
-  $participatingFaces = true ;
-}
-//--------------------------------------------------------------------
-$rule pointwise(fixed::participatingFaces),
-        constraint(ref->fixed_BCoption) {
-  $participatingFaces = true ;
-}
-//--------------------------------------------------------------------
-$rule pointwise(participatingFaces),
-  constraint(ref->constrainedMotion_BCoption) {
-  $participatingFaces = true ;
-}
-
-//--------------------------------------------------------------------
-$type participatingArea                 param<real> ;
-//--------------------------------------------------------------------
-$rule unit(participatingArea), constraint(UNIVERSE) {
-  $participatingArea = 0 ;     
-} 
-//--------------------------------------------------------------------
-$rule apply(participatingArea<-area)[Loci::Summation],
-  constraint(participatingFaces) {
-  join($participatingArea,$area.sada) ;
+  //--------------------------------------------------------------------
+  $type participatingFaces                store<bool> ;
+  //--------------------------------------------------------------------
+  $rule pointwise(participatingFaces),
+    constraint(ref->moving_BCoption) {
+    $participatingFaces = true ;
+  }
+  //--------------------------------------------------------------------
+  $rule pointwise(fixed::participatingFaces),
+    constraint(ref->fixed_BCoption) {
+    $participatingFaces = true ;
+  }
+  //--------------------------------------------------------------------
+  $rule pointwise(participatingFaces),
+    constraint(ref->constrainedMotion_BCoption) {
+    $participatingFaces = true ;
   }
 
-//--------------------------------------------------------------------
-$type farfieldDeformArea                param<real> ;
-//--------------------------------------------------------------------
-$rule unit(farfieldDeformArea), constraint(UNIVERSE) {
-  $farfieldDeformArea = 0 ;
-}
-//--------------------------------------------------------------------
-$rule apply(farfieldDeformArea<-area)[Loci::Summation],
-  constraint(ref->farfieldDeform_BCoption) {
-  join($farfieldDeformArea,$area.sada) ;
-}
-
-//--------------------------------------------------------------------
-$type surfaceDeformWeight               store<real> ;
-//--------------------------------------------------------------------
-$rule pointwise(surfaceDeformWeight<-BC_options) {
-  $surfaceDeformWeight = 1.0 ;
-  if ( $BC_options.optionExists("deformWeight") ) {
-    option_value_type ovt = 
-      $BC_options.getOptionValueType("deformWeight");
-    if (ovt == Loci::REAL) {
-      $BC_options.getOption("deformWeight", $surfaceDeformWeight);
-    }
-  }
-}
-//--------------------------------------------------------------------
-$rule pointwise(farfield::surfaceDeformWeight<-BC_options,
-                participatingArea,farfieldDeformArea),
-  constraint(farfieldDeform_BCoption) {
-  $surfaceDeformWeight = 1.0 ;
-  if ( $BC_options.optionExists("deformWeight") ) {
-    option_value_type ovt = 
-      $BC_options.getOptionValueType("deformWeight");
-    if (ovt == Loci::REAL) {
-      $BC_options.getOption("deformWeight", $surfaceDeformWeight);
-    }
-  }
-  $surfaceDeformWeight *= 2.*($participatingArea-$farfieldDeformArea)/$farfieldDeformArea ;
+  //--------------------------------------------------------------------
+  $type participatingArea_X                 param<real> ;
+  //--------------------------------------------------------------------
+  $rule unit(participatingArea_X), constraint(UNIVERSE),parametric(volumeTag(X)) {
+    $participatingArea_X = 0 ;     
+  } 
+  //--------------------------------------------------------------------
+  $rule apply(participatingArea_X<-area)[Loci::Summation],
+    constraint(participatingFaces,ci->volumeTag(X)), parametric(volumeTag(X)) {
+    join($participatingArea_X,$area.sada) ;
   }
 
-$type surfaceTotalWeight store<double> ;
-
-$rule unit(surfaceTotalWeight),constraint(UNIVERSE) {
-  $surfaceTotalWeight = 0 ;
-}
-
-$rule apply(ref->surfaceTotalWeight<-area,ref->surfaceDeformWeight)[Loci::Summation] {
-  join($ref->$surfaceTotalWeight,$area.sada*$ref->$surfaceDeformWeight) ;
-}
-
-
-//------------------------------------------------------------------
-// Area weight that we will probably use in the IDW algorithm so
-// that displacments are not overly biased towards boundaries with
-// relatively high concentrations of mesh nodes.
-//------------------------------------------------------------------
-$type nodeAreaWeight                    store<real>;
-$type nodeAreaWeightn                    store<real>;
-//------------------------------------------------------------------
-$rule unit( nodeAreaWeight ),
-  constraint( boundaryNodes ) {
-  $nodeAreaWeight = 0.0;
+  //--------------------------------------------------------------------
+  $type farfieldDeformArea_X                param<real> ;
+  //--------------------------------------------------------------------
+  $rule unit(farfieldDeformArea_X), constraint(UNIVERSE), 
+    parametric(volumeTag(X)) {
+    $farfieldDeformArea_X = 0 ;
   }
-//------------------------------------------------------------------
-$rule apply( face2node->nodeAreaWeight <- ref->surfaceDeformWeight,
-             area, face2node )[Loci::Summation],
-  constraint( participatingFaces ) {
-  const int N = $face2node.size();
-  const double weight = ($ref->$surfaceDeformWeight)*$area.sada/N;
-  for (int i=0; i<N; ++i) {
-    $face2node[i]->$nodeAreaWeight += weight;
-  }
+  //--------------------------------------------------------------------
+  $rule apply(farfieldDeformArea_X<-area)[Loci::Summation],
+    constraint(ref->farfieldDeform_BCoption),
+    parametric(volumeTag(X)) {
+    join($farfieldDeformArea_X,$area.sada) ;
   }
 
-$rule pointwise(nodeAreaWeightn{n}<-nodeAreaWeight{n}),constraint(boundaryNodes{n}) {
-  $nodeAreaWeightn{n} = $nodeAreaWeight{n} ;
-}
-
-//--------------------------------------------------------------------
-$type totalMovingNodeAreaWeight         param<real>;
-//--------------------------------------------------------------------
-$rule unit( totalMovingNodeAreaWeight ),
-  constraint( UNIVERSE ) {
-  $totalMovingNodeAreaWeight = 0.0;
-  }
-//--------------------------------------------------------------------
-$rule apply( totalMovingNodeAreaWeight <-
-             nodeAreaWeightn )[Loci::Summation],
-  constraint( movingBoundaryNodes ) {
-  $totalMovingNodeAreaWeight += $nodeAreaWeightn;
-  }
-
-//------------------------------------------------------------------
-$type participatingBoundaryArea         param<real>;
-//------------------------------------------------------------------
-$rule unit( participatingBoundaryArea ),
-  constraint( UNIVERSE ) {
-  $participatingBoundaryArea = 0;
-  }
-//------------------------------------------------------------------
-$rule apply( participatingBoundaryArea <- area )[Loci::Summation],
-  constraint( fixedBoundaryFaces ) {
-  $participatingBoundaryArea += $area.sada;
-  }
-//------------------------------------------------------------------
-$rule apply( participatingBoundaryArea <- area )[Loci::Summation],
-  constraint( movingBoundaryFaces ) {
-  $participatingBoundaryArea += $area.sada;
-  }
-
-//------------------------------------------------------------------
-$type participatingVolume_X               param<real>;
-//------------------------------------------------------------------
-$rule unit( participatingVolume_X ),
-  constraint( UNIVERSE ),parametric(volumeTag(X)) {
-  $participatingVolume_X = 0.0;
-  }
-//------------------------------------------------------------------
-$rule apply( participatingVolume_X <- vol )[Loci::Summation],
-  constraint( geom_cells,volumeTag(X)),parametric(volumeTag(X)) {
-  $participatingVolume_X += $vol;
-  }
-
-//--------------------------------------------------------------------
-$rule unit( participatingCentroid_X ),constraint( UNIVERSE ),
-  parametric(volumeTag(X)) {
-  $participatingCentroid_X = vect3d(0,0,0) ;
-}
-//--------------------------------------------------------------------
-$rule apply( participatingCentroid_X <- vol, cellcenter,
-             participatingVolume_X )[Loci::Summation],
-  constraint(geom_cells,volumeTag(X)),parametric(volumeTag(X)) {
-  $participatingCentroid_X += ($vol/$participatingVolume_X)*$cellcenter ;
-}
-
-//--------------------------------------------------------------------
-// This flag signals that we are working on a problem where all
-// deformations are constrained to 2D.  In other words, no deformation
-// out of the desired plane are allowed.  NOTE: Currently, the desired
-// plane must be aligned with one of the three Cartesian coordinate
-// planes.  Allowed values are "x", "y", and "z", denoting the desired
-// coordinate value to be held constant.
-//--------------------------------------------------------------------
-$type gridDeformationPlane              param<string>;
-//--------------------------------------------------------------------
-$rule default( gridDeformationPlane ) {
-  $gridDeformationPlane = "none";
-}
-
-//--------------------------------------------------------------------
-// This flag causes a symmetrical set of boundary node data to be
-// generated which will keep boundary nodes on a symmetry plane in the
-// desired plane.  NOTE: Currently, the symmetry plane must pass
-// through the origin and must be aligned with the Cartesian
-// coordinate planes.
-//--------------------------------------------------------------------
-$type gridDeformationSymmetry           param<string>;
-//--------------------------------------------------------------------
-$rule optional(gridDeformationSymmetry) {
-}
-
-//------------------------------------------------------------------
-// Default displacement for boundary nodes which have no prescribed
-// motion and are also not free to move.
-//------------------------------------------------------------------
-
-$rule pointwise( nodeDisp_bc{n}<-nodeDisp_b{n}),constraint(nodeDisp_b{n}) { 
-  $nodeDisp_bc{n} = $nodeDisp_b{n} ;
-}
-
-//------------------------------------------------------------------
-$rule pointwise( priority::nodeDisp_b{n} <- pos0{n} ),
-  constraint( fixedBoundaryNodes ) {
-  $nodeDisp_b{n} = vect3d(0,0,0);
-}
-
-
-//------------------------------------------------------------------
-// For each node, always add the edge which connects the current node
-// to the next node in the face2node map.  Since all faces are
-// boundary faces, the orientation of all faces adjacent to a given
-// node will agree, and therefore, each edge will be added exactly
-// once.
-//
-// 2011-01-21 [emc] Realized today that under certain circumstances,
-// not all edges would be included.  Specifically, when a node is on
-// the edge of a boundary surface, there will always be at least one
-// adjacent edge that will not be included on the list.
-//
-// For each edge, we will add the relative position of the adjacent
-// node with respect to the current node and the relative displacement
-// of the adjacent node with respect to the displacement of the
-// current node.
-//------------------------------------------------------------------
-$type nodeRotAccum    store< std::vector< std::pair<gridMotion::vect3d,gridMotion::vect3d> > >;
-//------------------------------------------------------------------
-$rule unit( nodeRotAccum ),
-  constraint( participatingNodes ) {
-  $nodeRotAccum.clear();
-}
-//------------------------------------------------------------------
-$rule apply( face2node->nodeRotAccum <- face2node->pos0,
-             face2node->nodeDisp_bc )[gridMotion::Append],
-  constraint( participatingFaces ) {
-  // Direction orthogonal to the desired plane
-  const int N = $face2node.size();
-  for (int i=0; i<N; ++i) {
-    // current node and its displacement
-    const vect3d a  = $face2node[i]->$pos0;
-    const vect3d da = $face2node[i]->$nodeDisp_bc;
-    for (int j=0; j<N; ++j) {
-      if (i != j) {
-        // nearby node and its displacement
-        const vect3d b  = $face2node[j]->$pos0;
-        const vect3d db = $face2node[j]->$nodeDisp_bc;
-        // project relative position and displacement onto the desired plane
-        const vect3d u  = b-a;
-        const vect3d du = db-da;
-        $face2node[i]->$nodeRotAccum.push_back(make_pair(u,du));
+  //--------------------------------------------------------------------
+  $type surfaceDeformWeight               store<real> ;
+  //--------------------------------------------------------------------
+  $rule pointwise(surfaceDeformWeight<-BC_options) {
+    $surfaceDeformWeight = 1.0 ;
+    if ( $BC_options.optionExists("deformWeight") ) {
+      option_value_type ovt = 
+	$BC_options.getOptionValueType("deformWeight");
+      if (ovt == Loci::REAL) {
+	$BC_options.getOption("deformWeight", $surfaceDeformWeight);
       }
     }
   }
+
+  $type participatingBoundaries_X store<bool> ;
+
+  $rule pointwise(ref->participatingBoundaries_X<-ci->volumeTag(X)),
+    parametric(volumeTag(X)) { }
+
+  //--------------------------------------------------------------------
+  $rule pointwise(farfield::surfaceDeformWeight<-BC_options,
+		  participatingArea_X,farfieldDeformArea_X),
+    constraint(farfieldDeform_BCoption,participatingBoundaries_X),
+    parametric(volumeTag(X)) {
+    $surfaceDeformWeight = 1.0 ;
+    if ( $BC_options.optionExists("deformWeight") ) {
+      option_value_type ovt = 
+	$BC_options.getOptionValueType("deformWeight");
+      if (ovt == Loci::REAL) {
+	$BC_options.getOption("deformWeight", $surfaceDeformWeight);
+      }
+    }
+    $surfaceDeformWeight *= 2.*($participatingArea_X-$farfieldDeformArea_X)/$farfieldDeformArea_X ;
   }
 
-//------------------------------------------------------------------
-$type nodeRot_b                       store<Rotor>;
-//------------------------------------------------------------------
-$type rotorType param<int> ;
+  $type surfaceTotalWeight store<real> ;
 
-$rule singleton(rotorType<-gridDeformationPlane) {
-  $rotorType = 0 ;
-  if ( $gridDeformationPlane == "x" ||
-       $gridDeformationPlane == "X" ) {
-    $rotorType = 1 ;
+  $rule unit(surfaceTotalWeight),constraint(UNIVERSE) {
+    $surfaceTotalWeight = 0 ;
   }
-  else if ( $gridDeformationPlane == "y" ||
-            $gridDeformationPlane == "Y" ) {
-    $rotorType = 2 ;
+
+  $rule apply(ref->surfaceTotalWeight<-area,ref->surfaceDeformWeight)[Loci::Summation] {
+    join($ref->$surfaceTotalWeight,$area.sada*$ref->$surfaceDeformWeight) ;
   }
-  else if ( $gridDeformationPlane == "z" ||
-            $gridDeformationPlane == "Z" ) {
-    $rotorType = 3 ;
+
+
+  //------------------------------------------------------------------
+  // Area weight that we will probably use in the IDW algorithm so
+  // that displacments are not overly biased towards boundaries with
+  // relatively high concentrations of mesh nodes.
+  //------------------------------------------------------------------
+  $type nodeAreaWeight                    store<real>;
+  $type nodeAreaWeightn                    store<real>;
+  //------------------------------------------------------------------
+  $rule unit( nodeAreaWeight ),
+    constraint( boundaryNodes ) {
+    $nodeAreaWeight = 0.0;
   }
-}
+  //------------------------------------------------------------------
+  $rule apply( face2node->nodeAreaWeight <- ref->surfaceDeformWeight,
+	       area, face2node )[Loci::Summation],
+    constraint( participatingFaces ) {
+    const int N = $face2node.size();
+    const real weight = ($ref->$surfaceDeformWeight)*$area.sada/N;
+    for (int i=0; i<N; ++i) {
+      $face2node[i]->$nodeAreaWeight += weight;
+    }
+  }
+
+  $rule pointwise(nodeAreaWeightn{n}<-nodeAreaWeight{n}),constraint(boundaryNodes{n}) {
+    $nodeAreaWeightn{n} = $nodeAreaWeight{n} ;
+  }
+
+  //--------------------------------------------------------------------
+  $type totalMovingNodeAreaWeight         param<real>;
+  //--------------------------------------------------------------------
+  $rule unit( totalMovingNodeAreaWeight ),
+    constraint( UNIVERSE ) {
+    $totalMovingNodeAreaWeight = 0.0;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( totalMovingNodeAreaWeight <-
+	       nodeAreaWeightn )[Loci::Summation],
+    constraint( movingBoundaryNodes ) {
+    $totalMovingNodeAreaWeight += $nodeAreaWeightn;
+  }
+
+  //------------------------------------------------------------------
+  $type participatingBoundaryArea         param<real>;
+  //------------------------------------------------------------------
+  $rule unit( participatingBoundaryArea ),
+    constraint( UNIVERSE ) {
+    $participatingBoundaryArea = 0;
+  }
+  //------------------------------------------------------------------
+  $rule apply( participatingBoundaryArea <- area )[Loci::Summation],
+    constraint( fixedBoundaryFaces ) {
+    $participatingBoundaryArea += $area.sada;
+  }
+  //------------------------------------------------------------------
+  $rule apply( participatingBoundaryArea <- area )[Loci::Summation],
+    constraint( movingBoundaryFaces ) {
+    $participatingBoundaryArea += $area.sada;
+  }
+
+  //------------------------------------------------------------------
+  $type participatingVolume_X               param<real>;
+  //------------------------------------------------------------------
+  $rule unit( participatingVolume_X ),
+    constraint( UNIVERSE ),parametric(volumeTag(X)) {
+    $participatingVolume_X = 0.0;
+  }
+  //------------------------------------------------------------------
+  $rule apply( participatingVolume_X <- vol )[Loci::Summation],
+    constraint( geom_cells,volumeTag(X)),parametric(volumeTag(X)) {
+    $participatingVolume_X += $vol;
+  }
+
+  //--------------------------------------------------------------------
+  $rule unit( participatingCentroid_X ),constraint( UNIVERSE ),
+    parametric(volumeTag(X)) {
+    $participatingCentroid_X = vect3d(0,0,0) ;
+  }
+  //--------------------------------------------------------------------
+  $rule apply( participatingCentroid_X <- vol, cellcenter,
+	       participatingVolume_X )[Loci::Summation],
+    constraint(geom_cells,volumeTag(X)),parametric(volumeTag(X)) {
+    $participatingCentroid_X += ($vol/$participatingVolume_X)*$cellcenter ;
+  }
+
+  //--------------------------------------------------------------------
+  // This flag signals that we are working on a problem where all
+  // deformations are constrained to 2D.  In other words, no deformation
+  // out of the desired plane are allowed.  NOTE: Currently, the desired
+  // plane must be aligned with one of the three Cartesian coordinate
+  // planes.  Allowed values are "x", "y", and "z", denoting the desired
+  // coordinate value to be held constant.
+  //--------------------------------------------------------------------
+  $type gridDeformationPlane              param<string>;
+  //--------------------------------------------------------------------
+  $rule default( gridDeformationPlane ) {
+    $gridDeformationPlane = "none";
+  }
+
+  //--------------------------------------------------------------------
+  // This flag causes a symmetrical set of boundary node data to be
+  // generated which will keep boundary nodes on a symmetry plane in the
+  // desired plane.  NOTE: Currently, the symmetry plane must pass
+  // through the origin and must be aligned with the Cartesian
+  // coordinate planes.
+  //--------------------------------------------------------------------
+  $type gridDeformationSymmetry           param<string>;
+  //--------------------------------------------------------------------
+  $rule optional(gridDeformationSymmetry) {
+  }
+
+  //------------------------------------------------------------------
+  // Default displacement for boundary nodes which have no prescribed
+  // motion and are also not free to move.
+  //------------------------------------------------------------------
+
+  $rule pointwise( nodeDisp_bc{n}<-nodeDisp_b{n}),constraint(nodeDisp_b{n}) { 
+    $nodeDisp_bc{n} = $nodeDisp_b{n} ;
+  }
+
+  //------------------------------------------------------------------
+  $rule pointwise( priority::nodeDisp_b{n} <- pos0{n} ),
+    constraint( fixedBoundaryNodes ) {
+    $nodeDisp_b{n} = vect3d(0,0,0);
+  }
+
+
+  //------------------------------------------------------------------
+  // For each node, always add the edge which connects the current node
+  // to the next node in the face2node map.  Since all faces are
+  // boundary faces, the orientation of all faces adjacent to a given
+  // node will agree, and therefore, each edge will be added exactly
+  // once.
+  //
+  // 2011-01-21 [emc] Realized today that under certain circumstances,
+  // not all edges would be included.  Specifically, when a node is on
+  // the edge of a boundary surface, there will always be at least one
+  // adjacent edge that will not be included on the list.
+  //
+  // For each edge, we will add the relative position of the adjacent
+  // node with respect to the current node and the relative displacement
+  // of the adjacent node with respect to the displacement of the
+  // current node.
+  //------------------------------------------------------------------
+  $type nodeRotAccum    store< std::vector< std::pair<gridMotion::vect3d,gridMotion::vect3d> > >;
+  //------------------------------------------------------------------
+  $rule unit( nodeRotAccum ),
+    constraint( participatingNodes ) {
+    $nodeRotAccum.clear();
+  }
+  //------------------------------------------------------------------
+  $rule apply( face2node->nodeRotAccum <- face2node->pos0,
+	       face2node->nodeDisp_bc )[gridMotion::Append],
+    constraint( participatingFaces ) {
+    // Direction orthogonal to the desired plane
+    const int N = $face2node.size();
+    for (int i=0; i<N; ++i) {
+      // current node and its displacement
+      const vect3d a  = $face2node[i]->$pos0;
+      const vect3d da = $face2node[i]->$nodeDisp_bc;
+      for (int j=0; j<N; ++j) {
+	if (i != j) {
+	  // nearby node and its displacement
+	  const vect3d b  = $face2node[j]->$pos0;
+	  const vect3d db = $face2node[j]->$nodeDisp_bc;
+	  // project relative position and displacement onto the desired plane
+	  const vect3d u  = b-a;
+	  const vect3d du = db-da;
+	  $face2node[i]->$nodeRotAccum.push_back(make_pair(u,du));
+	}
+      }
+    }
+  }
+
+  //------------------------------------------------------------------
+  $type nodeRot_b                       store<Rotor>;
+  //------------------------------------------------------------------
+  $type rotorType param<int> ;
+
+  $rule singleton(rotorType<-gridDeformationPlane) {
+    $rotorType = 0 ;
+    if ( $gridDeformationPlane == "x" ||
+	 $gridDeformationPlane == "X" ) {
+      $rotorType = 1 ;
+    }
+    else if ( $gridDeformationPlane == "y" ||
+	      $gridDeformationPlane == "Y" ) {
+      $rotorType = 2 ;
+    }
+    else if ( $gridDeformationPlane == "z" ||
+	      $gridDeformationPlane == "Z" ) {
+      $rotorType = 3 ;
+    }
+  }
   
-$rule pointwise( nodeRot_b <- nodeRotAccum, rotorType ),
-  constraint( participatingNodes ) {
-  $nodeRot_b = Rotor($nodeRotAccum);
-  switch($rotorType) {
-  case 0:
-    break ;
-  case 1:
-    { // constrain rotation to stay in x=0 plane
-      gridMotion::vect3d v1(0,1.0,0)  ; // rotate from baseline vector in plane
-      gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
-      v2.x = 0 ; // remove x plane part of rotation
-      v2 *= 1./norm(v2) ; // renormalize
-      $nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+  $rule pointwise( nodeRot_b <- nodeRotAccum, rotorType ),
+    constraint( participatingNodes ) {
+    $nodeRot_b = Rotor($nodeRotAccum);
+    switch($rotorType) {
+    case 0:
+      break ;
+    case 1:
+      { // constrain rotation to stay in x=0 plane
+	gridMotion::vect3d v1(0,1.0,0)  ; // rotate from baseline vector in plane
+	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	v2.x = 0 ; // remove x plane part of rotation
+	v2 *= 1./norm(v2) ; // renormalize
+	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+      }
+    case 2:
+      { // constraint rotation to stay in y=0 plane
+	gridMotion::vect3d v1(1.0,0,0)  ; // rotate from baseline vector in plane
+	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	v2.y = 0 ; // remove y plane part of rotation
+	v2 *= 1./norm(v2) ; // renormalize
+	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+      }
+    case 3:
+      { // constraint rotation to stay in z=0 plane
+	gridMotion::vect3d v1(1.0,0,0)  ; // rotat from baseline vector in plane
+	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	v2.z = 0 ; // remove z plane part of rotation
+	v2 *= 1./norm(v2) ; // renormalize
+	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+      }
+      break ;
+    default:
+      break ;
     }
-  case 2:
-    { // constraint rotation to stay in y=0 plane
-      gridMotion::vect3d v1(1.0,0,0)  ; // rotate from baseline vector in plane
-      gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
-      v2.y = 0 ; // remove y plane part of rotation
-      v2 *= 1./norm(v2) ; // renormalize
-      $nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+  }
+
+
+  $type nodeDataCollectionBase_X          blackbox<std::vector<NodeData> > ;
+  $rule unit( nodeDataCollectionBase_X ),
+    constraint( UNIVERSE ),parametric(volumeTag(X)),prelude {
+    (*$nodeDataCollectionBase_X).clear();
+  } ;
+  //--------------------------------------------------------------------
+  // Include all participating boundary node displacements
+  //--------------------------------------------------------------------
+  $rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
+	       nodeDisp_bc, nodeRot_b )[Loci::NullOp],
+    constraint( participatingNodes,meshComponentNodes_X),parametric(volumeTag(X)) {
+    NodeData tmp;
+    tmp.pos     = $pos0;
+    tmp.disp    = $nodeDisp_bc;
+    tmp.rot     = $nodeRot_b;
+    tmp.weight  = $nodeAreaWeightn ;
+    $nodeDataCollectionBase_X.push_back(tmp);
+  }
+  //--------------------------------------------------------------------
+  // Include a set of boundary node data reflected across a yz-symmetry plane.
+  //--------------------------------------------------------------------
+  $rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
+	       nodeDisp_bc, nodeRot_b )[Loci::NullOp],
+    constraint(participatingNodes,gridDeformationXSymmetry,meshComponentNodes_X),
+    parametric(volumeTag(X)) {
+    NodeData tmp;
+    tmp.pos     = $pos0;
+    tmp.pos.x = -tmp.pos.x ;
+    tmp.disp    = $nodeDisp_bc;
+    tmp.disp.x = -tmp.disp.x ;
+    tmp.rot     = $nodeRot_b;
+    tmp.rot.beta.x = -tmp.rot.beta.x ;
+    tmp.rot.alpha = -tmp.rot.alpha ;
+    tmp.weight  = $nodeAreaWeightn ;
+    $nodeDataCollectionBase_X.push_back(tmp);
+  }
+  //--------------------------------------------------------------------
+  // Include a set of boundary node data reflected across a xz-symmetry plane.
+  //--------------------------------------------------------------------
+  $rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
+	       nodeDisp_bc, nodeRot_b )[Loci::NullOp],
+    constraint(participatingNodes,gridDeformationYSymmetry,meshComponentNodes_X),
+    parametric(volumeTag(X)) {
+    NodeData tmp;
+    tmp.pos     = $pos0 ;
+    tmp.pos.y = -tmp.pos.y ;
+    tmp.disp    = $nodeDisp_bc;
+    tmp.disp.y = -tmp.disp.y ;
+    tmp.rot     = $nodeRot_b;
+    tmp.rot.beta.y = -tmp.rot.beta.y ;
+    tmp.rot.alpha = -tmp.rot.alpha ;
+    tmp.weight  = $nodeAreaWeightn ;
+    $nodeDataCollectionBase_X.push_back(tmp);
+  }
+  //--------------------------------------------------------------------
+  // Include a set of boundary node data reflected across a xy-symmetry plane.
+  //--------------------------------------------------------------------
+  $rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
+	       nodeDisp_bc, nodeRot_b )[Loci::NullOp],
+    constraint( participatingNodes,gridDeformationZSymmetry,meshComponentNodes_X) {
+    NodeData tmp;
+    tmp.pos     = $pos0;
+    tmp.pos.z = -tmp.pos.z ;
+    tmp.disp    = $nodeDisp_bc;
+    tmp.disp.z = -tmp.disp.z ;
+    tmp.rot     = $nodeRot_b;
+    tmp.rot.beta.z = -tmp.rot.beta.z ;
+    tmp.rot.alpha = -tmp.rot.alpha ;
+    tmp.weight  = $nodeAreaWeightn ;
+    $nodeDataCollectionBase_X.push_back(tmp);
+  }
+
+  $rule singleton(nodeDataCollection_X<-nodeDataCollectionBase_X),
+    parametric(volumeTag(X)) {
+    int lsz = ($nodeDataCollectionBase_X).size() ;
+    int p = Loci::MPI_processes ;
+    vector<int> sizelist(p) ;
+    MPI_Allgather(&lsz,1,MPI_INT,&sizelist[0],1,MPI_INT,MPI_COMM_WORLD) ;
+    int totsz = 0 ;
+    for(int i=0;i<p;++i)
+      totsz += sizelist[i] ;
+    ($nodeDataCollection_X) = vector<NodeData>(totsz) ;
+    int size_factor = sizeof(NodeData) ;
+    for(int i=0;i<p;++i)
+      sizelist[i] *= size_factor ;
+    vector<int> displs(p) ;
+    displs[0] = 0 ;
+    for(int i=1;i<p;++i)
+      displs[i] = displs[i-1]+sizelist[i-1] ;
+    vector<NodeData> senddata = $nodeDataCollectionBase_X ;
+
+    MPI_Allgatherv(&senddata[0],lsz*size_factor,MPI_BYTE,
+		   &($nodeDataCollection_X)[0],&sizelist[0],&displs[0],
+		   MPI_BYTE, MPI_COMM_WORLD) ;
+  } ;
+
+  //====================================================================
+  $rule pointwise( rot_angle{n,it} <- pos0{n},pos{n,it} ) {
+    $rot_angle{n,it} = 0 ;
+  }
+  //--------------------------------------------------------------------
+  $rule pointwise( override::rot_angle{n,it} <- nodeRot_b{n},pos0{n},pos{n,it} ) {
+    $rot_angle{n,it} = $nodeRot_b{n}.alpha ;
+  }
+
+  $rule pointwise( volumeChangeRatio{n,it} <- vol, vol{n,it} ),
+    constraint( geom_cells ) {
+    const real maxvol = max($vol, $vol{n,it}) ;
+    const real minvol = min($vol, $vol{n,it}) ;
+    if ( minvol >= 0 ) {
+      $volumeChangeRatio{n,it} = minvol/maxvol;
     }
-  case 3:
-    { // constraint rotation to stay in z=0 plane
-      gridMotion::vect3d v1(1.0,0,0)  ; // rotat from baseline vector in plane
-      gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
-      v2.z = 0 ; // remove z plane part of rotation
-      v2 *= 1./norm(v2) ; // renormalize
-      $nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
+    else {
+      $volumeChangeRatio{n,it} = 0;
     }
-    break ;
-  default:
-    break ;
-  }
   }
 
-
-$type nodeDataCollectionBase_X          blackbox<std::vector<NodeData> > ;
-$rule unit( nodeDataCollectionBase_X ),
-  constraint( UNIVERSE ),parametric(volumeTag(X)),prelude {
-  (*$nodeDataCollectionBase_X).clear();
-} ;
-//--------------------------------------------------------------------
-// Include all participating boundary node displacements
-//--------------------------------------------------------------------
-$rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
-             nodeDisp_bc, nodeRot_b )[Loci::NullOp],
-  constraint( participatingNodes,meshComponentNodes_X),parametric(volumeTag(X)) {
-  NodeData tmp;
-  tmp.pos     = $pos0;
-  tmp.disp    = $nodeDisp_bc;
-  tmp.rot     = $nodeRot_b;
-  tmp.weight  = $nodeAreaWeightn ;
-  $nodeDataCollectionBase_X.push_back(tmp);
-  }
-//--------------------------------------------------------------------
-// Include a set of boundary node data reflected across a yz-symmetry plane.
-//--------------------------------------------------------------------
-$rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
-             nodeDisp_bc, nodeRot_b )[Loci::NullOp],
-  constraint(participatingNodes,gridDeformationXSymmetry,meshComponentNodes_X),
-  parametric(volumeTag(X)) {
-  NodeData tmp;
-  tmp.pos     = $pos0;
-  tmp.pos.x = -tmp.pos.x ;
-  tmp.disp    = $nodeDisp_bc;
-  tmp.disp.x = -tmp.disp.x ;
-  tmp.rot     = $nodeRot_b;
-  tmp.rot.beta.x = -tmp.rot.beta.x ;
-  tmp.rot.alpha = -tmp.rot.alpha ;
-  tmp.weight  = $nodeAreaWeightn ;
-  $nodeDataCollectionBase_X.push_back(tmp);
 }
-//--------------------------------------------------------------------
-// Include a set of boundary node data reflected across a xz-symmetry plane.
-//--------------------------------------------------------------------
-$rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
-             nodeDisp_bc, nodeRot_b )[Loci::NullOp],
-  constraint(participatingNodes,gridDeformationYSymmetry,meshComponentNodes_X),
-  parametric(volumeTag(X)) {
-  NodeData tmp;
-  tmp.pos     = $pos0 ;
-  tmp.pos.y = -tmp.pos.y ;
-  tmp.disp    = $nodeDisp_bc;
-  tmp.disp.y = -tmp.disp.y ;
-  tmp.rot     = $nodeRot_b;
-  tmp.rot.beta.y = -tmp.rot.beta.y ;
-  tmp.rot.alpha = -tmp.rot.alpha ;
-  tmp.weight  = $nodeAreaWeightn ;
-  $nodeDataCollectionBase_X.push_back(tmp);
-}
-//--------------------------------------------------------------------
-// Include a set of boundary node data reflected across a xy-symmetry plane.
-//--------------------------------------------------------------------
-$rule apply( nodeDataCollectionBase_X <- pos0, nodeAreaWeightn, 
-             nodeDisp_bc, nodeRot_b )[Loci::NullOp],
-  constraint( participatingNodes,gridDeformationZSymmetry,meshComponentNodes_X) {
-  NodeData tmp;
-  tmp.pos     = $pos0;
-  tmp.pos.z = -tmp.pos.z ;
-  tmp.disp    = $nodeDisp_bc;
-  tmp.disp.z = -tmp.disp.z ;
-  tmp.rot     = $nodeRot_b;
-  tmp.rot.beta.z = -tmp.rot.beta.z ;
-  tmp.rot.alpha = -tmp.rot.alpha ;
-  tmp.weight  = $nodeAreaWeightn ;
-  $nodeDataCollectionBase_X.push_back(tmp);
-}
-
-$rule singleton(nodeDataCollection_X<-nodeDataCollectionBase_X),
-  parametric(volumeTag(X)) {
-  int lsz = ($nodeDataCollectionBase_X).size() ;
-  int p = Loci::MPI_processes ;
-  vector<int> sizelist(p) ;
-  MPI_Allgather(&lsz,1,MPI_INT,&sizelist[0],1,MPI_INT,MPI_COMM_WORLD) ;
-  int totsz = 0 ;
-  for(int i=0;i<p;++i)
-    totsz += sizelist[i] ;
-  ($nodeDataCollection_X) = vector<NodeData>(totsz) ;
-  int size_factor = sizeof(NodeData) ;
-  for(int i=0;i<p;++i)
-    sizelist[i] *= size_factor ;
-  vector<int> displs(p) ;
-  displs[0] = 0 ;
-  for(int i=1;i<p;++i)
-    displs[i] = displs[i-1]+sizelist[i-1] ;
-  vector<NodeData> senddata = $nodeDataCollectionBase_X ;
-
-  MPI_Allgatherv(&senddata[0],lsz*size_factor,MPI_BYTE,
-                 &($nodeDataCollection_X)[0],&sizelist[0],&displs[0],
-                 MPI_BYTE, MPI_COMM_WORLD) ;
-} ;
-
-//====================================================================
-$rule pointwise( rot_angle{n,it} <- pos0{n},pos{n,it} ) {
-  $rot_angle{n,it} = 0 ;
-}
-//--------------------------------------------------------------------
-$rule pointwise( override::rot_angle{n,it} <- nodeRot_b{n},pos0{n},pos{n,it} ) {
-  $rot_angle{n,it} = $nodeRot_b{n}.alpha ;
-}
-
-$rule pointwise( volumeChangeRatio{n,it} <- vol, vol{n,it} ),
-  constraint( geom_cells ) {
-  const real maxvol = max($vol, $vol{n,it}) ;
-  const real minvol = min($vol, $vol{n,it}) ;
-  if ( minvol >= 0 ) {
-    $volumeChangeRatio{n,it} = minvol/maxvol;
-  }
-  else {
-    $volumeChangeRatio{n,it} = 0;
-  }
-}
-
-
-
