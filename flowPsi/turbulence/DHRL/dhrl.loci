@@ -369,8 +369,8 @@ namespace flowPsi {
   $rule pointwise(prod_sgs), constraint(geom_cells) {$prod_sgs = 0. ;} // MILES default
 
   $rule pointwise(alpha_star_dhrl<-prod_les,prod_rans,prod_sgs), constraint(prod_les) { 
-    const real denom = max($prod_rans-$prod_sgs,1.e-16) ; 
-    $alpha_star_dhrl = min(max($prod_les/denom,0.),1.) ; 
+    const real denom = max<real>($prod_rans-$prod_sgs,1.e-16) ; 
+    $alpha_star_dhrl = min<real>(max<real>($prod_les/denom,0.),1.) ; 
   }
 
   $rule pointwise(alpha_dhrl<-alpha_star_dhrl) { // Original DHRL formulation
@@ -438,8 +438,8 @@ namespace flowPsi {
   }
 
   $rule pointwise(separate::alpha_star_energy_dhrl<-hflux_scalar_les,hflux_scalar_rans,hflux_scalar_sgs), constraint(geom_cells,DHRL_ALPHA_ENERGY) {
-    const real denom = max($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ; 
-    $alpha_star_energy_dhrl = min(max($hflux_scalar_les/denom,0.),1.) ; 
+    const real denom = max<real>($hflux_scalar_rans-$hflux_scalar_sgs,1.e-16) ; 
+    $alpha_star_energy_dhrl = min<real>(max<real>($hflux_scalar_les/denom,0.),1.) ; 
   }
 
   // Original (non-modified) alpha
@@ -789,7 +789,7 @@ namespace flowPsi {
   }
   $rule pointwise(dhrl::wilcox08::k_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmak_f),
     constraint(k_f,Wilcox08Model,DHRL_SST_BSL_KW) {
-    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmu_f = $rho_avg_f*$k_f/max<real>($w_f,1e-30) ;
     $k_nu_f=($mu_avg_f+kw_tmu_f*$sigmak_f) ;
   }
 #endif
@@ -803,7 +803,7 @@ namespace flowPsi {
 
   $rule pointwise(dhrl::wilcox08::w_nu_f<-mu_avg_f,rho_avg_f,k_f,w_f,sigmae_f),
     constraint(w_f,Wilcox08Model,DHRL_SST_BSL_KW) {
-    const real kw_tmu_f = $rho_avg_f*$k_f/max($w_f,1e-30) ;
+    const real kw_tmu_f = $rho_avg_f*$k_f/max<real>($w_f,1e-30) ;
     $w_nu_f=($mu_avg_f+kw_tmu_f*$sigmae_f) ;
   }    
 #endif
@@ -881,7 +881,7 @@ namespace flowPsi {
     const real Mt2 = 2.0*$k/($soundSpeed*$soundSpeed) ;
     // Turblent mach number cutoff
     const real mt0 = $wilcox_Mto ;
-    const real fmt = max(Mt2-mt0*mt0,0.0) ;
+    const real fmt = max<real>(Mt2-mt0*mt0,0.0) ;
     // compressibility dissipation constant (adjusted from Sarkars original
     // value
     const real psi = $wilcox_xi ;
@@ -918,7 +918,7 @@ namespace flowPsi {
     constraint(DHRL_SST_BSL_KW,k,tmu_rans) {
     const real S = $strainRateMag_avg ;
     const real Omega = $vortMag_avg ;
-    $stress_scalar=max($tmu_rans*(S*Omega-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar=max<real>($tmu_rans*(S*Omega-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                        0.0) ;
   }
   
@@ -932,16 +932,16 @@ namespace flowPsi {
     constraint(vorticity_production,k,tmu_rans,DHRL_SST_BSL_KW) {
     const real O2 = $vortMag_avg*$vortMag_avg ;
     
-    $stress_scalar = max($tmu_rans*(O2-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar = max<real>($tmu_rans*(O2-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                          0.0) ;
   }    
 
   $rule pointwise(dhrl::vortex_correction::stress_scalar<-tmu_rans,rho_avg,k,divu_avg,
                   vortMag_avg,strainRateMag_avg,Cvor),
     constraint(vortex_preserving_production,k,tmu_rans,DHRL_SST_BSL_KW) {
-    const real O = max($vortMag_avg + $Cvor*(min($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
+    const real O = max<real>($vortMag_avg + $Cvor*(min<real>($strainRateMag_avg-$vortMag_avg,0.0)),0.) ;
     const real S = $strainRateMag_avg ;
-    $stress_scalar = max($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
+    $stress_scalar = max<real>($tmu_rans*(S*O-2./3.*$divu_avg*$divu_avg)-2./3.*$rho_avg*$k*$divu_avg,
                          0.0);
   }    
 
