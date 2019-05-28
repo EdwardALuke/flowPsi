@@ -1,6 +1,6 @@
 //#############################################################################
 //#
-//# Copyright 2016, Mississippi State University
+//# Copyright 2016-2019, Mississippi State University
 //#
 //# This file is part of the flowPsi computational fluid dynamics solver.
 //#
