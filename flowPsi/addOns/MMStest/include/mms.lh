@@ -1,35 +1,23 @@
 //#############################################################################
 //#
-//# Copyright 2015-2019, Mississippi State University
+//# Copyright 2017-2019, Mississippi State University
 //#
-//# This file is part of the CHEM solver framework.
+//# This file is part of the flowPsi computational fluid dynamics solver.
 //#
-//# The CHEM solver framework is free software: you can redistribute it 
-//# and/or modify it under the terms of the Lesser GNU General Public License 
-//# as published by the Free Software Foundation, either version 3 of the 
-//# License, or (at your option) any later version.
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
 //#
-//# The CHEM solver is distributed in the hope that it will be useful,
+//# The flowPsi solver is distributed in the hope that it will be useful,
 //# but WITHOUT ANY WARRANTY; without even the implied warranty of
 //# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-//# Lesser GNU General Public License for more details.
+//# GNU General Public License for more details.
 //#
-//# You should have received a copy of the Lesser GNU General Public License
-//# along with the CHEM solver.  If not, see <http://www.gnu.org/licenses>
-//#
-//# NOTICE: The GNU license describes the parameters of your redistribution
-//# rights granted by Mississippi State University but the redistribution
-//# of this software is also constrained by export control laws.  This
-//# software may also be considered as covered by EAR or ITAR regulation
-//# regimes and so it is your responsibility to ensure that this software
-//# is redistributed only to US persons and any redistribution is in
-//# conformance with applicable United States export control laws.
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
 //#
 //#############################################################################
-
-// Hacks, these should be in chem.lh
-$type mixture_f         storeVec<chem::real> ;
-$type numSpecies param<int> ;
 
 // mms stuff	
 $type massGeneralSrc(loc) store<real> ;
