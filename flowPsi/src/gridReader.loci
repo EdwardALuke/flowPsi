@@ -569,10 +569,10 @@ namespace flowPsi {
       }
     }
 
-    param<std::string> gradStencil ;
-    gradStencil = facts.get_fact("gradStencil") ;
-    if(*gradStencil == "full" || facts.get_fact("use_cellStencil") !=0) 
-      create_cell_stencil(facts) ;
+    //    param<std::string> gradStencil ;
+    //    gradStencil = facts.get_fact("gradStencil") ;
+    //    if(*gradStencil == "full" || facts.get_fact("use_cellStencil") !=0) 
+    //      create_cell_stencil(facts) ;
 
     find_mind_noslip(facts) ;
 
