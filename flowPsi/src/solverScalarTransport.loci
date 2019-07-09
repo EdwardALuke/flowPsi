@@ -601,7 +601,7 @@ namespace flowPsi {
     const real factor = $scalarVolDT{n,it} ;
      const real w = 0.5 ;
      const real w1 = (1.+w)*factor ;
-     const real w2 = w*factor ;
+     const real w2 = -w*factor ;
      const real rn = $scalarRhon{n,it} ;
      const real rnm1 = $scalarRhonm1{n,it} ;
      
@@ -720,11 +720,19 @@ namespace flowPsi {
   
   $type X_resid store<real> ;
 
-  $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C),
+  $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C,timeStepSteadyState),
     parametric(scalarTransportP(X,C)) {
     $X_resid = 0 ;
     if($iblank < 2)
       $X_resid = $X_src ;
+  
+  }
+
+  $rule pointwise(X_resid<-X_rhs,iblank),constraint(geom_cells,C,timeStepAccurate),
+    parametric(scalarTransportP(X,C)) {
+    $X_resid = 0 ;
+    if($iblank < 2)
+      $X_resid = $X_rhs ;
   }
 
   $rule apply(X_residual<-X_resid,vol,grid_vol_iblank)[Loci::Summation],constraint(geom_cells,C),
@@ -894,6 +902,76 @@ namespace flowPsi {
   }
   register_rule<X_ic_from_file> register_X_ic_from_file ;
     
+  class X_ico_from_file2 : public pointwise_rule {
+    const_param<std::string> icfile,modelName,scalarTransportName_X ;
+    const_store<real> X_ic ;
+    store<real> X_ico ;
+  public:
+    X_ico_from_file2() ;
+    virtual void compute(const sequence &seq) ;
+  } ;
+
+  X_ico_from_file2::X_ico_from_file2() {
+    name_store("icfile",icfile) ;
+    name_store("modelName",modelName) ;
+    name_store("priority::ic_file::X_ico",X_ico) ;
+    name_store("X_ic",X_ic) ;
+    name_store("scalarTransportName_X",scalarTransportName_X) ;
+    input("icfile,scalarTransportName_X") ;
+    input("X_ic") ;
+    input("modelName") ;
+    constraint("geom_cells,icfile,timeStepSchemeBDF2,timeStepAccurate,C") ;
+    output("priority::ic_file::X_ico") ;
+    set_parametric_variable("scalarTransport(X,C)") ;
+    disable_threading() ;
+  }
+
+  void X_ico_from_file2::compute(const sequence &seq) {
+    if(Loci::GLOBAL_AND(seq==EMPTY))
+      return ;
+
+    string filename = *icfile+ *scalarTransportName_X+ string("Prev_") + *modelName ;
+
+    int file_exists = 1 ;
+    $[Once] {
+      struct stat buf ;
+      if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
+        file_exists = 0 ;
+    }
+    MPI_Bcast(&file_exists,1,MPI_INT, 0, MPI_COMM_WORLD) ;
+    if(file_exists==1) {
+      $[Once] {
+	cout << "reading " << *scalarTransportName_X << " initial conditions from " << filename << endl ;
+      }
+      
+      
+      hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
+					 H5F_ACC_RDONLY, H5P_DEFAULT);
+      entitySet read_set = entitySet(seq) ;
+      Loci::readContainer(file_id,*scalarTransportName_X,X_ico.Rep(),read_set) ;
+      
+      Loci::hdf5CloseFile(file_id) ;
+    } else {
+      entitySet read_set = entitySet(seq) ;
+      FORALL(read_set,ii) {
+	X_ico[ii] = X_ic[ii] ;
+      } ENDFORALL ;
+    }
+  }
+
+  register_rule<X_ico_from_file2> register_X_ico_from_file2 ;
+
+  $type C Constraint ;
+  $rule pointwise(X_ico<-X_ic),constraint(geom_cells,X_ic,C),
+  parametric(scalarTransport(X,C)) {
+    $X_ico = $X_ic ;
+  }
+
+  $rule pointwise(X{n=-1}<-X_ico),constraint(X_ic,timeStepAccurate,timeStepSchemeBDF2,C),
+  parametric(scalarTransport(X,C)) {
+    $X{n=-1} = $X_ico ;
+  }
+
   $rule pointwise(X{n=0}<-X_ic),constraint(geom_cells,C),
   parametric(scalarTransport(X,C)) {
     $X{n=0} = $X_ic ;
@@ -948,8 +1026,8 @@ namespace flowPsi {
     inplace(X{n+1}|X_n{n,it}),
     parametric(scalarTransport(X,C)) {
     real Xstar = $X_n{n,it} ;
-    real dXstar = (Xstar-$X{n})/Xstar ;
-    $X{n+1} = Xstar*(1. + dXstar) ;
+    real dXstar = (Xstar-$X{n}) ;
+    $X{n+1} = (Xstar + dXstar) ;
   }
 
   $rule pointwise(X{n+1}<-X_n{n,it},X{n}),
@@ -965,8 +1043,8 @@ namespace flowPsi {
   $rule pointwise(X_np1{n,it}<-X{n,it},X{n}),constraint(timeStepAccurate{n,it},timeStepSchemeKEC{n,it},X{n},geom_cells,C),
     parametric(scalarTransport(X,C)) {
     real Xstar = $X{n,it} ;
-    real dXstar = (Xstar-$X{n})/Xstar ;
-    $X_np1{n,it} = Xstar*(1. + dXstar) ;
+    real dXstar = (Xstar-$X{n}) ;
+    $X_np1{n,it} = (Xstar + dXstar) ;
   }
 
   $rule pointwise(X_next<-urelax,X_dq,X),
@@ -1143,7 +1221,7 @@ namespace flowPsi {
     const real factor = $scalarVolDT{n,it};
     const real w = 0.5 ;
     const real w1 = (1.+w)*factor ;
-    const real w2 = w*factor ;
+    const real w2 = -w*factor ;
     const real rn = $scalarRhon{n,it} ;
     const real rnm1 = $scalarRhonm1{n,it} ;
      
@@ -1264,11 +1342,18 @@ namespace flowPsi {
   
   $type X_resid store<real> ;
 
-  $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C),
+  $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C,timeStepSteadyState),
     parametric(scalarTransport(X,C)) {
     $X_resid = 0 ;
     if($iblank < 2)
       $X_resid = $X_src ;
+  }
+
+  $rule pointwise(X_resid<-X_rhs,iblank),constraint(geom_cells,C,timeStepAccurate),
+    parametric(scalarTransport(X,C)) {
+    $X_resid = 0 ;
+    if($iblank < 2)
+      $X_resid = $X_rhs ;
   }
 
   $rule apply(X_residual<-X_resid,vol,grid_vol_iblank)[Loci::Summation],constraint(geom_cells,C),
