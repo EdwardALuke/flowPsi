@@ -329,7 +329,9 @@ namespace flowPsi {
 
     // Find the mininmum distance to all faces for overset code
     //    find_mind_surf(facts) ;
-    find_mind_surf_node(facts) ;
+    //    find_mind_surf_node(facts) ;
+
+    setupOverset(facts) ;
 
     // Create constraint to indicate that this is the Loci/flowPsi code
     gConstraint FLOWPSI ;
@@ -578,7 +580,8 @@ namespace flowPsi {
 
     // Find the mininmum distance to all faces for overset code
     //    find_mind_surf(facts) ;
-    find_mind_surf_node(facts) ;
+    //    find_mind_surf_node(facts) ;
+    setupOverset(facts) ;
 
     // Create constraint to indicate that this is the Loci/flowPsi code
     constraint FLOWPSI ;

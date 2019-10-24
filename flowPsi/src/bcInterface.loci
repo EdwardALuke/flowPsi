@@ -26,6 +26,8 @@
 #include "inviscidFlux.h"
 #include "bcTools.h"
 $include "flowPsi.lh"
+#include "FVMOverset/overset.h"
+$include "FVMOverset/overset.lh"
 #include <map>
 using std::map ;
 
@@ -55,9 +57,8 @@ namespace flowPsi {
   }
   
 
-  $type interpolateFace(X) store<real> ;
-  $type interpolateFace_v3d(X) store<vect3d> ;
-  $type interpolateFace_M(X) storeVec<real> ;
+  //  $type interpolateFace(X) store<real> ;
+  //  $type interpolateFace_v3d(X) store<vect3d> ;
 
   $rule pointwise(u_f,gagePressure_f,temperature_f<-
                   ci->(u,temperature,gagePressure),

@@ -21,7 +21,8 @@
 
 #include <Loci.h>
 #include <Tools/tools.h>
-#include "gridComponent.h"
+#include <FVMOverset/overset.h>
+//#include "gridComponent.h"
 #include <iostream>
 #include <fstream>
 #include <string>
@@ -46,6 +47,9 @@ $include "FVM.lh"
 $include "flowPsi.lh"
 
 namespace flowPsi {
+  using Loci::componentXform ;
+  //  using Loci::Quaternion ;
+
   $type componentMRF param<options_list> ;
 
 $rule optional(componentMRF),
@@ -174,7 +178,7 @@ $rule constraint(componentMRFRotation_X,componentMRFStationary_X<-volumeTag(X),c
     const real angle = M_PI/360 ; // half a degree reference angle used to
                                   // numerically estimate velocity
     const real dt = angle/(*$componentMRFRotationSpeed_X) ;
-    Quaternion rotation(*$componentMRFRotationAxis_X,angle) ;
+    Loci::Quaternion rotation(*$componentMRFRotationAxis_X,angle) ;
     const vect3d cg = *$componentMRFRotationCenter_X ;
     componentXform xform ;
     xform.cg = cg ;

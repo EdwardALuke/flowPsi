@@ -50,6 +50,13 @@ namespace flowPsi {
   $rule pointwise(gagePressure{n,it}<-gagePressure_i{n,it}),
   	inplace(gagePressure{n,it}|gagePressure_i{n,it}),prelude {} ;
   $rule pointwise(u{n,it}<-u_i{n,it}),inplace(u{n,it}|u_i{n,it}),prelude {} ;
+  $type scalarInterpolateToBlankedCells(Xout,Xin) store<real> ;
+  $type v3dInterpolateToBlankedCells(Xout,Xin) store<vect3d> ;
+
+  // Add overset interpolation
+  $rule pointwise(OUTPUT<-scalarInterpolateToBlankedCells(temperature,temperature_i)) {} ;
+  $rule pointwise(OUTPUT<-scalarInterpolateToBlankedCells(gagePressure,gagePressure_i)) {} ;
+  $rule pointwise(OUTPUT<-v3dInterpolateToBlankedCells(u,u_i)) {} ;
 
   $type dfluid storeVec<real> ;
   $rule pointwise(temperature_i{n,it+1},gagePressure_i{n,it+1},u_i{n,it+1}<- 

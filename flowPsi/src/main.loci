@@ -288,6 +288,7 @@ int main(int ac, char *av[]) {
   fact_db facts ;
 
   Loci::load_module("fvm",rdb) ;
+  Loci::load_module("fvmoverset",rdb) ;
   
   // Now look in vars file for directives to load in modules, or solid_heat
   if(ac > 1) {
