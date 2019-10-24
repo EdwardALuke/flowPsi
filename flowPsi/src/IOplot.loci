@@ -112,7 +112,7 @@ namespace flowPsi {
     }
   }
 #endif 
-  $rule singleton(plot_postfix<-ncycle,plot_modulo) {
+  $rule singleton(plot_postfix<-ncycle,plot_modulo),constraint(timeStepImplicit) {
     $plot_postfix = "" ;
     int cycle = $ncycle ;
     if($plot_modulo != 0) 

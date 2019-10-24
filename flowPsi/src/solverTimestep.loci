@@ -31,6 +31,11 @@ namespace flowPsi {
     $stop_iter=1000 ;
   }
 
+  $type stop_time param<TimeValue> ;
+  $rule default(stop_time) {
+    $stop_time = 1e30 ;
+  }
+  
   $rule optional(cflmax) { }
   
   $rule singleton(plot_status{n=-1}),constraint(UNIVERSE) {
@@ -38,8 +43,10 @@ namespace flowPsi {
   }
 
   
-  $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1}) {
-    $timestepFinished{n} = ($$n{n}>$stop_iter+1)||($plot_status{n-1}>1) ;
+  $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1},stop_time,stime{n}) {
+    $timestepFinished{n} = (($$n{n}>$stop_iter+1) ||
+			    ($plot_status{n-1}>1) ||
+			    ($stime{n} > real($stop_time))) ;
   }
 					    
   $rule pointwise(solution<-gagePressure{n},temperature{n},u{n}),

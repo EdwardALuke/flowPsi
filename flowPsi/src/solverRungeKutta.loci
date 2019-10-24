@@ -20,11 +20,15 @@
 //#############################################################################
 
 #include <Loci.h>
+#include <Tools/stream.h>
+#include <string>
+#include <sstream>
 $include "flowPsi.lh"
 
 namespace flowPsi {
   using std::cerr ;
   using std::endl ;
+
 
   $type temperature_i store<real> ;
   $type gagePressure_i store<real> ;
@@ -78,11 +82,43 @@ namespace flowPsi {
   $rule default(plot_interval) {
     $plot_interval = -1.0 ;
   }
-  $rule apply(dtStable<-stime,plot_interval,dtmax)[Loci::Minimum],prelude {
-      real t1 = *$stime ;
+
+  $type stime_remain param<real> ;
+  $type ic_stime param<real> ;
+  
+
+  $rule singleton(stime_remain{n=0}<-ic_stime,plot_interval),
+  constraint(timeStepExplicit) {
+    $stime_remain{n=0} = $ic_stime ;
+    $stime_remain{n=0} -= floor($ic_stime/$plot_interval)*$plot_interval ;
+  }
+
+  $rule singleton(stime_remain{n,rk=0}<-stime_remain{n}),
+  constraint(timeStepExplicit) {
+    $stime_remain{n,rk=0} = $stime_remain{n} ;
+  }
+
+  $rule singleton(stime_remain{n,rk+1}<-stime_remain{n,rk},$rk{n,rk},dtRK{n,rk},plot_interval),
+  constraint(timeStepExplicit){
+    $stime_remain{n,rk+1} = $stime_remain{n,rk} ;
+    if($$rk{n,rk} == 0) {
+      const real pt = $plot_interval ;
+      const real tnext = $stime_remain{n,rk}+$dtRK{n,rk} ;
+      $stime_remain{n,rk+1} = (fabs(tnext-pt) < 1e-8*pt)?0.0:tnext ;
+    }
+  }
+
+  $rule singleton(stime_remain{n+1}<-stime_remain{n,rk}),
+    conditional(rkFinished{n,rk}),
+    constraint(timeStepExplicit) {
+    $stime_remain{n+1} = $stime_remain{n,rk} ;
+  }
+
+  $rule apply(dtStable<-stime_remain,plot_interval,dtmax)[Loci::Minimum],prelude {
+      real t1 = *$stime_remain ;
       real pi = (*$plot_interval)>0?(*$plot_interval):(*$dtmax)*1000.0 ;
-      real t2 = pi*ceil(t1/pi+1e-8) ;
-      join(*$dtStable,t2-t1) ;
+      real t2 = pi ;
+      join(*$dtStable,max(t2-t1,1e-30)) ;
   } ;                                                
 
   // Viscous stability limit
@@ -235,17 +271,14 @@ namespace flowPsi {
   }
 
   $rule singleton(do_plot{n,rk}<-ncycle{n},$rk{n,rk},plot_freq,plot_status{n},
-                  plot_interval{n,rk},stime{n,rk},dtRK{n,rk}) {
+                  plot_interval{n,rk},stime_remain{n,rk},stime{n,rk},dtRK{n,rk}) {
     if($plot_interval{n,rk} < 0.0) {
       $do_plot{n,rk} = (($ncycle{n})%$plot_freq == 0 || $plot_status{n}> 0)
                           && ($$rk{n,rk} == 0) ;
     } else {
       $do_plot{n,rk} = false ;
       if($$rk{n,rk} == 0) {
-        real tn = real($plot_interval{n,rk})
-	  *floor($stime{n,rk}/real($plot_interval{n,rk})+.5) ;
-        if(fabs(tn-$stime{n,rk}) < $stime{n,rk}*1e-8)
-          $do_plot{n,rk} = true ; 
+	$do_plot{n,rk} = ($stime_remain{n,rk} == 0.0) ;
       }
     }
   }
@@ -264,6 +297,44 @@ namespace flowPsi {
 
   $rule singleton(output_topo{n,rk}<-ncycle{n,rk},$n{n},$rk{n,rk}) {
     $output_topo{n,rk} = ($$n{n} == 0) && $$rk{n,rk} == 0 ;
+  }
+
+  real time_factor(real ptime, string &time_units) {
+    real factor = 1e15 ;
+    time_units = "fs" ;
+    if(ptime > 1e-15 && fabs(ptime*1e12-ceil(ptime*1e12-1e-4)) < 1e-8) {
+      time_units = "ps" ;
+      factor = 1e12 ;
+    }
+    if(ptime > 1e-12 && fabs(ptime*1e9-ceil(ptime*1e9-1e-4)) < 1e-8) {
+      time_units = "ns" ;
+      factor = 1e9 ;
+    }
+    if(ptime > 1e-9 && fabs(ptime*1e6-ceil(ptime*1e6-1e-4)) < 1e-8) {
+      time_units = "us" ;
+      factor = 1e6 ;
+    }
+    if(ptime > 1e-6 && fabs(ptime*1e3-ceil(ptime*1e3-1e-4)) < 1e-8) {
+      time_units = "ms" ;
+      factor = 1e3 ;
+    }
+    if(ptime > 1e-3 && fabs(ptime - ceil(ptime-1e-4))< 1e-8) {
+      time_units = "s" ;
+      factor = 1 ;
+    }
+    return factor ;
+  }
+
+  $rule singleton(plot_postfix<-ncycle,plot_modulo,stime,plot_interval),constraint(timeStepExplicit) {
+    $plot_postfix = "" ;
+    real ptime = $plot_interval ;
+    string time_units  ;
+    real factor = time_factor(ptime,time_units) ;
+    real time = $stime ;
+    int val = int(realToDouble(floor(time*factor +.5))) ;
+    ostringstream oss ;
+    oss << val << time_units ;
+    $plot_postfix=oss.str() ;
   }
 
 }
