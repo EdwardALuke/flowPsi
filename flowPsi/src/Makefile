@@ -17,7 +17,7 @@ OBJS =  \
 	bcInputs.o bcTurboInterface.o bcTools.o bcInterface.o \
 	bcPrescribed.o bcImpermeable.o bcInflow.o bcOutflow.o \
 	bcIsentropic.o bcFixedMass.o bcFixedMassOutflow.o bcViscousWall.o \
-	solverTimestep.o solverNewton.o solverEoS.o solverIC.o \
+	solverTimestep.o solverRungeKutta.o solverNewton.o solverEoS.o solverIC.o \
 	solverLinearSystem.o solverResidual.o solverRestart.o\
 	solverTurbulence.o solverScalarTransport.o solverPeriodic.o \
 	solverSetup.o solverGravity.o solverAveraging.o solverInterpolate.o \

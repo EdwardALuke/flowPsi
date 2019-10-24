@@ -73,6 +73,9 @@ namespace flowPsi {
     } else if($timeStepScheme == "KEC") {
       $timeStepSchemeKEC = ~EMPTY ;
       $timeStepSchemeBDF2 = EMPTY ;
+    } else if($timeStepScheme == "explicit") {
+      $timeStepSchemeKEC = EMPTY ;
+      $timeStepSchemeBDF2 = EMPTY ;
     } else {
       $[Once] {
 	std::cerr << "unknown timestepping scheme '" << $timeStepScheme
@@ -82,6 +85,17 @@ namespace flowPsi {
     }
   }
   
+  $rule constraint(timeStepImplicit,timeStepExplicit<-timeStepMode,timeStepScheme) {
+    $timeStepImplicit = EMPTY ;
+    $timeStepExplicit = EMPTY ;
+
+    if($timeStepScheme == "explicit") {
+      $timeStepExplicit = ~EMPTY ;
+    } else {
+      $timeStepImplicit = ~EMPTY ;
+    }
+  }
+
   $rule constraint(timeStepSteadyState,timeStepAccurate<-timeStepMode) {
     $timeStepSteadyState = ~EMPTY ;
     $timeStepAccurate = EMPTY ;
@@ -214,21 +228,21 @@ namespace flowPsi {
     $ncycle{n=0} = $ic_ncycle ;
   }
 
-  $rule singleton(ncycle{n,it=0}<-ncycle{n}) {
+  $rule singleton(ncycle{n,it=0}<-ncycle{n}),constraint(timeStepImplicit) {
     $ncycle{n,it=0} = $ncycle{n} + 1 ;
   }
 
-  $rule singleton(ncycle{n,it+1}<-ncycle{n,it}) {
+  $rule singleton(ncycle{n,it+1}<-ncycle{n,it}),constraint(timeStepImplicit) {
     $ncycle{n,it+1} = $ncycle{n,it} ;
   }
   $rule singleton(ncycle{n+1}<-ncycle{n,it}),conditional(newtonFinished{n,it}) {
     $ncycle{n+1} = $ncycle{n,it} ;
   }
   
-  $rule singleton(stime{n,it=0}<-stime{n},timeStepSize{n}) {
+  $rule singleton(stime{n,it=0}<-stime{n},timeStepSize{n}),constraint(timeStepImplicit) {
     $stime{n,it=0} = $stime{n}+0.5*$timeStepSize{n} ;
   }
-  $rule singleton(stime{n,it+1}<-stime{n,it},$it{n,it}) {
+  $rule singleton(stime{n,it+1}<-stime{n,it},$it{n,it}),constraint(timeStepImplicit) {
     $stime{n,it+1} = $stime{n,it} ;
   }
 

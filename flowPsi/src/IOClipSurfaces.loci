@@ -133,12 +133,12 @@ namespace flowPsi {
     $firstPlotBC_X{n=0} = true ;
   }
   $rule singleton(firstPlotBC_X{n,it=0}<-firstPlotBC_X{n}),
-    parametric(boundaryName(X)){
+  constraint(timeStepImplicit), parametric(boundaryName(X)){
     $firstPlotBC_X{n,it=0} = $firstPlotBC_X{n} ;
   }
   $type doPlotBC_X param<bool> ;
   $rule singleton(firstPlotBC_X{n,it+1}<-firstPlotBC_X{n,it},doPlotBC_X{n,it}),
-    parametric(boundaryName(X)){
+  constraint(timeStepImplicit), parametric(boundaryName(X)){
     $firstPlotBC_X{n,it+1} = $firstPlotBC_X{n,it} && !$doPlotBC_X{n,it} ;
   }
 

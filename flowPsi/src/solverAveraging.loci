@@ -72,7 +72,7 @@ namespace flowPsi {
   } ;
 
   $rule apply(meanCount_ic<-icfile,modelName)[priority_joiner], 
-    option(disable_threading),prelude {
+  option(disable_threading),prelude {
     
     string filename = *$icfile + "meanCount_" + *$modelName ;
 
@@ -86,7 +86,7 @@ namespace flowPsi {
     std::pair<int,real> count(-1,0) ;
     if(file_exists == 1) {
       hid_t file_id = Loci::hdf5OpenFile((filename).c_str(),
-                                       H5F_ACC_RDONLY, H5P_DEFAULT);
+					 H5F_ACC_RDONLY, H5P_DEFAULT);
       entitySet dom = ~EMPTY ;
       param<int> meanCount ;
       *meanCount = 0 ;
@@ -105,8 +105,8 @@ namespace flowPsi {
   }
 
   $rule pointwise(OUTPUT{n}<-meanCount{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n}),
-    conditional(do_restart{n}), 
-    option(disable_threading),prelude {
+  conditional(do_restart{n}), 
+  option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+"meanCount_"+*$modelName{n} ;
@@ -116,7 +116,8 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-  $rule singleton(meanCount{n,it=0}<-meanCount{n},meanFreq,useExponentialMean) {
+  $rule singleton(meanCount{n,it=0}<-meanCount{n},meanFreq,useExponentialMean),
+  constraint(timeStepImplicit){
     $meanCount{n,it=0} = $meanCount{n}+1.0 ;
     if($useExponentialMean)
       $meanCount{n,it=0} = min<real>(real($meanFreq),$meanCount{n,it=0}) ;
@@ -124,10 +125,10 @@ namespace flowPsi {
 
   
   $rule singleton(meanCount{n+1}<-meanCount{n,it},ncycle{n,it},meanFreq,useExponentialMean),
-    conditional(newtonFinished{n,it}) {
+  conditional(newtonFinished{n,it}) {
     $meanCount{n+1} = $meanCount{n,it} ;
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-//      $[Once] {
+      //      $[Once] {
       if(Loci::MPI_rank==0) {
         cout << "NOTE: online averaging module reseting averages..." << endl ;
       }
@@ -139,7 +140,7 @@ namespace flowPsi {
   $type meanVarName_X param<std::string> ;
 
   $rule singleton(meanVarName_X),constraint(UNIVERSE),
-    parametric(scalarMean(X)),option(disable_threading) {
+  parametric(scalarMean(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -159,7 +160,7 @@ namespace flowPsi {
   }
 
   $rule singleton(meanVarName_X),constraint(UNIVERSE),
-    parametric(vect3dMean(X)),option(disable_threading) {
+  parametric(vect3dMean(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -181,7 +182,7 @@ namespace flowPsi {
   $type meanVarNameFace_X param<std::string> ;
 
   $rule singleton(meanVarNameFace_X),constraint(UNIVERSE),
-    parametric(scalarMean_f(X)),option(disable_threading) {
+  parametric(scalarMean_f(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -201,7 +202,7 @@ namespace flowPsi {
   }
 
   $rule singleton(meanVarNameFace_X),constraint(UNIVERSE),
-    parametric(vect3dMean_f(X)),option(disable_threading) {
+  parametric(vect3dMean_f(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -225,18 +226,18 @@ namespace flowPsi {
   $type scalarMeanCell_X_ic store<real> ;
   
   $rule pointwise(scalarMeanCell_X_ic),constraint(geom_cells),
-				    parametric(scalarMean(X)) {
+  parametric(scalarMean(X)) {
     $scalarMeanCell_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarMeanCell_X_ic<-icfile,modelName,meanVarName_X),
-    constraint(geom_cells),parametric(scalarMean(X)),option(disable_threading),
+  constraint(geom_cells),parametric(scalarMean(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarName_X+"MeanCell_"+*$modelName ;
 
     int file_exists = 1 ;
-//    $[Once] {
-      if(Loci::MPI_rank==0) {
+    //    $[Once] {
+    if(Loci::MPI_rank==0) {
       struct stat buf ;
       if(stat(filename.c_str(),&buf) == -1 || !S_ISREG(buf.st_mode))
         file_exists = 0 ;
@@ -251,7 +252,7 @@ namespace flowPsi {
 			  dom) ;
       Loci::hdf5CloseFile(file_id) ;
     } else {
-//      $[Once] {
+      //      $[Once] {
       if(Loci::MPI_rank==1)	{
 	cerr << "Warning, couldn't read restart file '" 
 	     << filename << "'" << endl ;
@@ -265,15 +266,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanCell_X{n=0}<-scalarMeanCell_X_ic),constraint(geom_cells),
-    parametric(scalarMean(X)) {
+  parametric(scalarMean(X)) {
     $scalarMeanCell_X{n=0} = $scalarMeanCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarMeanCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarMean(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarMean(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"MeanCell_"+*$modelName{n} ;
@@ -284,9 +285,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanCell_X{n,it=0}<-scalarMeanCell_X{n}),
-    inplace(scalarMeanCell_X{n,it=0}|scalarMeanCell_X{n}), 
-    parametric(scalarMean(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarMeanCell_X{n}),
+  inplace(scalarMeanCell_X{n,it=0}|scalarMeanCell_X{n}), 
+  parametric(scalarMean(X)),
+  prelude {
   } ;
 
   $type X store<real> ;
@@ -299,10 +301,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarMeanCell_X{n,it+1}<-scalarMean(X){n,it}),inplace(scalarMeanCell_X{n,it+1}|scalarMean(X){n,it}),
-    parametric(scalarMean(X)),prelude { } ;
+  parametric(scalarMean(X)),prelude { } ;
 
   $rule pointwise(scalarMeanCell_X{n+1}<-scalarMeanCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarMeanCell_X{n+1}|scalarMeanCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarMean(X)) {
+  parametric(scalarMean(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarMeanCell_X{n+1} = 0 ;
     }
@@ -312,12 +314,12 @@ namespace flowPsi {
   $type scalarMeanFace_X_ic store<real> ;
   
   $rule pointwise(scalarMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarMean_f(X)) {
+  parametric(scalarMean_f(X)) {
     $scalarMeanFace_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarMeanFace_X_ic<-icfile,modelName,meanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(scalarMean_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(scalarMean_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarNameFace_X+"MeanFace_"+*$modelName ;
 
@@ -352,14 +354,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanFace_X{n=0}<-scalarMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarMean_f(X)) {
+  parametric(scalarMean_f(X)) {
     $scalarMeanFace_X{n=0} = $scalarMeanFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarMeanFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarMean_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarMean_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarNameFace_X+"MeanFace_"+*$modelName{n} ;
@@ -370,9 +372,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanFace_X{n,it=0}<-scalarMeanFace_X{n}),
-    inplace(scalarMeanFace_X{n,it=0}|scalarMeanFace_X{n}), 
-    parametric(scalarMean_f(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarMeanFace_X{n}),
+  inplace(scalarMeanFace_X{n,it=0}|scalarMeanFace_X{n}), 
+  parametric(scalarMean_f(X)),
+  prelude {
   } ;
 
   $type X_f store<real> ;
@@ -385,10 +388,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarMeanFace_X{n,it+1}<-scalarMean_f(X){n,it}),inplace(scalarMeanFace_X{n,it+1}|scalarMean_f(X){n,it}),
-    parametric(scalarMean_f(X)),prelude { } ;
+  parametric(scalarMean_f(X)),prelude { } ;
 
   $rule pointwise(scalarMeanFace_X{n+1}<-scalarMeanFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarMeanFace_X{n+1}|scalarMeanFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarMean_f(X)) {
+  parametric(scalarMean_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarMeanFace_X{n+1} = 0 ;
     }
@@ -400,7 +403,7 @@ namespace flowPsi {
   $type meanVarNameFaceAll_X param<std::string> ;
 
   $rule singleton(meanVarNameFaceAll_X),constraint(UNIVERSE),
-    parametric(scalarMeanAll_f(X)),option(disable_threading) {
+  parametric(scalarMeanAll_f(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -425,13 +428,13 @@ namespace flowPsi {
   
   $type X store<real> ;
   $rule pointwise(scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
-    parametric(scalarMeanAll_f(X)) {
+  parametric(scalarMeanAll_f(X)) {
     $scalarMeanFaceAll_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarMeanFaceAll_X_ic<-icfile,modelName,meanVarNameFaceAll_X),
-    constraint(cl->geom_cells),parametric(scalarMeanAll_f(X)),option(disable_threading),
-    prelude {
+  constraint(cl->geom_cells),parametric(scalarMeanAll_f(X)),option(disable_threading),
+  prelude {
     string filename = *$icfile+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName ;
 
     int file_exists = 1 ;
@@ -463,14 +466,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanFaceAll_X{n=0}<-scalarMeanFaceAll_X_ic),constraint(cl->geom_cells),
-			    parametric(scalarMeanAll_f(X)) {
+  parametric(scalarMeanAll_f(X)) {
     $scalarMeanFaceAll_X{n=0} = $scalarMeanFaceAll_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarMeanFaceAll_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFaceAll_X),
-    constraint(cl->geom_cells{n}),conditional(do_restart{n}),
-			    parametric(scalarMeanAll_f(X)),option(disable_threading),prelude {
+  constraint(cl->geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarMeanAll_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarNameFaceAll_X+"MeanFaceAll_"+*$modelName{n} ;
@@ -481,9 +484,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarMeanFaceAll_X{n,it=0}<-scalarMeanFaceAll_X{n}),
-    inplace(scalarMeanFaceAll_X{n,it=0}|scalarMeanFaceAll_X{n}), 
-    parametric(scalarMeanAll_f(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarMeanFaceAll_X{n}),
+  inplace(scalarMeanFaceAll_X{n,it=0}|scalarMeanFaceAll_X{n}), 
+  parametric(scalarMeanAll_f(X)),
+  prelude {
   } ;
 
   $type X_f store<real> ;
@@ -496,10 +500,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarMeanFaceAll_X{n,it+1}<-scalarMeanAll_f(X){n,it}),inplace(scalarMeanFaceAll_X{n,it+1}|scalarMeanAll_f(X){n,it}),
-    parametric(scalarMeanAll_f(X)),prelude { } ;
+  parametric(scalarMeanAll_f(X)),prelude { } ;
 
   $rule pointwise(scalarMeanFaceAll_X{n+1}<-scalarMeanFaceAll_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarMeanFaceAll_X{n+1}|scalarMeanFaceAll_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarMeanAll_f(X)) {
+  parametric(scalarMeanAll_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarMeanFaceAll_X{n+1} = 0 ;
     }
@@ -511,12 +515,12 @@ namespace flowPsi {
   $type scalarM2Cell_X_ic store<real> ;
 
   $rule pointwise(scalarM2Cell_X_ic),constraint(geom_cells),
-    parametric(scalarM2(X)) {
+  parametric(scalarM2(X)) {
     $scalarM2Cell_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarM2Cell_X_ic<-icfile,modelName,meanVarName_X),
-    constraint(geom_cells),parametric(scalarM2(X)),option(disable_threading),
+  constraint(geom_cells),parametric(scalarM2(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarName_X+"M2Cell_"+*$modelName ;
 
@@ -551,14 +555,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarM2Cell_X{n=0}<-scalarM2Cell_X_ic),constraint(geom_cells),
-    parametric(scalarM2(X)) {
+  parametric(scalarM2(X)) {
     $scalarM2Cell_X{n=0} = $scalarM2Cell_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarM2Cell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarM2(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarM2(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"M2Cell_"+*$modelName{n} ;
@@ -569,9 +573,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarM2Cell_X{n,it=0}<-scalarM2Cell_X{n}),
-    inplace(scalarM2Cell_X{n,it=0}|scalarM2Cell_X{n}), 
-    parametric(scalarM2(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarM2Cell_X{n}),
+  inplace(scalarM2Cell_X{n,it=0}|scalarM2Cell_X{n}), 
+  parametric(scalarM2(X)),
+  prelude {
   } ;
 
   $type X store<real> ;
@@ -586,10 +591,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarM2Cell_X{n,it+1}<-scalarM2(X){n,it}),inplace(scalarM2Cell_X{n,it+1}|scalarM2(X){n,it}),
-    parametric(scalarM2(X)),prelude { } ;
+  parametric(scalarM2(X)),prelude { } ;
 
   $rule pointwise(scalarM2Cell_X{n+1}<-scalarM2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(scalarM2Cell_X{n+1}|scalarM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarM2(X)) {
+  parametric(scalarM2(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarM2Cell_X{n+1} = 0 ;
     }
@@ -606,12 +611,12 @@ namespace flowPsi {
   $type scalarM2Face_X_ic store<real> ;
 
   $rule pointwise(scalarM2Face_X_ic),constraint(ci->geom_cells),
-    parametric(scalarM2_f(X)) {
+  parametric(scalarM2_f(X)) {
     $scalarM2Face_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarM2Face_X_ic<-icfile,modelName,meanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(scalarM2_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(scalarM2_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarNameFace_X+"M2Face_"+*$modelName ;
 
@@ -646,14 +651,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarM2Face_X{n=0}<-scalarM2Face_X_ic),constraint(ci->geom_cells),
-    parametric(scalarM2_f(X)) {
+  parametric(scalarM2_f(X)) {
     $scalarM2Face_X{n=0} = $scalarM2Face_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarM2Face_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarM2_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarM2_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"M2Face_"+*$modelName{n} ;
@@ -664,9 +669,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarM2Face_X{n,it=0}<-scalarM2Face_X{n}),
-    inplace(scalarM2Face_X{n,it=0}|scalarM2Face_X{n}), 
-    parametric(scalarM2_f(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarM2Face_X{n}),
+  inplace(scalarM2Face_X{n,it=0}|scalarM2Face_X{n}), 
+  parametric(scalarM2_f(X)),
+  prelude {
   } ;
 
   $type X_f store<real> ;
@@ -684,10 +690,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarM2Face_X{n,it+1}<-scalarM2_f(X){n,it}),inplace(scalarM2Face_X{n,it+1}|scalarM2_f(X){n,it}),
-    parametric(scalarM2_f(X)),prelude { } ;
+  parametric(scalarM2_f(X)),prelude { } ;
 
   $rule pointwise(scalarM2Face_X{n+1}<-scalarM2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(scalarM2Face_X{n+1}|scalarM2Face_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarM2_f(X)) {
+  parametric(scalarM2_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarM2Face_X{n+1} = 0 ;
     }
@@ -707,12 +713,12 @@ namespace flowPsi {
   $type vect3dMeanCell_X_ic store<vect3d> ;
 
   $rule pointwise(vect3dMeanCell_X_ic),constraint(geom_cells),
-    parametric(vect3dMean(X)) {
+  parametric(vect3dMean(X)) {
     $vect3dMeanCell_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dMeanCell_X_ic<-icfile,modelName,meanVarName_X),
-    constraint(geom_cells),parametric(vect3dMean(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dMean(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarName_X+"MeanCell_"+*$modelName ;
 
@@ -746,14 +752,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dMeanCell_X{n=0}<-vect3dMeanCell_X_ic),
-    constraint(geom_cells), parametric(vect3dMean(X)) {
+  constraint(geom_cells), parametric(vect3dMean(X)) {
     $vect3dMeanCell_X{n=0} = $vect3dMeanCell_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dMeanCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dMean(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dMean(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"MeanCell_"+*$modelName{n} ;
@@ -764,9 +770,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dMeanCell_X{n,it=0}<-vect3dMeanCell_X{n}),
-    inplace(vect3dMeanCell_X{n,it=0}|vect3dMeanCell_X{n}), 
-    parametric(vect3dMean(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dMeanCell_X{n}),
+  inplace(vect3dMeanCell_X{n,it=0}|vect3dMeanCell_X{n}), 
+  parametric(vect3dMean(X)),
+  prelude {
   } ;
 
   $type X store<vect3d> ;
@@ -780,10 +787,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dMeanCell_X{n,it+1}<-vect3dMean(X){n,it}),inplace(vect3dMeanCell_X{n,it+1}|vect3dMean(X){n,it}),
-    parametric(vect3dMean(X)),prelude { } ;
+  parametric(vect3dMean(X)),prelude { } ;
 
   $rule pointwise(vect3dMeanCell_X{n+1}<-vect3dMeanCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dMeanCell_X{n+1}|vect3dMeanCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dMean(X)) {
+  parametric(vect3dMean(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dMeanCell_X{n+1} = vect3d(0,0,0) ;
     }
@@ -793,12 +800,12 @@ namespace flowPsi {
   $type vect3dMeanFace_X_ic store<vect3d> ;
 
   $rule pointwise(vect3dMeanFace_X_ic),constraint(ci->geom_cells),
-     parametric(vect3dMean_f(X)) {
-     $vect3dMeanFace_X_ic = vect3d(0,0,0) ;
-   }
+  parametric(vect3dMean_f(X)) {
+    $vect3dMeanFace_X_ic = vect3d(0,0,0) ;
+  }
 
   $rule pointwise(icfile::vect3dMeanFace_X_ic<-icfile,modelName,meanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dMean_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dMean_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarNameFace_X+"MeanFace_"+*$modelName ;
 
@@ -833,14 +840,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dMeanFace_X{n=0}<-vect3dMeanFace_X_ic),
-    constraint(ci->geom_cells), parametric(vect3dMean_f(X)) {
+  constraint(ci->geom_cells), parametric(vect3dMean_f(X)) {
     $vect3dMeanFace_X{n=0} = $vect3dMeanFace_X_ic ;
-   }
+  }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dMeanFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dMean_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dMean_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarNameFace_X+"MeanFace_"+*$modelName{n} ;
@@ -850,42 +857,43 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-   $rule pointwise(vect3dMeanFace_X{n,it=0}<-vect3dMeanFace_X{n}),
-     inplace(vect3dMeanFace_X{n,it=0}|vect3dMeanFace_X{n}), 
-     parametric(vect3dMean_f(X)),
-     prelude {
-   } ;
+  $rule pointwise(vect3dMeanFace_X{n,it=0}<-vect3dMeanFace_X{n}),
+  constraint(timeStepImplicit,vect3dMeanFace_X{n}),
+  inplace(vect3dMeanFace_X{n,it=0}|vect3dMeanFace_X{n}), 
+  parametric(vect3dMean_f(X)),
+  prelude {
+  } ;
 
-   $type X_f store<vect3d> ;
-   $rule pointwise(vect3dMean_f(X){n,it}<-vect3dMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
-     $vect3dMean_f(X){n,it} = $vect3dMeanFace_X{n,it} ;
-     if($lastNewton{n,it}) {
-       vect3d delta = $X_f{n,it}-$vect3dMean_f(X){n,it} ;
-       real factor = 1./$meanCount{n,it} ;
-       $vect3dMean_f(X){n,it} += factor*delta ;
-     }
-   }
+  $type X_f store<vect3d> ;
+  $rule pointwise(vect3dMean_f(X){n,it}<-vect3dMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
+    $vect3dMean_f(X){n,it} = $vect3dMeanFace_X{n,it} ;
+    if($lastNewton{n,it}) {
+      vect3d delta = $X_f{n,it}-$vect3dMean_f(X){n,it} ;
+      real factor = 1./$meanCount{n,it} ;
+      $vect3dMean_f(X){n,it} += factor*delta ;
+    }
+  }
 
-   $rule pointwise(vect3dMeanFace_X{n,it+1}<-vect3dMean_f(X){n,it}),inplace(vect3dMeanFace_X{n,it+1}|vect3dMean_f(X){n,it}),
-     parametric(vect3dMean_f(X)),prelude { } ;
+  $rule pointwise(vect3dMeanFace_X{n,it+1}<-vect3dMean_f(X){n,it}),inplace(vect3dMeanFace_X{n,it+1}|vect3dMean_f(X){n,it}),
+  parametric(vect3dMean_f(X)),prelude { } ;
 
   $rule pointwise(vect3dMeanFace_X{n+1}<-vect3dMeanFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dMeanFace_X{n+1}|vect3dMeanFace_X{n,it}),conditional(newtonFinished{n,it}),
-     parametric(vect3dMean_f(X)) {
-     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-       $vect3dMeanFace_X{n+1} = vect3d(0,0,0) ;
-     }
-   } 
+  parametric(vect3dMean_f(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $vect3dMeanFace_X{n+1} = vect3d(0,0,0) ;
+    }
+  } 
 
-   $type vect3dM2Cell_X store<vect3d> ;
-   $type vect3dM2Cell_X_ic store<vect3d> ;
+  $type vect3dM2Cell_X store<vect3d> ;
+  $type vect3dM2Cell_X_ic store<vect3d> ;
 
-   $rule pointwise(vect3dM2Cell_X_ic),constraint(geom_cells),
-     parametric(vect3dM2(X)) {
-     $vect3dM2Cell_X_ic = vect3d(0,0,0) ;
-   }
+  $rule pointwise(vect3dM2Cell_X_ic),constraint(geom_cells),
+  parametric(vect3dM2(X)) {
+    $vect3dM2Cell_X_ic = vect3d(0,0,0) ;
+  }
 
   $rule pointwise(icfile::vect3dM2Cell_X_ic<-icfile,modelName,meanVarName_X),
-    constraint(geom_cells),parametric(vect3dM2(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dM2(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarName_X+"M2Cell_"+*$modelName ;
 
@@ -918,15 +926,15 @@ namespace flowPsi {
     }
   } ;
 
-   $rule pointwise(vect3dM2Cell_X{n=0}<-vect3dM2Cell_X_ic),constraint(geom_cells),
-     parametric(vect3dM2(X)) {
-     $vect3dM2Cell_X{n=0} = $vect3dM2Cell_X_ic;
-   }
+  $rule pointwise(vect3dM2Cell_X{n=0}<-vect3dM2Cell_X_ic),constraint(geom_cells),
+  parametric(vect3dM2(X)) {
+    $vect3dM2Cell_X{n=0} = $vect3dM2Cell_X_ic;
+  }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dM2Cell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dM2(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dM2(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"M2Cell_"+*$modelName{n} ;
@@ -936,52 +944,53 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-   $rule pointwise(vect3dM2Cell_X{n,it=0}<-vect3dM2Cell_X{n}),
-     inplace(vect3dM2Cell_X{n,it=0}|vect3dM2Cell_X{n}), 
-     parametric(vect3dM2(X)),
-     prelude {
-   } ;
+  $rule pointwise(vect3dM2Cell_X{n,it=0}<-vect3dM2Cell_X{n}),
+  constraint(timeStepImplicit,vect3dM2Cell_X{n}),
+  inplace(vect3dM2Cell_X{n,it=0}|vect3dM2Cell_X{n}), 
+  parametric(vect3dM2(X)),
+  prelude {
+  } ;
 
-   $type X store<vect3d> ;
-   $rule pointwise(vect3dM2(X){n,it}<-vect3dMean(X){n,it},vect3dMeanCell_X{n,it},vect3dM2Cell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
-     $vect3dM2(X){n,it} = $vect3dM2Cell_X{n,it} ;
-     if($lastNewton{n,it}) {
-       // Note, vect3dMeanCell_X is the old mean while vect3dMean(X) is the
-       // updated mean for this iteration value
-       vect3d delta = $X{n,it}-$vect3dMeanCell_X{n,it} ; 
-       $vect3dM2(X){n,it}.x += delta.x*($X{n,it}.x-$vect3dMean(X){n,it}.x) ;
-       $vect3dM2(X){n,it}.y += delta.y*($X{n,it}.y-$vect3dMean(X){n,it}.y) ;
-       $vect3dM2(X){n,it}.z += delta.z*($X{n,it}.z-$vect3dMean(X){n,it}.z) ;
-     }
-   }
+  $type X store<vect3d> ;
+  $rule pointwise(vect3dM2(X){n,it}<-vect3dMean(X){n,it},vect3dMeanCell_X{n,it},vect3dM2Cell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
+    $vect3dM2(X){n,it} = $vect3dM2Cell_X{n,it} ;
+    if($lastNewton{n,it}) {
+      // Note, vect3dMeanCell_X is the old mean while vect3dMean(X) is the
+      // updated mean for this iteration value
+      vect3d delta = $X{n,it}-$vect3dMeanCell_X{n,it} ; 
+      $vect3dM2(X){n,it}.x += delta.x*($X{n,it}.x-$vect3dMean(X){n,it}.x) ;
+      $vect3dM2(X){n,it}.y += delta.y*($X{n,it}.y-$vect3dMean(X){n,it}.y) ;
+      $vect3dM2(X){n,it}.z += delta.z*($X{n,it}.z-$vect3dMean(X){n,it}.z) ;
+    }
+  }
 
-   $rule pointwise(vect3dM2Cell_X{n,it+1}<-vect3dM2(X){n,it}),inplace(vect3dM2Cell_X{n,it+1}|vect3dM2(X){n,it}),
-     parametric(vect3dM2(X)),prelude { } ;
+  $rule pointwise(vect3dM2Cell_X{n,it+1}<-vect3dM2(X){n,it}),inplace(vect3dM2Cell_X{n,it+1}|vect3dM2(X){n,it}),
+  parametric(vect3dM2(X)),prelude { } ;
 
   $rule pointwise(vect3dM2Cell_X{n+1}<-vect3dM2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Cell_X{n+1}|vect3dM2Cell_X{n,it}),conditional(newtonFinished{n,it}),
-     parametric(vect3dM2(X)) {
-     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-       $vect3dM2Cell_X{n+1} = vect3d(0,0,0) ;
-     }
-     real mc = $meanCount{n,it} ;
-     if($useExponentialMean && mc == $meanFreq) {
-       $vect3dM2Cell_X{n+1} *= (mc-1.0)/mc ;
-     }
-   } 
-   $rule pointwise(vect3dVariance(X){n,it}<-vect3dM2(X){n,it},meanCount{n,it}) {
-     $vect3dVariance(X){n,it} = $vect3dM2(X){n,it}/$meanCount{n,it} ;
-   }
+  parametric(vect3dM2(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $vect3dM2Cell_X{n+1} = vect3d(0,0,0) ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $vect3dM2Cell_X{n+1} *= (mc-1.0)/mc ;
+    }
+  } 
+  $rule pointwise(vect3dVariance(X){n,it}<-vect3dM2(X){n,it},meanCount{n,it}) {
+    $vect3dVariance(X){n,it} = $vect3dM2(X){n,it}/$meanCount{n,it} ;
+  }
 
-   $type vect3dM2Face_X store<vect3d> ;
-   $type vect3dM2Face_X_ic store<vect3d> ;
+  $type vect3dM2Face_X store<vect3d> ;
+  $type vect3dM2Face_X_ic store<vect3d> ;
 
-   $rule pointwise(vect3dM2Face_X_ic),constraint(ci->geom_cells),
-     parametric(vect3dM2_f(X)) {
-     $vect3dM2Face_X_ic = vect3d(0,0,0) ;
-   }
+  $rule pointwise(vect3dM2Face_X_ic),constraint(ci->geom_cells),
+  parametric(vect3dM2_f(X)) {
+    $vect3dM2Face_X_ic = vect3d(0,0,0) ;
+  }
 
   $rule pointwise(icfile::vect3dM2Face_X_ic<-icfile,modelName,meanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dM2_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dM2_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarNameFace_X+"M2Face_"+*$modelName ;
 
@@ -1016,15 +1025,15 @@ namespace flowPsi {
   } ;
 
 
-   $rule pointwise(vect3dM2Face_X{n=0}<-vect3dM2Face_X_ic),constraint(ci->geom_cells),
-     parametric(vect3dM2_f(X)) {
-     $vect3dM2Face_X{n=0} = $vect3dM2Face_X_ic;
-   }
+  $rule pointwise(vect3dM2Face_X{n=0}<-vect3dM2Face_X_ic),constraint(ci->geom_cells),
+  parametric(vect3dM2_f(X)) {
+    $vect3dM2Face_X{n=0} = $vect3dM2Face_X_ic;
+  }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dM2Face_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dM2_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dM2_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarNameFace_X+"M2Face_"+*$modelName{n} ;
@@ -1034,59 +1043,60 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-   $rule pointwise(vect3dM2Face_X{n,it=0}<-vect3dM2Face_X{n}),
-     inplace(vect3dM2Face_X{n,it=0}|vect3dM2Face_X{n}), 
-     parametric(vect3dM2_f(X)),
-     prelude {
-   } ;
+  $rule pointwise(vect3dM2Face_X{n,it=0}<-vect3dM2Face_X{n}),
+  constraint(timeStepImplicit,vect3dM2Face_X{n}),
+  inplace(vect3dM2Face_X{n,it=0}|vect3dM2Face_X{n}), 
+  parametric(vect3dM2_f(X)),
+  prelude {
+  } ;
 
-   $type X_f store<vect3d> ;
-   $rule pointwise(vect3dM2_f(X){n,it}<-
-		   vect3dMean_f(X){n,it},vect3dMeanFace_X{n,it},
-		   vect3dM2Face_X{n,it},
-		   lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
-     $vect3dM2_f(X){n,it} = $vect3dM2Face_X{n,it} ;
-     if($lastNewton{n,it}) {
-       // Note vect3dMeanFace_X is the old mean while vect3dMean_f(X) is 
-       // the updated mean for this iteration value
-       vect3d delta = $X_f{n,it}-$vect3dMeanFace_X{n,it} ;
-       $vect3dM2_f(X){n,it}.x += delta.x*
-			      ($X_f{n,it}.x-$vect3dMean_f(X){n,it}.x) ;
-       $vect3dM2_f(X){n,it}.y += delta.y*
-			      ($X_f{n,it}.y-$vect3dMean_f(X){n,it}.y) ;
-       $vect3dM2_f(X){n,it}.z += delta.z*
-			      ($X_f{n,it}.z-$vect3dMean_f(X){n,it}.z) ;
-     }
-   }
+  $type X_f store<vect3d> ;
+  $rule pointwise(vect3dM2_f(X){n,it}<-
+		  vect3dMean_f(X){n,it},vect3dMeanFace_X{n,it},
+		  vect3dM2Face_X{n,it},
+		  lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
+    $vect3dM2_f(X){n,it} = $vect3dM2Face_X{n,it} ;
+    if($lastNewton{n,it}) {
+      // Note vect3dMeanFace_X is the old mean while vect3dMean_f(X) is 
+      // the updated mean for this iteration value
+      vect3d delta = $X_f{n,it}-$vect3dMeanFace_X{n,it} ;
+      $vect3dM2_f(X){n,it}.x += delta.x*
+			     ($X_f{n,it}.x-$vect3dMean_f(X){n,it}.x) ;
+      $vect3dM2_f(X){n,it}.y += delta.y*
+			     ($X_f{n,it}.y-$vect3dMean_f(X){n,it}.y) ;
+      $vect3dM2_f(X){n,it}.z += delta.z*
+			     ($X_f{n,it}.z-$vect3dMean_f(X){n,it}.z) ;
+    }
+  }
 
-   $rule pointwise(vect3dM2Face_X{n,it+1}<-vect3dM2_f(X){n,it}),inplace(vect3dM2Face_X{n,it+1}|vect3dM2_f(X){n,it}),
-     parametric(vect3dM2_f(X)),prelude { } ;
+  $rule pointwise(vect3dM2Face_X{n,it+1}<-vect3dM2_f(X){n,it}),inplace(vect3dM2Face_X{n,it+1}|vect3dM2_f(X){n,it}),
+  parametric(vect3dM2_f(X)),prelude { } ;
 
   $rule pointwise(vect3dM2Face_X{n+1}<-vect3dM2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dM2Face_X{n+1}|vect3dM2Face_X{n,it}),conditional(newtonFinished{n,it}),
-     parametric(vect3dM2_f(X)) {
-     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-       $vect3dM2Face_X{n+1} = vect3d(0,0,0) ;
-     }
-     real mc = $meanCount{n,it} ;
-     if($useExponentialMean && mc == $meanFreq) {
-       $vect3dM2Face_X{n+1} *= (mc-1.0)/mc ;
-     }
-   }
+  parametric(vect3dM2_f(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $vect3dM2Face_X{n+1} = vect3d(0,0,0) ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $vect3dM2Face_X{n+1} *= (mc-1.0)/mc ;
+    }
+  }
 
-   $rule pointwise(vect3dVariance_f(X){n,it}<-vect3dM2_f(X){n,it},meanCount{n,it}) {
-     $vect3dVariance_f(X){n,it} = $vect3dM2_f(X){n,it}/$meanCount{n,it} ;
-   }
+  $rule pointwise(vect3dVariance_f(X){n,it}<-vect3dM2_f(X){n,it},meanCount{n,it}) {
+    $vect3dVariance_f(X){n,it} = $vect3dM2_f(X){n,it}/$meanCount{n,it} ;
+  }
 
   $type vect3dMX2Cell_X store<vect3d> ;
   $type vect3dMX2Cell_X_ic store<vect3d> ;
 
   $rule pointwise(vect3dMX2Cell_X_ic),constraint(geom_cells),
-    parametric(vect3dMX2(X)) {
+  parametric(vect3dMX2(X)) {
     $vect3dMX2Cell_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dMX2Cell_X_ic<-icfile,modelName,meanVarName_X),
-    constraint(geom_cells),parametric(vect3dMX2(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dMX2(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarName_X+"MX2Cell_"+*$modelName ;
 
@@ -1120,14 +1130,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dMX2Cell_X{n=0}<-vect3dMX2Cell_X_ic),constraint(geom_cells),
-    parametric(vect3dMX2(X)) {
+  parametric(vect3dMX2(X)) {
     $vect3dMX2Cell_X{n=0} = $vect3dMX2Cell_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dMX2Cell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dMX2(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dMX2(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarName_X+"MX2Cell_"+*$modelName{n} ;
@@ -1137,54 +1147,55 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-   $rule pointwise(vect3dMX2Cell_X{n,it=0}<-vect3dMX2Cell_X{n}),
-     inplace(vect3dMX2Cell_X{n,it=0}|vect3dMX2Cell_X{n}), 
-     parametric(vect3dMX2(X)),
-     prelude {
-   } ;
+  $rule pointwise(vect3dMX2Cell_X{n,it=0}<-vect3dMX2Cell_X{n}),
+  constraint(timeStepImplicit,vect3dMX2Cell_X{n}),
+  inplace(vect3dMX2Cell_X{n,it=0}|vect3dMX2Cell_X{n}), 
+  parametric(vect3dMX2(X)),
+  prelude {
+  } ;
 
-   $type X store<vect3d> ;
-   $rule pointwise(vect3dMX2(X){n,it}<-vect3dMean(X){n,it},vect3dMeanCell_X{n,it},vect3dMX2Cell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
-     $vect3dMX2(X){n,it} = $vect3dMX2Cell_X{n,it} ;
-     if($lastNewton{n,it}) {
-       // Note, vect3dMeanCell_X is the old mean while vect3dMean(X) is the
-       // updated mean for this iteration value
-       vect3d delta = $X{n,it}-$vect3dMeanCell_X{n,it} ; 
+  $type X store<vect3d> ;
+  $rule pointwise(vect3dMX2(X){n,it}<-vect3dMean(X){n,it},vect3dMeanCell_X{n,it},vect3dMX2Cell_X{n,it},lastNewton{n,it},X{n,it},meanCount{n,it}) {
+    $vect3dMX2(X){n,it} = $vect3dMX2Cell_X{n,it} ;
+    if($lastNewton{n,it}) {
+      // Note, vect3dMeanCell_X is the old mean while vect3dMean(X) is the
+      // updated mean for this iteration value
+      vect3d delta = $X{n,it}-$vect3dMeanCell_X{n,it} ; 
        
-       real n = $meanCount{n,it} ;
-       $vect3dMX2(X){n,it}.x += (n-1.)*delta.y*delta.z/n ;
-       $vect3dMX2(X){n,it}.y += (n-1.)*delta.x*delta.z/n ;
-       $vect3dMX2(X){n,it}.z += (n-1.)*delta.x*delta.y/n ;
-     }
-   }
+      real n = $meanCount{n,it} ;
+      $vect3dMX2(X){n,it}.x += (n-1.)*delta.y*delta.z/n ;
+      $vect3dMX2(X){n,it}.y += (n-1.)*delta.x*delta.z/n ;
+      $vect3dMX2(X){n,it}.z += (n-1.)*delta.x*delta.y/n ;
+    }
+  }
 
-   $rule pointwise(vect3dMX2Cell_X{n,it+1}<-vect3dMX2(X){n,it}),inplace(vect3dMX2Cell_X{n,it+1}|vect3dMX2(X){n,it}),
-     parametric(vect3dMX2(X)),prelude { } ;
+  $rule pointwise(vect3dMX2Cell_X{n,it+1}<-vect3dMX2(X){n,it}),inplace(vect3dMX2Cell_X{n,it+1}|vect3dMX2(X){n,it}),
+  parametric(vect3dMX2(X)),prelude { } ;
 
   $rule pointwise(vect3dMX2Cell_X{n+1}<-vect3dMX2Cell_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Cell_X{n+1}|vect3dMX2Cell_X{n,it}),conditional(newtonFinished{n,it}),
-     parametric(vect3dMX2(X)) {
-     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-       $vect3dMX2Cell_X{n+1} = vect3d(0,0,0) ;
-     }
-     real mc = $meanCount{n,it} ;
-     if($useExponentialMean && mc == $meanFreq) {
-       $vect3dMX2Cell_X{n+1} *= (mc-1.0)/mc ;
-     }
-   } 
-   $rule pointwise(vect3dCoVariance(X){n,it}<-vect3dMX2(X){n,it},meanCount{n,it}) {
-     $vect3dCoVariance(X){n,it} = $vect3dMX2(X){n,it}/$meanCount{n,it} ;
-   }
+  parametric(vect3dMX2(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $vect3dMX2Cell_X{n+1} = vect3d(0,0,0) ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $vect3dMX2Cell_X{n+1} *= (mc-1.0)/mc ;
+    }
+  } 
+  $rule pointwise(vect3dCoVariance(X){n,it}<-vect3dMX2(X){n,it},meanCount{n,it}) {
+    $vect3dCoVariance(X){n,it} = $vect3dMX2(X){n,it}/$meanCount{n,it} ;
+  }
 
-   $type vect3dMX2Face_X store<vect3d> ;
-   $type vect3dMX2Face_X_ic store<vect3d> ;
+  $type vect3dMX2Face_X store<vect3d> ;
+  $type vect3dMX2Face_X_ic store<vect3d> ;
 
-   $rule pointwise(vect3dMX2Face_X_ic),constraint(ci->geom_cells),
-     parametric(vect3dMX2_f(X)) {
-     $vect3dMX2Face_X_ic = vect3d(0,0,0) ;
-   }
+  $rule pointwise(vect3dMX2Face_X_ic),constraint(ci->geom_cells),
+  parametric(vect3dMX2_f(X)) {
+    $vect3dMX2Face_X_ic = vect3d(0,0,0) ;
+  }
 
   $rule pointwise(icfile::vect3dMX2Face_X_ic<-icfile,modelName,meanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dMX2_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dMX2_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$meanVarNameFace_X+"MX2Face_"+*$modelName ;
 
@@ -1218,15 +1229,15 @@ namespace flowPsi {
 
   } ;
 
-   $rule pointwise(vect3dMX2Face_X{n=0}<-vect3dMX2Face_X_ic),constraint(ci->geom_cells),
-     parametric(vect3dMX2_f(X)) {
-     $vect3dMX2Face_X{n=0} = $vect3dMX2Face_X_ic ;
-   }
+  $rule pointwise(vect3dMX2Face_X{n=0}<-vect3dMX2Face_X_ic),constraint(ci->geom_cells),
+  parametric(vect3dMX2_f(X)) {
+    $vect3dMX2Face_X{n=0} = $vect3dMX2Face_X_ic ;
+  }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dMX2Face_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},meanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dMX2_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dMX2_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$meanVarNameFace_X+"MX2Face_"+*$modelName{n} ;
@@ -1236,47 +1247,48 @@ namespace flowPsi {
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-   $rule pointwise(vect3dMX2Face_X{n,it=0}<-vect3dMX2Face_X{n}),
-     inplace(vect3dMX2Face_X{n,it=0}|vect3dMX2Face_X{n}), 
-     parametric(vect3dMX2_f(X)),
-     prelude {
-   } ;
+  $rule pointwise(vect3dMX2Face_X{n,it=0}<-vect3dMX2Face_X{n}),
+  constraint(timeStepImplicit,vect3dMX2Face_X{n}),
+  inplace(vect3dMX2Face_X{n,it=0}|vect3dMX2Face_X{n}), 
+  parametric(vect3dMX2_f(X)),
+  prelude {
+  } ;
 
-   $type X_f store<vect3d> ;
-   $rule pointwise(vect3dMX2_f(X){n,it}<-
-		   vect3dMean_f(X){n,it},vect3dMeanFace_X{n,it},
-		   vect3dMX2Face_X{n,it},
-		   lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
-     $vect3dMX2_f(X){n,it} = $vect3dMX2Face_X{n,it} ;
-     if($lastNewton{n,it}) {
-       // Note vect3dMeanFace_X is the old mean while vect3dMean_f(X) is 
-       // the updated mean for this iteration value
-       vect3d delta = $X_f{n,it}-$vect3dMeanFace_X{n,it} ;
-       real n = $meanCount{n,it} ;
+  $type X_f store<vect3d> ;
+  $rule pointwise(vect3dMX2_f(X){n,it}<-
+		  vect3dMean_f(X){n,it},vect3dMeanFace_X{n,it},
+		  vect3dMX2Face_X{n,it},
+		  lastNewton{n,it},X_f{n,it},meanCount{n,it}) {
+    $vect3dMX2_f(X){n,it} = $vect3dMX2Face_X{n,it} ;
+    if($lastNewton{n,it}) {
+      // Note vect3dMeanFace_X is the old mean while vect3dMean_f(X) is 
+      // the updated mean for this iteration value
+      vect3d delta = $X_f{n,it}-$vect3dMeanFace_X{n,it} ;
+      real n = $meanCount{n,it} ;
 
-       $vect3dMX2_f(X){n,it}.x += (n-1.)*delta.y*delta.z/n ;
-       $vect3dMX2_f(X){n,it}.y += (n-1.)*delta.x*delta.z/n ;
-       $vect3dMX2_f(X){n,it}.z += (n-1.)*delta.x*delta.y/n ;
-     }
-   }
-
-   $rule pointwise(vect3dMX2Face_X{n,it+1}<-vect3dMX2_f(X){n,it}),inplace(vect3dMX2Face_X{n,it+1}|vect3dMX2_f(X){n,it}),
-     parametric(vect3dMX2_f(X)),prelude { } ;
-
-  $rule pointwise(vect3dMX2Face_X{n+1}<-vect3dMX2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Face_X{n+1}|vect3dMX2Face_X{n,it}),conditional(newtonFinished{n,it}),
-     parametric(vect3dMX2_f(X)) {
-     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
-       $vect3dMX2Face_X{n+1} = vect3d(0,0,0) ;
-     }
-     real mc = $meanCount{n,it} ;
-     if($useExponentialMean && mc == $meanFreq) {
-       $vect3dMX2Face_X{n+1} *= (mc-1.0)/mc ;
-     }
+      $vect3dMX2_f(X){n,it}.x += (n-1.)*delta.y*delta.z/n ;
+      $vect3dMX2_f(X){n,it}.y += (n-1.)*delta.x*delta.z/n ;
+      $vect3dMX2_f(X){n,it}.z += (n-1.)*delta.x*delta.y/n ;
+    }
   }
 
-   $rule pointwise(vect3dCoVariance_f(X){n,it}<-vect3dMX2_f(X){n,it},meanCount{n,it}) {
-     $vect3dCoVariance_f(X){n,it} = $vect3dMX2_f(X){n,it}/$meanCount{n,it} ;
-   }
+  $rule pointwise(vect3dMX2Face_X{n,it+1}<-vect3dMX2_f(X){n,it}),inplace(vect3dMX2Face_X{n,it+1}|vect3dMX2_f(X){n,it}),
+  parametric(vect3dMX2_f(X)),prelude { } ;
+
+  $rule pointwise(vect3dMX2Face_X{n+1}<-vect3dMX2Face_X{n,it},ncycle{n,it},meanCount{n,it},meanFreq,useExponentialMean),inplace(vect3dMX2Face_X{n+1}|vect3dMX2Face_X{n,it}),conditional(newtonFinished{n,it}),
+  parametric(vect3dMX2_f(X)) {
+    if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
+      $vect3dMX2Face_X{n+1} = vect3d(0,0,0) ;
+    }
+    real mc = $meanCount{n,it} ;
+    if($useExponentialMean && mc == $meanFreq) {
+      $vect3dMX2Face_X{n+1} *= (mc-1.0)/mc ;
+    }
+  }
+
+  $rule pointwise(vect3dCoVariance_f(X){n,it}<-vect3dMX2_f(X){n,it},meanCount{n,it}) {
+    $vect3dCoVariance_f(X){n,it} = $vect3dMX2_f(X){n,it}/$meanCount{n,it} ;
+  }
 
 
   //--------------------------------------------------------------------------
@@ -1285,7 +1297,7 @@ namespace flowPsi {
   $type favreMeanVarName_X param<std::string> ;
 
   $rule singleton(favreMeanVarName_X),constraint(UNIVERSE),
-    parametric(scalarFavreMean(X)),option(disable_threading) {
+  parametric(scalarFavreMean(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -1305,7 +1317,7 @@ namespace flowPsi {
   }
 
   $rule singleton(favreMeanVarName_X),constraint(UNIVERSE),
-    parametric(vect3dFavreMean(X)),option(disable_threading) {
+  parametric(vect3dFavreMean(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -1327,7 +1339,7 @@ namespace flowPsi {
   $type favreMeanVarNameFace_X param<std::string> ;
 
   $rule singleton(favreMeanVarNameFace_X),constraint(UNIVERSE),
-    parametric(scalarFavreMean_f(X)),option(disable_threading) {
+  parametric(scalarFavreMean_f(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -1347,7 +1359,7 @@ namespace flowPsi {
   }
 
   $rule singleton(favreMeanVarNameFace_X),constraint(UNIVERSE),
-    parametric(vect3dFavreMean_f(X)),option(disable_threading) {
+  parametric(vect3dFavreMean_f(X)),option(disable_threading) {
     const Loci::rule_impl::info &info = get_info() ;
     Loci::variableSet outset = info.output_vars() ;
     Loci::variable out=*outset.begin() ;
@@ -1371,12 +1383,12 @@ namespace flowPsi {
   $type scalarFavreMeanCell_X_ic store<real> ;
   
   $rule pointwise(scalarFavreMeanCell_X_ic),constraint(geom_cells),
-				    parametric(scalarFavreMean(X)) {
+  parametric(scalarFavreMean(X)) {
     $scalarFavreMeanCell_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarFavreMeanCell_X_ic<-icfile,modelName,favreMeanVarName_X),
-    constraint(geom_cells),parametric(scalarFavreMean(X)),option(disable_threading),
+  constraint(geom_cells),parametric(scalarFavreMean(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarName_X+"FavreMeanCell_"+*$modelName ;
 
@@ -1411,15 +1423,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreMeanCell_X{n=0}<-scalarFavreMeanCell_X_ic),constraint(geom_cells),
-    parametric(scalarFavreMean(X)) {
+  parametric(scalarFavreMean(X)) {
     $scalarFavreMeanCell_X{n=0} = $scalarFavreMeanCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarFavreMeanCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarFavreMean(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarFavreMean(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarName_X+"FavreMeanCell_"+*$modelName{n} ;
@@ -1430,9 +1442,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreMeanCell_X{n,it=0}<-scalarFavreMeanCell_X{n}),
-    inplace(scalarFavreMeanCell_X{n,it=0}|scalarFavreMeanCell_X{n}), 
-    parametric(scalarFavreMean(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarFavreMeanCell_X{n}),
+  inplace(scalarFavreMeanCell_X{n,it=0}|scalarFavreMeanCell_X{n}), 
+  parametric(scalarFavreMean(X)),
+  prelude {
   } ;
 
   $type X store<real> ;
@@ -1449,10 +1462,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarFavreMeanCell_X{n,it+1}<-scalarFavreMeanBase(X){n,it}),inplace(scalarFavreMeanCell_X{n,it+1}|scalarFavreMeanBase(X){n,it}),
-    parametric(scalarFavreMean(X)),prelude { } ;
+  parametric(scalarFavreMean(X)),prelude { } ;
 
   $rule pointwise(scalarFavreMeanCell_X{n+1}<-scalarFavreMeanCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarFavreMeanCell_X{n+1}|scalarFavreMeanCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarFavreMean(X)) {
+  parametric(scalarFavreMean(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarFavreMeanCell_X{n+1} = 0 ;
     }
@@ -1462,12 +1475,12 @@ namespace flowPsi {
   $type scalarFavreMeanFace_X_ic store<real> ;
   
   $rule pointwise(scalarFavreMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarFavreMean_f(X)) {
+  parametric(scalarFavreMean_f(X)) {
     $scalarFavreMeanFace_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarFavreMeanFace_X_ic<-icfile,modelName,favreMeanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(scalarFavreMean_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(scalarFavreMean_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarNameFace_X+"FavreMeanFace_"+*$modelName ;
 
@@ -1502,14 +1515,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreMeanFace_X{n=0}<-scalarFavreMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarFavreMean_f(X)) {
+  parametric(scalarFavreMean_f(X)) {
     $scalarFavreMeanFace_X{n=0} = $scalarFavreMeanFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarFavreMeanFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarFavreMean_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarFavreMean_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarNameFace_X+"FavreMeanFace_"+*$modelName{n} ;
@@ -1520,20 +1533,21 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreMeanFace_X{n,it=0}<-scalarFavreMeanFace_X{n}),
-    inplace(scalarFavreMeanFace_X{n,it=0}|scalarFavreMeanFace_X{n}), 
-    parametric(scalarFavreMean_f(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarFavreMeanFace_X{n}),
+  inplace(scalarFavreMeanFace_X{n,it=0}|scalarFavreMeanFace_X{n}), 
+  parametric(scalarFavreMean_f(X)),
+  prelude {
   } ;
 
   $type X_f store<real> ;
   $rule pointwise(scalarFavreMean_f(X){n,it}<-scalarFavreMeanBase_f(X){n,it},
 		  scalarMean_f(rho){n,it}),
-    parametric(scalarFavreMean_f(X)){
+  parametric(scalarFavreMean_f(X)){
     $scalarFavreMean_f(X){n,it}=  $scalarFavreMeanBase_f(X){n,it}/
 				    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
   $rule pointwise(scalarFavreMeanBase_f(X){n,it}<-scalarFavreMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it}),
-    parametric(scalarFavreMean_f(X)) {
+  parametric(scalarFavreMean_f(X)) {
     $scalarFavreMeanBase_f(X){n,it} = $scalarFavreMeanFace_X{n,it} ;
     if($lastNewton{n,it}) {
       real delta = $rho_f{n,it}*$X_f{n,it}-$scalarFavreMeanBase_f(X){n,it} ;
@@ -1542,10 +1556,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarFavreMeanFace_X{n,it+1}<-scalarFavreMeanBase_f(X){n,it}),inplace(scalarFavreMeanFace_X{n,it+1}|scalarFavreMeanBase_f(X){n,it}),
-    parametric(scalarFavreMean_f(X)),prelude { } ;
+  parametric(scalarFavreMean_f(X)),prelude { } ;
 
   $rule pointwise(scalarFavreMeanFace_X{n+1}<-scalarFavreMeanFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarFavreMeanFace_X{n+1}|scalarFavreMeanFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarFavreMean_f(X)) {
+  parametric(scalarFavreMean_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarFavreMeanFace_X{n+1} = 0 ;
     }
@@ -1555,14 +1569,14 @@ namespace flowPsi {
   $type scalarFavreVarCell_X_ic store<real> ;
   
   $rule pointwise(scalarFavreVarCell_X_ic),constraint(geom_cells),
-    parametric(scalarFavreVar(X)), prelude {
+  parametric(scalarFavreVar(X)), prelude {
   } compute {
     $scalarFavreVarCell_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarFavreVarCell_X_ic<-icfile,modelName,favreMeanVarName_X),
     constraint(geom_cells),parametric(scalarFavreVar(X)),option(disable_threading),
-  prelude {
+    prelude {
     string filename = *$icfile+*$favreMeanVarName_X+"FavreVarCell_"+*$modelName ;
 
     int file_exists = 1 ;
@@ -1596,15 +1610,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreVarCell_X{n=0}<-scalarFavreVarCell_X_ic),constraint(geom_cells),
-    parametric(scalarFavreVar(X)) {
+  parametric(scalarFavreVar(X)) {
     $scalarFavreVarCell_X{n=0} = $scalarFavreVarCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarFavreVarCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarFavreVar(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarFavreVar(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarName_X+"FavreVarCell_"+*$modelName{n} ;
@@ -1615,9 +1629,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreVarCell_X{n,it=0}<-scalarFavreVarCell_X{n}),
-    inplace(scalarFavreVarCell_X{n,it=0}|scalarFavreVarCell_X{n}), 
-    parametric(scalarFavreVar(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarFavreVarCell_X{n}),
+  inplace(scalarFavreVarCell_X{n,it=0}|scalarFavreVarCell_X{n}), 
+  parametric(scalarFavreVar(X)),
+  prelude {
   } ;
 
   $type X store<real> ;
@@ -1645,10 +1660,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarFavreVarCell_X{n,it+1}<-scalarFavreVarBase(X){n,it}),inplace(scalarFavreVarCell_X{n,it+1}|scalarFavreVarBase(X){n,it}),
-    parametric(scalarFavreVar(X)),prelude { } ;
+  parametric(scalarFavreVar(X)),prelude { } ;
 
   $rule pointwise(scalarFavreVarCell_X{n+1}<-scalarFavreVarCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarFavreVarCell_X{n+1}|scalarFavreVarCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarFavreVar(X)) {
+  parametric(scalarFavreVar(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarFavreVarCell_X{n+1} = 0 ;
     }
@@ -1658,12 +1673,12 @@ namespace flowPsi {
   $type scalarFavreVarFace_X_ic store<real> ;
   
   $rule pointwise(scalarFavreVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarFavreVar_f(X)) {
+  parametric(scalarFavreVar_f(X)) {
     $scalarFavreVarFace_X_ic = 0 ;
   }
 
   $rule pointwise(icfile::scalarFavreVarFace_X_ic<-icfile,modelName,favreMeanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(scalarFavreVar_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(scalarFavreVar_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarNameFace_X+"FavreVarFace_"+*$modelName ;
 
@@ -1698,14 +1713,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreVarFace_X{n=0}<-scalarFavreVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(scalarFavreVar_f(X)) {
+  parametric(scalarFavreVar_f(X)) {
     $scalarFavreVarFace_X{n=0} = $scalarFavreVarFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-scalarFavreVarFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(scalarFavreVar_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(scalarFavreVar_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarNameFace_X+"FavreVarFace_"+*$modelName{n} ;
@@ -1716,22 +1731,23 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(scalarFavreVarFace_X{n,it=0}<-scalarFavreVarFace_X{n}),
-    inplace(scalarFavreVarFace_X{n,it=0}|scalarFavreVarFace_X{n}), 
-    parametric(scalarFavreVar_f(X)),
-    prelude {
+  constraint(timeStepImplicit,scalarFavreVarFace_X{n}),
+  inplace(scalarFavreVarFace_X{n,it=0}|scalarFavreVarFace_X{n}), 
+  parametric(scalarFavreVar_f(X)),
+  prelude {
   } ;
 
   $type X_f store<real> ;
   $rule pointwise(scalarFavreVar_f(X){n,it}<-scalarFavreVarBase_f(X){n,it},
 		  scalarMean_f(rho){n,it}),
-    parametric(scalarFavreVar_f(X)){
+  parametric(scalarFavreVar_f(X)){
     $scalarFavreVar_f(X){n,it}=  $scalarFavreVarBase_f(X){n,it}/
                                    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;
   $rule pointwise(scalarFavreVarBase_f(X){n,it}<-scalarFavreVarFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it},scalarMeanFace_rho{n,it},scalarFavreMean_f(X){n,it},scalarFavreMeanFace_X{n,it}),
-    parametric(scalarFavreVar_f(X)) {
+  parametric(scalarFavreVar_f(X)) {
     $scalarFavreVarBase_f(X){n,it} = $scalarFavreVarFace_X{n,it} ;
     if($lastNewton{n,it} && $meanCount{n,it} > 1) {
       real rbar = $scalarMeanFace_rho{n,it} ;
@@ -1747,10 +1763,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(scalarFavreVarFace_X{n,it+1}<-scalarFavreVarBase_f(X){n,it}),inplace(scalarFavreVarFace_X{n,it+1}|scalarFavreVarBase_f(X){n,it}),
-    parametric(scalarFavreVar_f(X)),prelude { } ;
+  parametric(scalarFavreVar_f(X)),prelude { } ;
 
   $rule pointwise(scalarFavreVarFace_X{n+1}<-scalarFavreVarFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(scalarFavreVarFace_X{n+1}|scalarFavreVarFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(scalarFavreVar_f(X)) {
+  parametric(scalarFavreVar_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $scalarFavreVarFace_X{n+1} = 0 ;
     }
@@ -1761,12 +1777,12 @@ namespace flowPsi {
   $type vect3dFavreMeanCell_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreMeanCell_X_ic),constraint(geom_cells),
-				    parametric(vect3dFavreMean(X)) {
+  parametric(vect3dFavreMean(X)) {
     $vect3dFavreMeanCell_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreMeanCell_X_ic<-icfile,modelName,favreMeanVarName_X),
-    constraint(geom_cells),parametric(vect3dFavreMean(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dFavreMean(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarName_X+"FavreMeanCell_"+*$modelName ;
 
@@ -1801,15 +1817,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreMeanCell_X{n=0}<-vect3dFavreMeanCell_X_ic),constraint(geom_cells),
-    parametric(vect3dFavreMean(X)) {
+  parametric(vect3dFavreMean(X)) {
     $vect3dFavreMeanCell_X{n=0} = $vect3dFavreMeanCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreMeanCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreMean(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreMean(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarName_X+"FavreMeanCell_"+*$modelName{n} ;
@@ -1820,9 +1836,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreMeanCell_X{n,it=0}<-vect3dFavreMeanCell_X{n}),
-    inplace(vect3dFavreMeanCell_X{n,it=0}|vect3dFavreMeanCell_X{n}), 
-    parametric(vect3dFavreMean(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreMeanCell_X{n}),
+  inplace(vect3dFavreMeanCell_X{n,it=0}|vect3dFavreMeanCell_X{n}), 
+  parametric(vect3dFavreMean(X)),
+  prelude {
   } ;
 
   $type X store<vect3d> ;
@@ -1839,10 +1856,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreMeanCell_X{n,it+1}<-vect3dFavreMeanBase(X){n,it}),inplace(vect3dFavreMeanCell_X{n,it+1}|vect3dFavreMeanBase(X){n,it}),
-    parametric(vect3dFavreMean(X)),prelude { } ;
+  parametric(vect3dFavreMean(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreMeanCell_X{n+1}<-vect3dFavreMeanCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreMeanCell_X{n+1}|vect3dFavreMeanCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreMean(X)) {
+  parametric(vect3dFavreMean(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreMeanCell_X{n+1} = vect3d(0,0,0) ;
     }
@@ -1852,12 +1869,12 @@ namespace flowPsi {
   $type vect3dFavreMeanFace_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreMean_f(X)) {
+  parametric(vect3dFavreMean_f(X)) {
     $vect3dFavreMeanFace_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreMeanFace_X_ic<-icfile,modelName,favreMeanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dFavreMean_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dFavreMean_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarNameFace_X+"FavreMeanFace_"+*$modelName ;
 
@@ -1892,14 +1909,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreMeanFace_X{n=0}<-vect3dFavreMeanFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreMean_f(X)) {
+  parametric(vect3dFavreMean_f(X)) {
     $vect3dFavreMeanFace_X{n=0} = $vect3dFavreMeanFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreMeanFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreMean_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreMean_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarNameFace_X+"FavreMeanFace_"+*$modelName{n} ;
@@ -1910,20 +1927,21 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreMeanFace_X{n,it=0}<-vect3dFavreMeanFace_X{n}),
-    inplace(vect3dFavreMeanFace_X{n,it=0}|vect3dFavreMeanFace_X{n}), 
-    parametric(vect3dFavreMean_f(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreMeanFace_X{n}),
+  inplace(vect3dFavreMeanFace_X{n,it=0}|vect3dFavreMeanFace_X{n}), 
+  parametric(vect3dFavreMean_f(X)),
+  prelude {
   } ;
 
   $type X_f store<vect3d> ;
   $rule pointwise(vect3dFavreMean_f(X){n,it}<-vect3dFavreMeanBase_f(X){n,it},
 		  scalarMean_f(rho){n,it}),
-    parametric(vect3dFavreMean_f(X)){
+  parametric(vect3dFavreMean_f(X)){
     $vect3dFavreMean_f(X){n,it}=  $vect3dFavreMeanBase_f(X){n,it}/
 				    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
   $rule pointwise(vect3dFavreMeanBase_f(X){n,it}<-vect3dFavreMeanFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it}),
-    parametric(vect3dFavreMean_f(X)) {
+  parametric(vect3dFavreMean_f(X)) {
     $vect3dFavreMeanBase_f(X){n,it} = $vect3dFavreMeanFace_X{n,it} ;
     if($lastNewton{n,it}) {
       vect3d delta = $rho_f{n,it}*$X_f{n,it}-$vect3dFavreMeanBase_f(X){n,it} ;
@@ -1932,10 +1950,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreMeanFace_X{n,it+1}<-vect3dFavreMeanBase_f(X){n,it}),inplace(vect3dFavreMeanFace_X{n,it+1}|vect3dFavreMeanBase_f(X){n,it}),
-    parametric(vect3dFavreMean_f(X)),prelude { } ;
+  parametric(vect3dFavreMean_f(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreMeanFace_X{n+1}<-vect3dFavreMeanFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreMeanFace_X{n+1}|vect3dFavreMeanFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreMean_f(X)) {
+  parametric(vect3dFavreMean_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreMeanFace_X{n+1} = vect3d(0,0,0) ;
     }
@@ -1946,12 +1964,12 @@ namespace flowPsi {
   $type vect3dFavreVarCell_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreVarCell_X_ic),constraint(geom_cells),
-				    parametric(vect3dFavreVar(X)) {
+  parametric(vect3dFavreVar(X)) {
     $vect3dFavreVarCell_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreVarCell_X_ic<-icfile,modelName,favreMeanVarName_X),
-    constraint(geom_cells),parametric(vect3dFavreVar(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dFavreVar(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarName_X+"FavreVarCell_"+*$modelName ;
 
@@ -1986,15 +2004,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreVarCell_X{n=0}<-vect3dFavreVarCell_X_ic),constraint(geom_cells),
-    parametric(vect3dFavreVar(X)) {
+  parametric(vect3dFavreVar(X)) {
     $vect3dFavreVarCell_X{n=0} = $vect3dFavreVarCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreVarCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreVar(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreVar(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarName_X+"FavreVarCell_"+*$modelName{n} ;
@@ -2005,9 +2023,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreVarCell_X{n,it=0}<-vect3dFavreVarCell_X{n}),
-    inplace(vect3dFavreVarCell_X{n,it=0}|vect3dFavreVarCell_X{n}), 
-    parametric(vect3dFavreVar(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreVarCell_X{n}),
+  inplace(vect3dFavreVarCell_X{n,it=0}|vect3dFavreVarCell_X{n}), 
+  parametric(vect3dFavreVar(X)),
+  prelude {
   } ;
 
   $type X store<vect3d> ;
@@ -2036,10 +2055,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreVarCell_X{n,it+1}<-vect3dFavreVarBase(X){n,it}),inplace(vect3dFavreVarCell_X{n,it+1}|vect3dFavreVarBase(X){n,it}),
-    parametric(vect3dFavreVar(X)),prelude { } ;
+  parametric(vect3dFavreVar(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreVarCell_X{n+1}<-vect3dFavreVarCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreVarCell_X{n+1}|vect3dFavreVarCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreVar(X)) {
+  parametric(vect3dFavreVar(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreVarCell_X{n+1} = vect3d(0,0,0) ;
     }
@@ -2049,12 +2068,12 @@ namespace flowPsi {
   $type vect3dFavreVarFace_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreVar_f(X)) {
+  parametric(vect3dFavreVar_f(X)) {
     $vect3dFavreVarFace_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreVarFace_X_ic<-icfile,modelName,favreMeanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dFavreVar_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dFavreVar_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarNameFace_X+"FavreVarFace_"+*$modelName ;
 
@@ -2089,14 +2108,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreVarFace_X{n=0}<-vect3dFavreVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreVar_f(X)) {
+  parametric(vect3dFavreVar_f(X)) {
     $vect3dFavreVarFace_X{n=0} = $vect3dFavreVarFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreVarFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreVar_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreVar_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarNameFace_X+"FavreVarFace_"+*$modelName{n} ;
@@ -2107,22 +2126,23 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreVarFace_X{n,it=0}<-vect3dFavreVarFace_X{n}),
-    inplace(vect3dFavreVarFace_X{n,it=0}|vect3dFavreVarFace_X{n}), 
-    parametric(vect3dFavreVar_f(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreVarFace_X{n}),
+  inplace(vect3dFavreVarFace_X{n,it=0}|vect3dFavreVarFace_X{n}), 
+  parametric(vect3dFavreVar_f(X)),
+  prelude {
   } ;
 
   $type X_f store<vect3d> ;
   $rule pointwise(vect3dFavreVar_f(X){n,it}<-vect3dFavreVarBase_f(X){n,it},
 		  scalarMean_f(rho){n,it}),
-    parametric(vect3dFavreVar_f(X)){
+  parametric(vect3dFavreVar_f(X)){
     $vect3dFavreVar_f(X){n,it}=  $vect3dFavreVarBase_f(X){n,it}/
                                    max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;
   $rule pointwise(vect3dFavreVarBase_f(X){n,it}<-vect3dFavreVarFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it},scalarMeanFace_rho{n,it},vect3dFavreMean_f(X){n,it},vect3dFavreMeanFace_X{n,it}),
-    parametric(vect3dFavreVar_f(X)) {
+  parametric(vect3dFavreVar_f(X)) {
     $vect3dFavreVarBase_f(X){n,it} = $vect3dFavreVarFace_X{n,it} ;
     if($lastNewton{n,it} && $meanCount{n,it} > 1) {
       real rbar = $scalarMeanFace_rho{n,it} ;
@@ -2140,10 +2160,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreVarFace_X{n,it+1}<-vect3dFavreVarBase_f(X){n,it}),inplace(vect3dFavreVarFace_X{n,it+1}|vect3dFavreVarBase_f(X){n,it}),
-    parametric(vect3dFavreVar_f(X)),prelude { } ;
+  parametric(vect3dFavreVar_f(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreVarFace_X{n+1}<-vect3dFavreVarFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreVarFace_X{n+1}|vect3dFavreVarFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreVar_f(X)) {
+  parametric(vect3dFavreVar_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreVarFace_X{n+1} = vect3d(0,0,0) ;
     }
@@ -2153,12 +2173,12 @@ namespace flowPsi {
   $type vect3dFavreCoVarCell_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreCoVarCell_X_ic),constraint(geom_cells),
-				    parametric(vect3dFavreCoVar(X)) {
+  parametric(vect3dFavreCoVar(X)) {
     $vect3dFavreCoVarCell_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreCoVarCell_X_ic<-icfile,modelName,favreMeanVarName_X),
-    constraint(geom_cells),parametric(vect3dFavreCoVar(X)),option(disable_threading),
+  constraint(geom_cells),parametric(vect3dFavreCoVar(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarName_X+"FavreCoVarCell_"+*$modelName ;
 
@@ -2193,15 +2213,15 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreCoVarCell_X{n=0}<-vect3dFavreCoVarCell_X_ic),constraint(geom_cells),
-    parametric(vect3dFavreCoVar(X)) {
+  parametric(vect3dFavreCoVar(X)) {
     $vect3dFavreCoVarCell_X{n=0} = $vect3dFavreCoVarCell_X_ic ;
   }
 
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreCoVarCell_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarName_X),
-    constraint(geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreCoVar(X)),option(disable_threading),prelude {
+  constraint(geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreCoVar(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarName_X+"FavreCoVarCell_"+*$modelName{n} ;
@@ -2212,9 +2232,10 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreCoVarCell_X{n,it=0}<-vect3dFavreCoVarCell_X{n}),
-    inplace(vect3dFavreCoVarCell_X{n,it=0}|vect3dFavreCoVarCell_X{n}), 
-    parametric(vect3dFavreCoVar(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreCoVarCell_X{n}),
+  inplace(vect3dFavreCoVarCell_X{n,it=0}|vect3dFavreCoVarCell_X{n}), 
+  parametric(vect3dFavreCoVar(X)),
+  prelude {
   } ;
 
   $type X store<vect3d> ;
@@ -2243,10 +2264,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreCoVarCell_X{n,it+1}<-vect3dFavreCoVarBase(X){n,it}),inplace(vect3dFavreCoVarCell_X{n,it+1}|vect3dFavreCoVarBase(X){n,it}),
-    parametric(vect3dFavreCoVar(X)),prelude { } ;
+  parametric(vect3dFavreCoVar(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreCoVarCell_X{n+1}<-vect3dFavreCoVarCell_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreCoVarCell_X{n+1}|vect3dFavreCoVarCell_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreCoVar(X)) {
+  parametric(vect3dFavreCoVar(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreCoVarCell_X{n+1} = vect3d(0,0,0) ;
     }
@@ -2256,12 +2277,12 @@ namespace flowPsi {
   $type vect3dFavreCoVarFace_X_ic store<vect3d> ;
   
   $rule pointwise(vect3dFavreCoVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreCoVar_f(X)) {
+  parametric(vect3dFavreCoVar_f(X)) {
     $vect3dFavreCoVarFace_X_ic = vect3d(0,0,0) ;
   }
 
   $rule pointwise(icfile::vect3dFavreCoVarFace_X_ic<-icfile,modelName,favreMeanVarNameFace_X),
-    constraint(ci->geom_cells),parametric(vect3dFavreCoVar_f(X)),option(disable_threading),
+  constraint(ci->geom_cells),parametric(vect3dFavreCoVar_f(X)),option(disable_threading),
   prelude {
     string filename = *$icfile+*$favreMeanVarNameFace_X+"FavreCoVarFace_"+*$modelName ;
 
@@ -2296,14 +2317,14 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreCoVarFace_X{n=0}<-vect3dFavreCoVarFace_X_ic),constraint(ci->geom_cells),
-    parametric(vect3dFavreCoVar_f(X)) {
+  parametric(vect3dFavreCoVar_f(X)) {
     $vect3dFavreCoVarFace_X{n=0} = $vect3dFavreCoVarFace_X_ic ;
   }
 
   // Write out restart file
   $rule pointwise(OUTPUT{n}<-vect3dFavreCoVarFace_X{n},ncycle{n},stime{n},restart_modulo{n},restart_directory{n},restart_postfix{n},modelName{n},favreMeanVarNameFace_X),
-    constraint(ci->geom_cells{n}),conditional(do_restart{n}),
-    parametric(vect3dFavreCoVar_f(X)),option(disable_threading),prelude {
+  constraint(ci->geom_cells{n}),conditional(do_restart{n}),
+  parametric(vect3dFavreCoVar_f(X)),option(disable_threading),prelude {
     if(*$ncycle{n} == 0) 
       return ;
     string filename = *$restart_directory{n}+*$favreMeanVarNameFace_X+"FavreCoVarFace_"+*$modelName{n} ;
@@ -2314,22 +2335,23 @@ namespace flowPsi {
   } ;
 
   $rule pointwise(vect3dFavreCoVarFace_X{n,it=0}<-vect3dFavreCoVarFace_X{n}),
-    inplace(vect3dFavreCoVarFace_X{n,it=0}|vect3dFavreCoVarFace_X{n}), 
-    parametric(vect3dFavreCoVar_f(X)),
-    prelude {
+  constraint(timeStepImplicit,vect3dFavreCoVarFace_X{n}),
+  inplace(vect3dFavreCoVarFace_X{n,it=0}|vect3dFavreCoVarFace_X{n}), 
+  parametric(vect3dFavreCoVar_f(X)),
+  prelude {
   } ;
 
   $type X_f store<vect3d> ;
   $rule pointwise(vect3dFavreCoVar_f(X){n,it}<-vect3dFavreCoVarBase_f(X){n,it},
 		  scalarMean_f(rho){n,it}),
-    parametric(vect3dFavreCoVar_f(X)){
+  parametric(vect3dFavreCoVar_f(X)){
     $vect3dFavreCoVar_f(X){n,it}=  $vect3dFavreCoVarBase_f(X){n,it}/
                                      max<real>($scalarMean_f(rho){n,it},1e-60) ;
   }
 
   $type scalarMeanFace_rho store<real> ;
   $rule pointwise(vect3dFavreCoVarBase_f(X){n,it}<-vect3dFavreCoVarFace_X{n,it},lastNewton{n,it},X_f{n,it},meanCount{n,it},rho_f{n,it},scalarMeanFace_rho{n,it},vect3dFavreMean_f(X){n,it},vect3dFavreMeanFace_X{n,it}),
-    parametric(vect3dFavreCoVar_f(X)) {
+  parametric(vect3dFavreCoVar_f(X)) {
     $vect3dFavreCoVarBase_f(X){n,it} = $vect3dFavreCoVarFace_X{n,it} ;
     if($lastNewton{n,it} && $meanCount{n,it} > 1) {
       real rbar = $scalarMeanFace_rho{n,it} ;
@@ -2346,10 +2368,10 @@ namespace flowPsi {
   }
 
   $rule pointwise(vect3dFavreCoVarFace_X{n,it+1}<-vect3dFavreCoVarBase_f(X){n,it}),inplace(vect3dFavreCoVarFace_X{n,it+1}|vect3dFavreCoVarBase_f(X){n,it}),
-    parametric(vect3dFavreCoVar_f(X)),prelude { } ;
+  parametric(vect3dFavreCoVar_f(X)),prelude { } ;
 
   $rule pointwise(vect3dFavreCoVarFace_X{n+1}<-vect3dFavreCoVarFace_X{n,it},ncycle{n,it},meanFreq,useExponentialMean),inplace(vect3dFavreCoVarFace_X{n+1}|vect3dFavreCoVarFace_X{n,it}),conditional(newtonFinished{n,it}),
-    parametric(vect3dFavreCoVar_f(X)) {
+  parametric(vect3dFavreCoVar_f(X)) {
     if(!$useExponentialMean && ($ncycle{n,it}%$meanFreq) == 0) {
       $vect3dFavreCoVarFace_X{n+1} = vect3d(0,0,0) ;
     }
