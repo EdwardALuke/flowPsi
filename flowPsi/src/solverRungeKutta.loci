@@ -74,29 +74,32 @@ namespace flowPsi {
     join($dtStable,dt) ;
   }
 
-  //  $rule apply(dt_stable_rk2<-stime,plot_interval,boundary_plot_interval,dtmax)[Loci::Minimum],prelude {
-  //    real t1 = *$stime ;
-  //    real pi = (*$plot_interval)>0?(*$plot_interval):(*$dtmax)*1000.0 ;
-  //    real pib =(*$boundary_plot_interval)>0?(*$boundary_plot_interval):1e7 ;
-  //    real t2 = min<real>(pi*ceil(t1/pi+1e-8),pib*ceil(t1/pib+1e-8)) ;
-  //    join(*$dt_stable_rk2,t2-t1) ;
-  //  } ;                                                
+  $type plot_interval param<TimeValue> ;
+  $rule default(plot_interval) {
+    $plot_interval = -1.0 ;
+  }
+  $rule apply(dtStable<-stime,plot_interval,dtmax)[Loci::Minimum],prelude {
+      real t1 = *$stime ;
+      real pi = (*$plot_interval)>0?(*$plot_interval):(*$dtmax)*1000.0 ;
+      real t2 = pi*ceil(t1/pi+1e-8) ;
+      join(*$dtStable,t2-t1) ;
+  } ;                                                
 
   // Viscous stability limit
-  //  $rule apply(dtStable<-rho_f,muu_f,tmuu_f,area,(cl,cr)->vol,cflmax)[Loci::Minimum] {
-  //    const real dist=0.5*($cl->$vol+$cr->$vol)/$area.sada ;
-  //    real cfl = ($cflmax<=0)?0.95:$cflmax ;
-  //    real nut = ($muu_f+$tmuu_f)/$rho_f ;
-  //    real dt = 0.2*cfl*dist*dist/nut ;
-  //    join($dtStable,dt) ;
-  //  }
-  //  $rule apply(dtStable<-rho_f,muu_f,tmuu_f,area,ci->vol,cflmax)[Loci::Minimum] {
-  //    const real dist=($ci->$vol)/$area.sada ;
-  //    real cfl = ($cflmax<=0)?0.95:$cflmax ;
-  //    real nut = ($muu_f+$tmuu_f)/$rho_f ;
-  //    real dt = 0.2*cfl*dist*dist/nut ;
-  //    join($dtStable,dt) ;
-  //  }
+  $rule apply(dtStable<-rho_f,mu_f,tmu_f,area,(cl,cr)->vol,cflmax)[Loci::Minimum] {
+    const real dist=0.5*($cl->$vol+$cr->$vol)/$area.sada ;
+    real cfl = ($cflmax<=0)?0.95:$cflmax ;
+    real nut = ($mu_f+$tmu_f)/$rho_f ;
+    real dt = 0.2*cfl*dist*dist/nut ;
+    join($dtStable,dt) ;
+  }
+  $rule apply(dtStable<-rho_f,mu_f,tmu_f,area,ci->vol,cflmax)[Loci::Minimum] {
+    const real dist=($ci->$vol)/$area.sada ;
+    real cfl = ($cflmax<=0)?0.95:$cflmax ;
+    real nut = ($mu_f+$tmu_f)/$rho_f ;
+    real dt = 0.2*cfl*dist*dist/nut ;
+    join($dtStable,dt) ;
+  }
 
   //  $rule singleton(dtRK<-dtmax) {
   //    $dtRK = $dtmax ;
@@ -231,16 +234,31 @@ namespace flowPsi {
     $ncycle{n+1} = $ncycle{n,rk} ;
   }
 
-  $rule singleton(do_plot{n,rk}<-ncycle{n,rk},plot_freq,plot_status{n},$rk{n,rk}) {
-    $do_plot{n,rk} = ((((($ncycle{n,rk})%$plot_freq) == 0) ||
-		       ($plot_status{n} != 0)) &&
-		      $$rk{n,rk}==0) ;
-    if(Loci::MPI_rank == 0) {
-      if($do_plot{n,rk}) {
-	std::cout << "plot output, ncycle = " << $ncycle{n,rk} << endl ;
+  $rule singleton(do_plot{n,rk}<-ncycle{n},$rk{n,rk},plot_freq,plot_status{n},
+                  plot_interval{n,rk},stime{n,rk},dtRK{n,rk}) {
+    if($plot_interval{n,rk} < 0.0) {
+      $do_plot{n,rk} = (($ncycle{n})%$plot_freq == 0 || $plot_status{n}> 0)
+                          && ($$rk{n,rk} == 0) ;
+    } else {
+      $do_plot{n,rk} = false ;
+      if($$rk{n,rk} == 0) {
+        real tn = real($plot_interval{n,rk})
+	  *floor($stime{n,rk}/real($plot_interval{n,rk})+.5) ;
+        if(fabs(tn-$stime{n,rk}) < $stime{n,rk}*1e-8)
+          $do_plot{n,rk} = true ; 
       }
     }
   }
+  // $rule singleton(do_plot{n,rk}<-ncycle{n,rk},plot_freq,plot_status{n},$rk{n,rk}) {
+  //   $do_plot{n,rk} = ((((($ncycle{n,rk})%$plot_freq) == 0) ||
+  // 		       ($plot_status{n} != 0)) &&
+  // 		      $$rk{n,rk}==0) ;
+  //   if(Loci::MPI_rank == 0) {
+  //     if($do_plot{n,rk}) {
+  // 	std::cout << "plot output, ncycle = " << $ncycle{n,rk} << endl ;
+  //     }
+  //   }
+  // }
   
   $type output_topo param<bool> ;
 
