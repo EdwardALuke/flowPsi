@@ -295,6 +295,9 @@ $type scalarTransport(X,C) store<flowPsi::real> ;
 $type timeStepSteadyState Constraint ;
 $type timeStepAccurate Constraint ;
 
+$type timeStepImplicit Constraint ;
+$type timeStepExplicit Constraint ;
+
 $type timeStepSchemeBDF2 Constraint ;
 $type timeStepSchemeKEC Constraint ;
 
