@@ -50,6 +50,7 @@ using Loci::MPI_rank ;
 
 namespace flowPsi {
   
+  unsigned long BCErrorCode ;
   gridPostList::gridPostListEnt *gridPostList::postlist = 0 ;
   
 
