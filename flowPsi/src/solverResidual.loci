@@ -25,7 +25,7 @@ $include "flowPsi.lh"
 #include <Tools/stream.h>
 
 namespace flowPsi {
-  unsigned long BCErrorCode ;
+  extern unsigned long BCErrorCode ;
   
 
   $type residual param<residual> ;
