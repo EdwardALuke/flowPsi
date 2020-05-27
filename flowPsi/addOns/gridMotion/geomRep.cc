@@ -142,7 +142,11 @@ namespace geomRep {
       delete kdp ;
 
     vector<Loci::kdTree::coord3d> fpos(nfaces) ;
+#ifdef LOCI_V5
+    vector<gEntity> fid(nfaces) ;
+#else
     vector<int> fid(nfaces) ;
+#endif
     for(int i=0;i<nfaces;++i) {
       vector3d<real> ct = triGeom[i].centroid() ;
       fpos[i].x = realToDouble(ct.x) ;

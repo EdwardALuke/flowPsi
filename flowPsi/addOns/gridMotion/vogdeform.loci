@@ -20,6 +20,10 @@
 //#
 //#############################################################################
 #include <Loci.h>
+#ifdef LOCI_V5
+#include <GLoci.h>
+using Loci::gEntity ;
+#endif
 #include <string>
 #include <iostream>
 #include <fstream>
@@ -273,7 +277,11 @@ void find_mind_deform(fact_db &facts) {
       continue ;
     }
     vector<Loci::kdTree::coord3d> bcnodes_pts(nodeSetsurf.size()) ;
+#ifdef LOCI_V5
+    vector<gEntity> bcnodes_ids(nodeSetsurf.size()) ;
+#else
     vector<int> bcnodes_ids(nodeSetsurf.size()) ;
+#endif
 
     int cnt = 0 ;
     FORALL(nodeSetsurf,nd) {
@@ -288,7 +296,11 @@ void find_mind_deform(fact_db &facts) {
       
       
     vector<Loci::kdTree::coord3d> node_pts(nodeSet.size()) ;
+#ifdef LOCI_V5
+    vector<gEntity> closest(nodeSet.size(),-1) ;
+#else
     vector<int> closest(nodeSet.size(),-1) ;
+#endif
     cnt = 0 ;
     FORALL(nodeSet,nd) {
       node_pts[cnt][0] = realToDouble(pos[nd].x) ;
@@ -992,7 +1004,11 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
     vector<coord3df> file_coords;
     readLociDeformFile_rank0(*$deformFile,file_coords, file_disp);
     if(Loci::MPI_rank == 0) { // Do mapping on processor zero, distribute data out
+#ifdef LOCI_V5
+      vector<gEntity> file_coordsID (file_coords.size()) ;
+#else
       vector<int> file_coordsID (file_coords.size()) ;
+#endif
       for(unsigned int i=0;i<file_coords.size();++i) {
 	file_coordsID[i] = i ;
       }

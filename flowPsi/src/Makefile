@@ -2,6 +2,8 @@ include ../flowpsi.conf
 include ../revision.conf
 include $(LOCI_BASE)/Loci.conf
 
+FVMADAPT_LIB = -lfvmadaptfunc
+
 #COPTLESS = -O0 -g
 #COPT=$(COPTLESS)
 
@@ -28,7 +30,7 @@ OBJS =  \
 
 
 
-LOCAL_LIBS = $(LIBXML2_LIBS) -L$(LOCI_BASE)/lib 
+LOCAL_LIBS = $(LIBXML2_LIBS) -L$(LOCI_BASE)/lib $(FVMADAPT_LIB)
 
 JUNK = *~  core debug .schedule .schedule-*
 

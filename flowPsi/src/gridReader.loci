@@ -224,7 +224,7 @@ namespace flowPsi {
     for(mi=varplotlist.begin();mi!=varplotlist.end();) {
       if(mi->second != 0) {
         gConstraint x ;
-        x = ~EMPTY ;
+        x = ~GEMPTY ;
         string cname = string("plotOutput_") + mi->first ;
         facts.create_gfact(cname,x,universe_space) ;
         cname = string("scalarOutput_") + mi->first ;

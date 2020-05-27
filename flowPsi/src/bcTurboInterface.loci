@@ -20,6 +20,10 @@
 //#############################################################################
 
 #include <Loci.h>
+#ifdef LOCI_V5
+#include <GLoci.h>
+using Loci::gEntity ;
+#endif
 #include "flowTypes.h"
 #include <string>
 #include "readGrid.h"
@@ -878,7 +882,11 @@ namespace flowPsi {
     int nsz = turboPointInitDB.size() ;
     int bsz = turboBCIds.size() ;
     vector<vector<vector3d<float> > > coord_list(bsz) ;
+#ifdef LOCI_V5
+    vector<vector<gEntity> > id_list(bsz) ;
+#else
     vector<vector<int> > id_list(bsz) ;
+#endif
     // collate information based on boundaries
     for(int i=0;i<nsz;++i) {
       int bc = turboPointInitDB[i].first.first ;

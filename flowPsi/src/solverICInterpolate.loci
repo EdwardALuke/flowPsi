@@ -20,6 +20,11 @@
 //#############################################################################
 
 #include <Loci.h>
+#ifdef LOCI_V5
+#include <GLoci.h>
+using Loci::gEntity ;
+#endif
+
 #include "flowTypes.h"
 #include "interpolate_file.h"
 #include "initialConditions.h"
@@ -143,7 +148,11 @@ namespace flowPsi {
 
     int npnts = loc.domain().Max()+1 ;
     vector<coord3df> pnts(npnts) ;
+#ifdef LOCI_V5
+    vector<gEntity> pnt_id (npnts) ;
+#else
     vector<int> pnt_id (npnts) ;
+#endif
     for(int i=0;i<npnts;++i) {
       pnts[i][0] = realToFloat(loc[i].x) ;
       pnts[i][1] = realToFloat(loc[i].y) ;

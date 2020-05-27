@@ -534,7 +534,7 @@ namespace flowPsi {
         continue ;
       }
       vector<Loci::kdTree::coord3d> bcfaces_pts(faceSet.size()) ;
-      vector<int> bcfaces_ids(faceSet.size()) ;
+      vector<gEntity> bcfaces_ids(faceSet.size()) ;
 
       int cnt = 0 ;
       gStore<vect3d>::const_iterator fc_itr = facecenter.begin();
@@ -551,7 +551,11 @@ namespace flowPsi {
       }
       
       vector<Loci::kdTree::coord3d> cell_pts(cellSet.size()) ;
+#ifdef LOCI_V5
+      vector<gEntity> closest(cellSet.size(),-1) ;
+#else
       vector<int> closest(cellSet.size(),-1) ;
+#endif
       cnt = 0 ;
       gStore<vect3d>::const_iterator cc_itr = cellcenter.begin();
       for(gEntitySet:: const_iterator itr = cellSet.begin(); itr != cellSet.end(); itr++){
@@ -698,7 +702,7 @@ namespace flowPsi {
       gEntitySet faces = (cr.preimage(volSets[i]).first +
                           cl.preimage(volSets[i]).first) ;
       
-      facesets.push_back(all_collect_entitySet(faces)) ;
+      facesets.push_back(g_all_collect_entitySet(faces)) ;
     }
 
     // Now get node associations with volumes

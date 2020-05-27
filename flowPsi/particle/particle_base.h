@@ -85,6 +85,10 @@ also operators "<<" and ">>" are expected to be defined
 #include "par_util.h"
 #include "store_traverser.h"
 #include <Loci.h>
+#ifdef LOCI_V5
+#include <GLoci.h>
+using Loci::gEntity ;
+#endif
 #include <Tools/except.h>
 #include <iostream>
 #include <set>
@@ -126,7 +130,11 @@ namespace lagrangianP {
   using Loci::cross ;
 
   inline void approx_NN(const std::vector<Loci::kdTree::coord3d> &target_pnts,
+#ifdef LOCI_V5
+                        const std::vector<gEntity> &target_ids,
+#else
                         const std::vector<int> &target_ids,
+#endif
                         const std::vector<Loci::kdTree::coord3d> &search_pnts,
                         std::vector<int> &close_pt,
                         MPI_Comm comm) {
@@ -158,7 +166,11 @@ namespace lagrangianP {
 
     {// First sample the targets
       vector<coord3d> sample_pts(nsamples) ;
+#ifdef LOCI_V5
+      vector<gEntity> sample_ids(nsamples) ;
+#else
       vector<int> sample_ids(nsamples) ;
+#endif
       for(int i=0;i<nsamples;++i) {
         sample_pts[i] = target_pnts[i*samp_freq] ;
         sample_ids[i] = target_ids[i*samp_freq] ;
@@ -175,8 +187,12 @@ namespace lagrangianP {
       int rsize = rdispls[p-1]+rcounts[p-1] ;
       
       vector<coord3d> tpnts(rsize);
+#ifdef LOCI_V5
+      vector<gEntity> tids(rsize) ;
+#else
       vector<int> tids(rsize) ;
-      MPI_Allgatherv((void *)&sample_ids[0],tsz,MPI_INT,
+#endif
+      MPI_Allgatherv(&sample_ids[0],tsz,MPI_INT,
                      &tids[0],&rcounts[0],&rdispls[0],
                      MPI_INT,comm) ;
       for(int i=0;i<p;++i)
@@ -2462,7 +2478,11 @@ namespace lagrangianP {
     store<vec3d> cellcenter(factsP->get_variable("cellcenter")) ;
     
     std::vector<Loci::kdTree::coord3d> cell_pts(cells.size()) ;
+#ifdef LOCI_V5
+    std::vector<gEntity> cell_ids(cells.size()) ;
+#else
     std::vector<int> cell_ids(cells.size()) ;
+#endif
     int count = 0 ;
 
     if(parallel_run) {
@@ -2495,8 +2515,12 @@ namespace lagrangianP {
       search_pts[i][1] = pp.y ;
       search_pts[i][2] = pp.z ;
     }
-    
+
+#ifdef LOCI_V5
+    std::vector<gEntity> closest(orb_buf.size(), -1) ;
+#else
     std::vector<int> closest(orb_buf.size(), -1) ;
+#endif
 //#define USE_APPROX_NN
 #ifdef USE_APPROX_NN
     approx_NN(cell_pts, cell_ids, search_pts, closest, MPI_COMM_WORLD) ;
@@ -2568,7 +2592,12 @@ namespace lagrangianP {
     store<vec3d> cellcenter(factsP->get_variable("cellcenter")) ;
     
     std::vector<Loci::kdTree::coord3d> cell_pts(cells.size()) ;
+#ifdef LOCI_V5
+    std::vector<gEntity> cell_ids(cells.size()) ;
+#else
     std::vector<int> cell_ids(cells.size()) ;
+#endif
+    
     int count = 0 ;
 
     if(parallel_run) {
@@ -2601,7 +2630,11 @@ namespace lagrangianP {
       search_pts[i][2] = pp.z ;
     }
 
+#ifdef LOCI_V5
+    std::vector<gEntity> closest(orb_buf.size(), -1) ;
+#else
     std::vector<int> closest(orb_buf.size(), -1) ;
+#endif
 #ifdef USE_APPROX_NN
     approx_NN(cell_pts, cell_ids, search_pts, closest, MPI_COMM_WORLD) ;
 #else

@@ -491,7 +491,11 @@ namespace flowPsi {
    // Create kd_tree
    coord3df zero(0,0,0) ;
    vector<coord3df > pnts(mydom.size(),zero) ;
+#ifdef LOCI_V5
+   vector<gEntity> pnt_id(mydom.size(),0) ;
+#else
    vector<int> pnt_id(mydom.size(),0) ;
+#endif
    cnt = 0 ;
    FORALL(mydom,ii) {
      pnt_id[cnt] = ii+interp_data->domain_offset ;
@@ -887,7 +891,7 @@ namespace flowPsi {
           wt[i] = w[i] ;
         }
         for(int i=nsz;i<4;++i) {
-          st[i] = st[nsz-1] ;
+          st[i] = st[0] ;
           wt[i] = 0 ;
         }
         stencils[lid[ip]] = st ;

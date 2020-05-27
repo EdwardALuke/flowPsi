@@ -26,6 +26,11 @@ using std::cout ;
 #include <string>
 using std::string;
 #include <Loci.h>
+#ifdef LOCI_V5
+#include <GLoci.h>
+using Loci::gEntity ;
+#endif
+
 using Loci::option_value_type;
 #include "gridMotion/gridTypes.h"
 #include "gridMotion/nodeData.h"
@@ -195,8 +200,11 @@ $rule pointwise( priority::moving::us_n ),
         continue ;
       }
       vector<Loci::kdTree::coord3d> bcnodes_pts(nodeSetsurf.size()) ;
+#ifdef LOCI_V5
+      vector<gEntity> bcnodes_ids(nodeSetsurf.size()) ;
+#else
       vector<int> bcnodes_ids(nodeSetsurf.size()) ;
-
+#endif
       int cnt = 0 ;
       FORALL(nodeSetsurf,nd) {
         bcnodes_pts[cnt][0] = realToDouble(pos[nd].x) ;
@@ -210,7 +218,11 @@ $rule pointwise( priority::moving::us_n ),
       
       
       vector<Loci::kdTree::coord3d> node_pts(nodeSet.size()) ;
+#ifdef LOCI_V5
+      vector<gEntity> closest(nodeSet.size(),-1) ;
+#else
       vector<int> closest(nodeSet.size(),-1) ;
+#endif
       cnt = 0 ;
       FORALL(nodeSet,nd) {
         node_pts[cnt][0] = realToDouble(pos[nd].x) ;
