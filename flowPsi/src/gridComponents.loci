@@ -51,13 +51,15 @@ $include "FVMOverset/overset.lh"
 namespace flowPsi {
 
 
-  $type componentMotionState_X_ic param<vector<real> > ;
-  $type componentMotionState_X param<vector<real> > ;
-  $type componentMotionState_X_next param<vector<real> > ;
+  $type componentMotionState_X_ic blackbox<vector<real> > ;
+  $type componentMotionState_X blackbox<vector<real> > ;
+  $type componentMotionState_X_next blackbox<vector<real> > ;
 
   $type motionBehavior_X blackbox<Loci::CPTR<Loci::motionType> > ;
 
-  $rule unit(componentMotionState_X_ic<-motionBehavior_X), parametric(volumeTag(X)) {
+  $rule unit(componentMotionState_X_ic<-motionBehavior_X),
+  constraint(componentMotion),
+  parametric(volumeTag(X)) {
     $componentMotionState_X_ic = vector<real>() ;
   }
 
@@ -85,7 +87,9 @@ namespace flowPsi {
     hid_t file_id = Loci::hdf5OpenFile(filename.c_str(),
 					 H5F_ACC_RDONLY, H5P_DEFAULT);
     entitySet read_set = entitySet(seq) ;
-    Loci::readContainer(file_id,"motionState",$componentMotionState_X_ic.Rep(),read_set) ;
+    param<vector<real> > tmp ;
+    Loci::readContainer(file_id,"motionState",tmp.Rep(),read_set) ;
+    *$componentMotionState_X_ic = *tmp ;
     Loci::hdf5CloseFile(file_id) ;
 
   } ;
@@ -103,24 +107,27 @@ namespace flowPsi {
 
   $rule pointwise(OUTPUT{n}<-componentMotionState_X{n},componentName_X{n},
 		  modelName{n},restart_modulo{n},restart_directory{n},ncycle{n},
-		  restart_postfix{n},$n{n}),parametric(volumeTag(X)),
+		  restart_postfix{n},$n{n}),constraint(componentMotion),
+  parametric(volumeTag(X)),
   conditional(do_restart{n}),prelude {
     hid_t file_id = 0 ;
     string filename = *$restart_directory{n} + "componentMotionState_" + *$componentName_X{n} +  "_" + *$modelName{n} ;
     file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
 				     H5P_DEFAULT, H5P_DEFAULT) ;
-      
-    Loci::writeContainer(file_id,"motionState",$componentMotionState_X{n}.Rep()) ;
+    param<vector<real> > tmp ;
+    *tmp = *$componentMotionState_X{n} ;
+    Loci::writeContainer(file_id,"motionState",tmp.Rep()) ;
     Loci::hdf5CloseFile(file_id) ;
   } ;
 
-  $rule singleton(componentMotionState_X_next{n}<-componentMotionState_X{n},motionBehavior_X{n},motionInfo{n}),parametric(volumeTag(X)) {
+  $rule singleton(componentMotionState_X_next{n}<-componentMotionState_X{n},motionBehavior_X{n},motionInfo{n}),constraint(componentMotion),parametric(volumeTag(X)) {
     $componentMotionState_X_next{n} = $motionBehavior_X{n}->advanceStateInTime($componentMotionState_X{n},$motionInfo{n}) ;
   }
 
 
 
   $rule singleton(componentMotionState_X{n+1}<-componentMotionState_X_next{n}),
+  constraint(componentMotion),
   parametric(volumeTag(X)) {
     $componentMotionState_X{n+1} = $componentMotionState_X_next{n} ;
   }
