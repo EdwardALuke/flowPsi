@@ -803,6 +803,14 @@ namespace flowPsi {
   }    
 
   $type Cvor param<real> ;
+
+  // added by Erdem Dikbas
+  $rule default(Cvor),
+     comments("Cvor constant for rotation correction.") {
+     $Cvor = 2.0 ;
+  }
+  //
+  
   $rule pointwise(vortex_correction::stress_scalar<-kw_tmu,rho_t,k,divu_t,
                   vortMag_t,strainRate_t,Cvor),
     constraint(vortex_preserving_production,k,kw_tmu) {
