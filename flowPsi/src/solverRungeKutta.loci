@@ -296,7 +296,7 @@ namespace flowPsi {
   $type output_topo param<bool> ;
 
   $rule singleton(output_topo{n,rk}<-ncycle{n,rk},$n{n},$rk{n,rk}) {
-    $output_topo{n,rk} = ($$n{n} == 0) && $$rk{n,rk} == 0 ;
+    $output_topo{n,rk} = ($$n{n} == 0) && ($$rk{n,rk} == 0) ;
   }
 
   real time_factor(real ptime, string &time_units) {

@@ -181,23 +181,23 @@ namespace flowPsi {
     const_param<string> plot_postfix ;
   public:
     output_grid_topology() {
-      name_store("OUTPUT{n,it}",OUTPUT) ;
+      name_store("OUTPUT",OUTPUT) ;
       name_store("upper",upper) ;
       name_store("lower",lower) ;
       name_store("boundary_map",boundary_map) ;
       name_store("face2node",face2node) ;
       name_store("ref",ref) ;
-      name_store("boundary_names{n,it}",boundary_names) ;
+      name_store("boundary_names",boundary_names) ;
       name_store("modelName",modelName) ;
-      name_store("pos{n,it}",pos) ;
+      name_store("pos",pos) ;
       //      name_store("firstPlot{n,it}",firstPlot) ;
-      name_store("plot_postfix{n,it}",plot_postfix) ;
-      input("plot_postfix{n,it}") ;
+      name_store("plot_postfix",plot_postfix) ;
+      input("plot_postfix") ;
       input("modelName") ;
-      input("(upper,lower,boundary_map)->face2node->pos{n,it}") ;
-      input("boundary_map->ref->boundary_names{n,it}") ;
-      conditional("output_topo{n,it}") ;
-      output("OUTPUT{n,it}") ;
+      input("(upper,lower,boundary_map)->face2node->pos") ;
+      input("boundary_map->ref->boundary_names") ;
+      conditional("output_topo") ;
+      output("OUTPUT") ;
       disable_threading() ;
     }
     
@@ -235,6 +235,7 @@ namespace flowPsi {
 
   register_rule<output_grid_topology> register_output_grid_topology ;
 
+  
   class output_grid_positions_topo: public pointwise_rule {
     const_store<vector3d<real> > pos ;
     const_param<string> plot_postfix ;
