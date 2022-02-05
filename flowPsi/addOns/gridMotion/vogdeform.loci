@@ -777,7 +777,7 @@ $rule apply( faceCollection <-  face2node->fileNumber(pos),
 
     try{
       cout << "Copying face connectivity...\n";
-      for(unsigned int i=0;i< tri_glob.size();++i) {
+      for(size_t i=0;i< tri_glob.size();++i) {
 	cfd_data.face_conn[i].resize(3);
 	cfd_data.isParabolic[i]=false;
 	if(cfd_data.node_map.count(tri_glob[i][0])==0)
@@ -793,7 +793,7 @@ $rule apply( faceCollection <-  face2node->fileNumber(pos),
 	  "]->[" <<  cfd_data.face_conn[i][0] <<  "," <<  cfd_data.face_conn[i][1] <<  "," <<
 	  cfd_data.face_conn[i][2] <<  "]" << endl;
       }
-      for(unsigned int i=0,f=tri_glob.size();i<qua_glob.size();++i,++f) {
+      for(size_t i=0,f=tri_glob.size();i<qua_glob.size();++i,++f) {
 	cfd_data.face_conn[f].resize(4);
 	cfd_data.isParabolic[f]=false;
 	if(cfd_data.node_map.count(qua_glob[i][0])==0)
@@ -884,7 +884,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       VecCreateSeq(MPI_COMM_SELF,file_data.disp.size()*6,&file_disp);
       VecCreateSeq(MPI_COMM_SELF,cfd_data.disp.size()*3,&cfd_disp);
       int tempindex=0;
-      for(unsigned int i=0;i<file_data.node_ids.size();++i)
+      for(size_t i=0;i<file_data.node_ids.size();++i)
 	{
 	  tempindex=i*6+0;
 	  VecSetValues(file_disp,1,&tempindex,&file_data.disp[i][0],INSERT_VALUES);
@@ -897,7 +897,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       mapper->fem2cfd_disp(file_disp,cfd_disp);
 
       cfd_disp_glob.resize(cfd_data.node_ids.size(),vect3d(0.,0.,0.));
-      for(unsigned int i=0;i<cfd_data.node_ids.size();++i)
+      for(size_t i=0;i<cfd_data.node_ids.size();++i)
 	{
 	  tempindex=i*3+0;
 	  VecGetValues(cfd_disp,1,&tempindex,&cfd_disp_glob[i].x);
@@ -915,10 +915,10 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       vector<vector<real_t> > cfd_def_coords, file_def_coords;
       file_face_ids.resize(file_data.face_conn.size());
       cfd_face_ids.resize(cfd_data.face_conn.size());
-      for(unsigned int i=0;i<file_face_ids.size();++i){
+      for(size_t i=0;i<file_face_ids.size();++i){
 	file_face_ids[i]=i+1;
       }
-      for(unsigned int i=0;i<cfd_face_ids.size();++i){
+      for(size_t i=0;i<cfd_face_ids.size();++i){
 	cfd_face_ids[i]=i+1;
       }
 
@@ -926,13 +926,13 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       file_data.inode_ids.resize(file_data.node_ids.size());
       cfd_def_coords=cfd_data.node_coords;
       cfd_data.inode_ids.resize(cfd_data.node_ids.size());
-      for(unsigned int i=0;i<file_def_coords.size();++i){
+      for(size_t i=0;i<file_def_coords.size();++i){
 	file_data.inode_ids[i]=i+1; // Output numbering from 1 to match error messages
 	file_def_coords[i][0] += *$deformationScaleFactor * file_data.disp[i][0];
 	file_def_coords[i][1] += *$deformationScaleFactor * file_data.disp[i][1];
 	file_def_coords[i][2] += *$deformationScaleFactor * file_data.disp[i][2];
       }
-      for(unsigned int i=0;i<cfd_def_coords.size();++i){
+      for(size_t i=0;i<cfd_def_coords.size();++i){
 	cfd_data.inode_ids[i]=i+1; // Output numbering from 1 to match error messages
 	cfd_def_coords[i][0] += *$deformationScaleFactor * cfd_disp_glob[i].x;
 	cfd_def_coords[i][1] += *$deformationScaleFactor * cfd_disp_glob[i].y;
@@ -1009,7 +1009,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
 #else
       vector<int> file_coordsID (file_coords.size()) ;
 #endif
-      for(unsigned int i=0;i<file_coords.size();++i) {
+      for(size_t i=0;i<file_coords.size();++i) {
 	file_coordsID[i] = i ;
       }
 		  
@@ -1017,20 +1017,20 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       entitySet locdom = interval(0,file_coords.size()-1) ;
       loc.allocate(locdom) ;
 			
-      for(unsigned int i=0;i<file_coords.size();++i) {
+      for(size_t i=0;i<file_coords.size();++i) {
 	file_coords[i] *= realToDouble(*$lengthScaleFactor);
 	loc[i] = file_coords[i] ;
       }
 
       Loci::kdTree::KDTree<double> kd(file_coords,file_coordsID) ;
       cfd_disp.resize(*$numDeformNodes,vect3d(0.,0.,0.));
-      for(unsigned int i=0;i<cfd_disp.size();++i){
+      for(size_t i=0;i<cfd_disp.size();++i){
 	vector<int> neighbors  = get_stencil(kd,cfd_coords[i],*$searchRadius) ;
 	vector<real_t> w ;
 	stencil_weights(w,neighbors,loc,cfd_coords[i]) ;
 	//				Loci::debugout << "Node " << i << "\n";
 	//				Loci::debugout << "    Neighbors size " << neighbors.size() << "\n";
-	for(unsigned int j=0;j<neighbors.size();++j) {
+	for(size_t j=0;j<neighbors.size();++j) {
 	  //					Loci::debugout << "    Neighbor " << j << ", file line " << neighbors[j] << ", weight " << w[j] << ", file coord, [" << file_coords[neighbors[j]] << ", file disp [" << *$lengthScaleFactor *file_disp[neighbors[j]] << "]\n";
 	  cfd_disp[i] += *$lengthScaleFactor * w[j]*file_disp[neighbors[j]];
 	}
