@@ -178,6 +178,7 @@ $type stime             param<flowPsi::real> ; // simulation time
 $type ncycle            param<int> ; // simulation iteration number
 $type newtonMaxIter     param<int> ;
 $type newtonFinished    param<bool> ;
+$type rkFinished        param<bool> ;
 $type lastNewton        param<bool> ;
 $type urelax            param<flowPsi::real> ;
 $type dtmax             param<flowPsi::TimeValue> ;
