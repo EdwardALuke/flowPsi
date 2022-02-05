@@ -497,6 +497,6 @@ public:
   $rule pointwise(SGSScalarSolve(X)<-SGSScalarSolve(X){igs}),
     constraint(geom_cells{igs}),
     conditional(gseidel_finished(X){igs}),
-    inplace(SGSScalarSolve(X)|SGSScalarSolve(X){igs}){}
+  inplace(SGSScalarSolve(X)|SGSScalarSolve(X){igs}), prelude {} ;
 
 }
