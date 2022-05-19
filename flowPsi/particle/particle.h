@@ -23,6 +23,7 @@
 // particle types. Different particle types may be defined
 // to represent different kind of particles. See the comments in
 // "particle_base.h" for the details of the current design.
+#ifndef USE_AUTODIFF
 #ifndef PARTICLE_H
 #define PARTICLE_H
 
@@ -328,4 +329,5 @@ namespace lagrangianP {
 } // end of namespace lagrangianP
 
 #include "integrate_particle.h"
+#endif
 #endif

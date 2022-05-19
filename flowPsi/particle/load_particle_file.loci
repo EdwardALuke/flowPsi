@@ -20,6 +20,7 @@
 //#############################################################################
 
 #include <Loci.h>
+#ifndef USE_AUTODIFF
 
 #include "particle.h"
 #include "particle_model.h"
@@ -218,3 +219,4 @@ namespace lagrangianP {
 
   register_rule<collect_load_particles> register_collect_load_particles ;
 }
+#endif

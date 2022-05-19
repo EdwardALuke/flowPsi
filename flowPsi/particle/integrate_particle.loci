@@ -22,6 +22,7 @@
 // include the Loci finite-volume module
 $include "FVM.lh"
 
+#ifndef USE_AUTODIFF
 #include "particle_config.h"
 #include "particle.h"
 #include "util.h"
@@ -530,3 +531,4 @@ namespace lagrangianP {
 
 // ... the end ...
 
+#endif

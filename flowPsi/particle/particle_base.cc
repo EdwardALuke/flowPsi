@@ -18,6 +18,7 @@
 //# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
 //#
 //#############################################################################
+#ifndef USE_AUTODIFF
 
 // This file implements the particle_base module (obviously)
 #include "particle_base.h"
@@ -2638,3 +2639,5 @@ namespace lagrangianP {
 } 
 
 // ... the end ...
+#endif
+

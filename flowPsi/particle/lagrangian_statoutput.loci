@@ -20,6 +20,8 @@
 //#############################################################################
 
 #include <Loci.h>
+
+#ifndef USE_AUTODIFF
 // include the Loci finite-volume module
 $include "FVM.lh"
 #include "particle_config.h"
@@ -1620,3 +1622,4 @@ void pt_bin_vector_node_output::compute(const sequence &seq) {
     constraint(Z);constraint(X);}					\
   }; register_rule<OUTBB_##Y> register_OUTBB_##Y
 }
+#endif

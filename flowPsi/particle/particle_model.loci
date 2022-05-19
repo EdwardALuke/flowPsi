@@ -21,6 +21,8 @@
 
 #include <Loci.h>
 
+#ifndef USE_AUTODIFF
+
 #include <fstream>
 #include "particle.h"
 #include "particle_model.h"
@@ -441,3 +443,5 @@ namespace lagrangianP {
   }
   
 }
+
+#endif

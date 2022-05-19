@@ -20,6 +20,9 @@
 //#############################################################################
 
 #include <Loci.h>
+
+#ifndef USE_AUTODIFF
+
 #include "interpolate.h"
 #include "particle.h"
 #include "particle_model.h"
@@ -851,3 +854,5 @@ namespace lagrangianP {
   }
   
 }
+
+#endif

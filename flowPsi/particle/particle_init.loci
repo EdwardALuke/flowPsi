@@ -19,6 +19,7 @@
 //#
 //#############################################################################
 
+#ifndef USE_AUTODIFF
 // This file implements the necessary stuffs for properly
 // initiate the ParticleSpace object for use later in the code
 #include "particle_base.h"
@@ -523,3 +524,4 @@ namespace lagrangianP {
 } // end of namespace lagrangianP
 
 // ... the end ...
+#endif

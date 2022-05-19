@@ -20,6 +20,7 @@
 //#############################################################################
 
 #include <Loci.h>
+#ifndef USE_AUTODIFF
 
 $include "FVM.lh"
 
@@ -387,3 +388,21 @@ namespace lagrangianP {
                           
   
 }
+
+#else
+
+#include <iostream>
+using std::cout ;
+using std::endl ;
+class PrintOnConstruct {
+public:
+  PrintOnConstruct() {
+    if (Loci::MPI_rank ==0) {
+      cout << "Lagrangian Particle NOT Compatible with AUTODIFF feature!"
+	   << endl ;
+    }
+  }
+} ;
+PrintOnConstruct Instance ;
+
+#endif
