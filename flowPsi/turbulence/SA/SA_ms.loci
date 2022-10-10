@@ -62,9 +62,15 @@ namespace flowPsi {
   $type dist_noslip_des store<real> ;
   $type LG store<real> ;
 
-  $rule pointwise(dist_noslip_des<-dist_noslip,LG) {
-    const real des_param = 0.65 ;
-    $dist_noslip_des = min($dist_noslip,des_param*$LG) ;
+  $type des_param param<real> ;
+  $rule default(des_param) { $des_param=0.65 ; }
+
+  $rule pointwise(dist_noslip_des<-LG,des_param) {
+    $dist_noslip_des = $des_param*$LG ;
+  }
+
+  $rule pointwise(wall::dist_noslip_des<-dist_noslip,LG,des_param) {
+    $dist_noslip_des = min($dist_noslip,$des_param*$LG) ;
   }
 
   $type f_ddes store<real> ;
@@ -85,11 +91,10 @@ namespace flowPsi {
     $sa_dist_noslip = $dist_noslip_des ;
   }
   
-  $rule pointwise(ddes::sa_dist_noslip<-dist_noslip,LG,f_ddes),
-    constraint(SA_DDES,geom_cells) {
-    const real des_param = 0.65 ;
+  $rule pointwise(ddes::sa_dist_noslip<-dist_noslip,LG,f_ddes,des_param),
+  constraint(SA_DDES,geom_cells,dist_noslip) {
     const real d = $dist_noslip ;
-    $sa_dist_noslip = d - $f_ddes*max<real>(0.,d-des_param*$LG) ;
+    $sa_dist_noslip = d - $f_ddes*max<real>(0.,d-$des_param*$LG) ;
   }
   // IDDES section
   $type f_iddes store<real> ;
@@ -129,14 +134,13 @@ namespace flowPsi {
     tmpRe = min<real>(100.,tmpRe) ;
     $low_Re = sqrt(tmpRe) ;
   }
-  $rule pointwise(iddes::sa_dist_noslip<-dist_noslip,LG,f_iddes,f_restore,low_Re,LGMIN),
-    constraint(SA_IDDES,vol,LG) {
-    const real des_param = 0.65 ;
+  $rule pointwise(iddes::sa_dist_noslip<-dist_noslip,LG,f_iddes,f_restore,low_Re,LGMIN,des_param),
+  constraint(SA_IDDES,vol,LG,dist_noslip) {
     const real d = $dist_noslip ;
     const real sgs_cw = 0.15 ;
     const real maxvar=max(sgs_cw*d,sgs_cw*$LG);
     const real ddes = min(max(maxvar,$LGMIN),$LG) ;
-    $sa_dist_noslip = $f_iddes*(1.+$f_restore*$low_Re)*d + (1.-$f_iddes)*des_param*$low_Re*ddes ;
+    $sa_dist_noslip = $f_iddes*(1.+$f_restore*$low_Re)*d + (1.-$f_iddes)*$des_param*$low_Re*ddes ;
   }
 
 
