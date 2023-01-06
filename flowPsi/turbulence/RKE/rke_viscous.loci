@@ -1,0 +1,62 @@
+//#############################################################################
+//#
+//# Copyright 2015-2019, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+
+$include "flowPsi.lh"
+$include "rke.lh"
+
+namespace flowPsi {
+   
+  $rule pointwise(k_bc,e_bc<-ref->(rke_k_bc,rke_e_bc)),constraint(RKEModel,area,ci->u) {
+    $k_bc = $ref->$rke_k_bc ;
+    $e_bc = $ref->$rke_e_bc ;
+  }
+
+  $type prescribe_turb_ref store<vec<2> > ;
+
+  $rule pointwise(prescribe::k_bc,prescribe::e_bc<-
+                  prescribe_turb_ref,rho_f),
+                  constraint(RKEModel,area,ci->u,prescribe_turb_ref) {
+
+
+    $k_bc = $prescribe_turb_ref[0] ;
+    real mut = $prescribe_turb_ref[1] ;
+    $e_bc = 0.09*$rho_f*pow($k_bc,2)/(mut+1e-10) ;
+  }
+  
+
+   $rule pointwise(viscousWall::k_f,viscousWall::e_f<-ci->(dist_noslip,rho,k,mu)),
+    constraint(viscousWall_BC,RKEModel) {
+
+    $k_f = 0.0 ;
+    real nu = $ci->$mu/$ci->$rho ;
+    real k1 = $ci->$k ;
+    real dy = $ci->$dist_noslip ;
+    $e_f = 2.*nu*k1/(dy*dy) ;
+  }
+}

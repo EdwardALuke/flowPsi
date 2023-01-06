@@ -1,0 +1,593 @@
+//#############################################################################
+//#
+//# Copyright 2015-2019, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+#include "rke_turb_param.h"
+
+$include "flowPsi.lh"
+$include "rke.lh"
+
+
+namespace flowPsi {
+  const double EPSILON=1e-20 ;
+
+
+  $rule constraint(RKEModel,RKE,RKECUBIC<-turbulence_model) {
+    $RKEModel = EMPTY ;
+    $RKE = EMPTY ;
+    $RKECUBIC = EMPTY ;
+    if($turbulence_model == "RKE") {
+      $RKEModel = $*turbulence_model.domain() ;
+      $RKE = $*turbulence_model.domain() ;
+    }
+    else if($turbulence_model == "RKECUBIC") {
+      $RKEModel = $*turbulence_model.domain() ;
+      $RKECUBIC = $*turbulence_model.domain() ;
+    }
+  }
+
+
+  $type kprod_func param<std::string> ;
+
+  $rule default(kprod_func),
+    comments("Determines which terms are included in the turbulence production term.  'vorticity' uses vorticity instead of strain rate, 'SOmega' uses a product of vorticity and strain rate and is robust for stagnation flows, 'vortex_preserving' uses a modifed form that tries to limit turbulence production in vortex cores, while 'total' includes all of the terms without modification.") {
+    $kprod_func = "SOmega" ;
+  }
+
+  $rule constraint(shear_production,total_production,vorticity_production,
+                   vortex_preserving_production<- kprod_func) {
+    $shear_production = EMPTY ;
+    $vorticity_production = EMPTY ;
+    $total_production = EMPTY ;
+    $vortex_preserving_production = EMPTY ;
+    if($kprod_func == "shear") {
+      $shear_production = $*kprod_func.domain() ;
+    } else if($kprod_func == "total") {
+      $total_production = $*kprod_func.domain() ;
+    } else if($kprod_func == "vorticity") {
+      $vorticity_production = $*kprod_func.domain() ;
+    } else if($kprod_func == "vortex_preserving") {
+      $vortex_preserving_production = $*kprod_func.domain() ;
+    } else if($kprod_func != "SOmega") {
+      cerr << "kprod_func set to unknown value = " << $kprod_func
+           << endl ;
+      Loci::Abort() ;
+    }
+  }
+
+  $rule constraint(MS_RKEModel<-multi_scale,turbulence_model) {
+    $MS_RKEModel = EMPTY ;
+    if($multi_scale == "LNS" ||
+       $multi_scale == "LNS2DX"||
+       $multi_scale == "LNS2DY"||
+       $multi_scale == "LNS2DZ" ) {
+       $MS_RKEModel = $*multi_scale.domain() ;
+    }
+    else if($multi_scale == "LES"||
+            $multi_scale == "LES2DX"||
+            $multi_scale == "LES2DY"||
+            $multi_scale == "LES2DZ" ) {
+            $MS_RKEModel = EMPTY ;
+    }
+    else if($multi_scale == "none") {
+      $MS_RKEModel = EMPTY ;
+    }
+    else if($multi_scale == "DES") {
+      $MS_RKEModel = EMPTY ;
+    }
+//    else {
+//      $[Once] {
+//        cerr << "incorrect specification of the multi_scale parameter for the RKE model!" << endl ;
+//      }
+//      Loci::Abort() ;
+//    }
+  }
+
+
+  $rule default(rke),
+    comments("RKE turbulence parameters") {
+
+    $rke.a1 = 1.25 ;
+    $rke.ce1 = 1.44 ;
+    $rke.ce2 = 1.92 ;
+    $rke.sigmak = 1.0 ;
+    $rke.sigmae = 1.3 ;
+    $rke.ctau = sqrt(2.0) ;
+    $rke.amu = 0.01 ;
+    $rke.ae = 0.3 ;
+    $rke.aet = 0.15 ;
+    $rke.cs = 0.05 ;
+  }
+
+  // Setting up transport of k and w variables
+  $type scalarTransportP(X,Y) param<bool> ;
+  $rule pointwise(OUTPUT<-scalarTransportP(k,RKEModel)) {
+  }
+  $rule pointwise(OUTPUT<-scalarTransportP(e,RKEModel)) {
+  }
+
+  // K equation diffusion term
+  $rule pointwise(k_nu_f<-mu_f,tmu_f,rke),
+    constraint(RKEModel,grads_f(e)) {       //constraint needed to distinguish from diff_t in sst
+      const real sigmak = $rke.sigmak ;
+      $k_nu_f=($mu_f+$tmu_f/sigmak) ;
+  }
+
+
+  // Epsilon equation diffusion term
+  $rule pointwise(e_nu_f<-mu_f,tmu_f,rke) {
+    const real sigmae = $rke.sigmae ;
+    $e_nu_f=($mu_f+$tmu_f/sigmae) ;
+  }
+
+
+  // turbulence time scale
+  $rule pointwise(tts<-k,e) {
+    $tts = $k/$e ;
+  }
+
+
+  // constant cmu for baseline k-e model
+  $rule pointwise(cmu),constraint(vol) {
+    $cmu = 0.09 ;
+  }
+
+
+  // nonlinear cmu for cubic k-e model
+  $rule pointwise(rkecubic::cmu<-tts,strainRate,vortMag,divu,rke),
+    constraint(vol,RKECUBIC) {
+    const real a1 = $rke.a1 ;
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real S = $tts*pow(S2,0.5) ;
+    const real W = $tts*$vortMag ;
+    $cmu = (2./3.)/(a1+S+0.9*W) ;
+  }
+
+
+  // turbulence Reynolds number
+  $rule pointwise(rt<-k,e,rho,mu) {
+    const real nu = $mu/$rho ;
+    $rt = pow($k,2)/(nu*$e) ;
+  }
+
+
+  // realizable time scale
+  $rule pointwise(rts<-rke,tts,rt) {
+    const real ctau = $rke.ctau ;
+    $rts = $tts*max(1.0,ctau/pow($rt,0.5)) ;
+  }
+
+
+  // wall damping function
+  $rule pointwise(fmu<-rke,rt) {
+    const real amu = $rke.amu ;
+    const real ctau = $rke.ctau ;
+    const real amrt = amu*$rt ;
+    const real rtsqt = pow($rt,0.5) ;
+    const real rf = max(1.0,ctau/rtsqt) ;
+    const real e1 = 1.-exp(-amrt) ;
+    const real e2 = 1.-exp(-rtsqt) ;
+    $fmu = max(e1*rf/(e2+EPSILON),amu*ctau) ;
+  }
+
+
+  // default latency parameter (< 1 only when using hybrid RANS/LES with the RKE model)
+  $rule pointwise(alpha),constraint(vol) {
+    $alpha = 1.0 ;
+  }
+
+
+  // latency parameter for hybrid RANS/LES in the RKE model
+  $rule pointwise(lns::alpha<-rke,LG,strainRate,divu,k,e,cmu,u,dtmax),
+    constraint(vol,MS_RKEModel) {
+    const real udt = 2.*norm($u)*$dtmax ;
+//      const real udt = 0. ;
+
+    const real cs = $rke.cs ;
+    const real S = pow($strainRate*$strainRate-2./3.*$divu*$divu,0.5) ;
+    const real grid_len_scale = 2.*max($LG,udt) ;
+    const real c1 = cs*pow(grid_len_scale,2)*S ;
+    const real c2 = $cmu*pow($k,2)/$e ;
+    $alpha = min(c1/(c2+EPSILON),1.0) ;
+  }
+
+  // Definition of turbulent viscosity
+
+  $rule pointwise(rke::tmu<-tmu_clip,rho,k,e,cmu,fmu,alpha,strainRate,divu),
+    constraint(k,e,RKE) {
+    const real S = pow($strainRate*$strainRate-2./3.*$divu*$divu,0.5) ;
+    const real tmu = min($alpha*$cmu*$fmu*$rho*pow($k,2)/$e,
+                         (2./3.)*$alpha*$rho*$k/(S+EPSILON)) ;
+    $tmu = min(tmu,$tmu_clip);
+  }
+
+  $rule pointwise(rkecubic::tmu<-tmu_clip,rho,k,e,cmu,fmu,alpha),
+    constraint(k,e,RKECUBIC) {
+    const real tmu = $alpha*$cmu*$fmu*$rho*pow($k,2)/$e ;
+    $tmu = min(tmu,$tmu_clip);
+  }
+
+
+  $rule pointwise(psit<-e,tts,grads(k),grads(e)) {
+    const real gradkk = dot($grads(k),$grads(k)) ;
+    const real gradke = dot($grads(k),$grads(e)) ;
+    const real gradFunc = (gradkk-$tts*gradke)/$e ;
+    $psit = max(gradFunc,0.0) ;
+  }
+
+
+  $rule pointwise(extra_prod<-k,e,rts,psit,rho,mu,rke) {
+    const real Ae = $rke.ae ;
+    const real nu = $mu/$rho ;
+    const real V = max(pow($k,0.5),pow(nu*$e,0.25)) ;
+    const real sqet = pow($e*$rts,0.5) ;
+
+    $extra_prod = Ae*$rho*V*sqet*$psit ;
+  }
+
+  $rule pointwise(rkecubic::extra_prod<-k,e,rts,psit,rho,mu,rke),
+    constraint(vol,RKECUBIC) {
+    const real Aet = $rke.aet ;
+    const real nu = $mu/$rho ;
+    const real V = max(pow($k,0.5),pow(nu*$e,0.25)) ;
+    const real sqet = pow($e*$rts,0.5) ;
+
+    $extra_prod = Aet*$rho*V*sqet*$psit ;
+  }
+
+  //----------------------------------------------------------------------
+  // Turbulence Production Computation
+  // stress_scalar is the stress term found in the production.  We provide
+  // several methods for computing this to improve robustness.
+
+
+  $rule pointwise(stress_scalar_rke<-strainRate,divu,vortMag,tmu,rho,k,alpha) {
+    const real S = $strainRate ;
+    const real Omega = $vortMag ;
+
+    $stress_scalar_rke = max($tmu*(S*Omega-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+                             0.0) ;
+  }
+
+  $rule pointwise(total::stress_scalar_rke<-rho,k,divu,tmu,strainRate,alpha),
+    constraint(tmu,k,total_production) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+
+    $stress_scalar_rke = $tmu*S2 - 2./3.*$alpha*$rho*$k*$divu ;
+  }
+
+  $rule pointwise(vorticity::stress_scalar_rke<-tmu,rho,k,divu,vortMag,alpha),
+    constraint(vorticity_production,k,tmu) {
+    const real O2 = $vortMag*$vortMag ;
+
+    $stress_scalar_rke = max($tmu*(O2-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+                             0.0) ;
+  }
+
+  $rule pointwise(vortex_correction::stress_scalar_rke<-tmu,rho,k,divu,
+                  vortMag,strainRate,Cvor,alpha),
+    constraint(vortex_preserving_production,k,tmu) {
+    const real O = max($vortMag + $Cvor*(min($strainRate-$vortMag,0.0)),0.) ;
+    const real S = $strainRate ;
+    $stress_scalar_rke = max($tmu*(S*O-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+                             0.0);
+  }
+
+  $rule pointwise(shear::stress_scalar_rke<-gradv3d(u),tmu),
+    constraint(shear_production,tmu,gradv3d(u)) {
+    const real tmu = $tmu ;
+    const real dvdx = $gradv3d(u).y.x ;
+    const real dwdx = $gradv3d(u).z.x ;
+    const real dwdy = $gradv3d(u).z.y ;
+    const real dudy = $gradv3d(u).x.y ;
+    const real dudz = $gradv3d(u).x.z ;
+    const real dvdz = $gradv3d(u).y.z ;
+
+    $stress_scalar_rke = tmu*((dudy+dvdx)*(dudy+dvdx)+(dudz+dwdx)*(dudz+dwdx)
+                             +(dvdz+dwdy)*(dvdz+dwdy)) ;
+  }
+
+// Rules for production term in the nonlinear (cubic) variant of the realizable k-epsilon model
+
+
+  $rule pointwise(cubic_prod1<-cmu,tts,tmu,divu,strainRate,gradv3d(u)) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real S = $tts*pow(S2,0.5) ;
+    const real c1 = 0.75/((1000+pow(S,3))*$cmu) ;
+    const vect3d du = $gradv3d(u).x ;
+    const vect3d dv = $gradv3d(u).y ;
+    const vect3d dw = $gradv3d(u).z ;
+    const vect3d s1 = vect3d(2.*du.x-2./3.*$divu, du.y+dv.x,           du.z+dw.x) ;
+    const vect3d s2 = vect3d(du.y+dv.x,           2.*dv.y-2./3.*$divu, dv.z+dw.y) ;
+    const vect3d s3 = vect3d(du.z+dw.x,           dv.z+dw.y,           2.*dw.z-2./3.*$divu) ;
+    const vect3d p1 = vect3d(dot(s1,du),dot(s1,dv),dot(s1,dw)) ;
+    const vect3d p2 = vect3d(dot(s2,du),dot(s2,dv),dot(s2,dw)) ;
+    const vect3d p3 = vect3d(dot(s3,du),dot(s3,dv),dot(s3,dw)) ;
+    const real term1 = dot(s1,p1) ;
+    const real term2 = dot(s2,p2) ;
+    const real term3 = dot(s3,p3) ;
+    $cubic_prod1 = c1*$tmu*$tts*(term1+term2+term3-2./3.*S2*$divu) ;
+  }
+
+
+  $rule pointwise(cubic_prod2<-cmu,tts,tmu,divu,strainRate,vort,gradv3d(u)) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real S = $tts*pow(S2,0.5) ;
+    const real c2 = 3.75/((1000+pow(S,3))*$cmu) ;
+    const vect3d o1 = vect3d(0.0,-$vort.z,$vort.y) ;
+    const vect3d o2 = vect3d($vort.z,0.0,-$vort.x) ;
+    const vect3d o3 = vect3d(-$vort.y,$vort.x,0.0) ;
+    const vect3d du = $gradv3d(u).x ;
+    const vect3d dv = $gradv3d(u).y ;
+    const vect3d dw = $gradv3d(u).z ;
+    const vect3d s1 = vect3d(2.*du.x-2./3.*$divu, du.y+dv.x,           du.z+dw.x) ;
+    const vect3d s2 = vect3d(du.y+dv.x,           2.*dv.y-2./3.*$divu, dv.z+dw.y) ;
+    const vect3d s3 = vect3d(du.z+dw.x,           dv.z+dw.y,           2.*dw.z-2./3.*$divu) ;
+    const vect3d p1 = vect3d(dot(s1,du),dot(s1,dv),dot(s1,dw)) ;
+    const vect3d p2 = vect3d(dot(s2,du),dot(s2,dv),dot(s2,dw)) ;
+    const vect3d p3 = vect3d(dot(s3,du),dot(s3,dv),dot(s3,dw)) ;
+    const vect3d q1 = vect3d(dot(o1,du),dot(o1,dv),dot(o1,dw)) ;
+    const vect3d q2 = vect3d(dot(o2,du),dot(o2,dv),dot(o2,dw)) ;
+    const vect3d q3 = vect3d(dot(o3,du),dot(o3,dv),dot(o3,dw)) ;
+    const real term1 = -dot(o1,p1)-dot(s1,q1) ;
+    const real term2 = -dot(o2,p2)-dot(s2,q2) ;
+    const real term3 = -dot(o3,p3)-dot(s3,q3) ;
+    $cubic_prod2 = c2*$tmu*$tts*(term1+term2+term3) ;
+  }
+
+
+  $rule pointwise(cubic_prod3<-cmu,tts,tmu,divu,vort,vortMag,strainRate,gradv3d(u)) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real S = $tts*pow(S2,0.5) ;
+    const real O2 = $vortMag*$vortMag ;
+    const real c3 = -4.75/((1000+pow(S,3))*$cmu) ;
+    const vect3d o1 = vect3d(0.0,-$vort.z,$vort.y) ;
+    const vect3d o2 = vect3d($vort.z,0.0,-$vort.x) ;
+    const vect3d o3 = vect3d(-$vort.y,$vort.x,0.0) ;
+    const vect3d du = $gradv3d(u).x ;
+    const vect3d dv = $gradv3d(u).y ;
+    const vect3d dw = $gradv3d(u).z ;
+    const vect3d q1 = vect3d(dot(o1,du),dot(o1,dv),dot(o1,dw)) ;
+    const vect3d q2 = vect3d(dot(o2,du),dot(o2,dv),dot(o2,dw)) ;
+    const vect3d q3 = vect3d(dot(o3,du),dot(o3,dv),dot(o3,dw)) ;
+    const real term1 = dot(o1,q1) ;
+    const real term2 = dot(o2,q2) ;
+    const real term3 = dot(o3,q3) ;
+    $cubic_prod3 = c3*$tmu*$tts*(term1+term2+term3-2./3.*O2*$divu) ;
+  }
+
+
+  $rule pointwise(cubic_prod4<-cmu,tts,tmu,divu,vort,gradv3d(u)) {
+    const real c4 = -10*$cmu*$cmu ;
+    const vect3d o1 = vect3d(0.0,-$vort.z,$vort.y) ;
+    const vect3d o2 = vect3d($vort.z,0.0,-$vort.x) ;
+    const vect3d o3 = vect3d(-$vort.y,$vort.x,0.0) ;
+    const vect3d du = $gradv3d(u).x ;
+    const vect3d dv = $gradv3d(u).y ;
+    const vect3d dw = $gradv3d(u).z ;
+    const vect3d s1 = vect3d(2.*du.x-2./3.*$divu, du.y+dv.x,           du.z+dw.x) ;
+    const vect3d s2 = vect3d(du.y+dv.x,           2.*dv.y-2./3.*$divu, dv.z+dw.y) ;
+    const vect3d s3 = vect3d(du.z+dw.x,           dv.z+dw.y,           2.*dw.z-2./3.*$divu) ;
+    const vect3d p1 = vect3d(dot(s1,du),dot(s1,dv),dot(s1,dw)) ;
+    const vect3d p2 = vect3d(dot(s2,du),dot(s2,dv),dot(s2,dw)) ;
+    const vect3d p3 = vect3d(dot(s3,du),dot(s3,dv),dot(s3,dw)) ;
+    const vect3d q1 = vect3d(dot(o1,du),dot(o1,dv),dot(o1,dw)) ;
+    const vect3d q2 = vect3d(dot(o2,du),dot(o2,dv),dot(o2,dw)) ;
+    const vect3d q3 = vect3d(dot(o3,du),dot(o3,dv),dot(o3,dw)) ;
+    const vect3d bp1 = vect3d(dot(s1,q1)+dot(o1,p1),dot(s1,q2)+dot(o2,p1),dot(s1,q3)+dot(o3,p1)) ;
+    const vect3d bp2 = vect3d(dot(s2,q1)+dot(o1,p2),dot(s2,q2)+dot(o2,p2),dot(s2,q3)+dot(o3,p2)) ;
+    const vect3d bp3 = vect3d(dot(s3,q1)+dot(o1,p3),dot(s3,q2)+dot(o2,p3),dot(s3,q3)+dot(o3,p3)) ;
+    const real term1 = dot(s1,bp1) ;
+    const real term2 = dot(s2,bp2) ;
+    const real term3 = dot(s3,bp3) ;
+    $cubic_prod4 = c4*$tmu*$tts*$tts*(term1+term2+term3) ;
+  }
+
+// constant c5=0, thus no need to compute cubic_prod5
+
+
+  $rule pointwise(cubic_prod6<-cmu,tts,tmu,divu,strainRate) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real c6 = -2.*$cmu*$cmu ;
+    $cubic_prod6 = c6*$tmu*$tts*$tts*2.*S2*S2 ;
+  }
+
+
+  $rule pointwise(cubic_prod7<-cmu,tts,tmu,divu,strainRate,vortMag) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    const real O2 = $vortMag*$vortMag ;
+    const real c7 = 2.*$cmu*$cmu ;
+    $cubic_prod7 = c7*$tmu*$tts*$tts*2.*O2*S2 ;
+  }
+
+  $rule pointwise(rkecubic::total::stress_scalar_rke<-rho,k,divu,tmu,strainRate,alpha,
+                  cubic_prod1,cubic_prod2,cubic_prod3,cubic_prod4,cubic_prod6,cubic_prod7),
+    constraint(tmu,k,RKECUBIC) {
+    const real S2 = $strainRate*$strainRate-2./3.*$divu*$divu ;
+    $stress_scalar_rke = $tmu*S2 - 2./3.*$alpha*$rho*$k*$divu
+                         -$cubic_prod1 - $cubic_prod2 - $cubic_prod3
+                         -$cubic_prod4 - $cubic_prod6 - $cubic_prod7 ;
+  }
+
+
+  $rule default(Kprod_clip),
+    comments("This term is used to limit the turbulent production to not exceed this dissipation by this value.  Set to a large value to disable this feature.  When enabled, this is typically set to a value of 10.") {
+    $Kprod_clip = 1e100 ;
+  }
+
+
+  $rule pointwise(P_k<-stress_scalar_rke,Kprod_clip,rho,e),constraint(RKEModel,rho,e) {
+    $P_k = min($stress_scalar_rke, ($Kprod_clip)*$rho*$e) ;
+  }
+
+  // Add turbulent k production into source terms
+  $rule apply(k_src<-P_k,vol)[Loci::Summation],constraint(P_k,RKEModel) {
+    $k_src += $P_k*$vol ;
+  }
+
+  // turbulent k destruction
+  $rule apply(k_src<-rho,e,vol)[Loci::Summation],constraint(e,RKEModel) {
+    $k_src -= $rho*$e*$vol ;
+  }
+
+  // Add epsilon production into source terms
+  $rule apply(e_src<-rke,stress_scalar_rke,vol,rts)[Loci::Summation],
+  constraint(e,RKEModel) {
+    const real ce1 = $rke.ce1 ;
+    const real tsrc= $stress_scalar_rke ;
+    $e_src += ce1*tsrc*$vol/$rts ;
+  }
+
+  // Add extra epsilon production into source terms
+  $rule apply(e_src<-extra_prod,vol,rts)[Loci::Summation],
+  constraint(e,RKEModel) {
+    $e_src += $extra_prod*$vol/$rts ;
+  }
+
+  //epsilon destruction term
+  $rule apply(e_src<-rho,e,vol,rke,rts)[Loci::Summation],
+  constraint(e,RKEModel) {
+    const real ce2 = $rke.ce2 ;
+    $e_src -= ce2*$rho*$e*$vol/$rts ;
+  }
+
+  // k and epsilon destruction jacobian for baseline ke
+  $rule apply(e_srcJ<-vol,rho,k,e,rt,rke)[Loci::Summation],
+    constraint(k,e,RKEModel) {
+    const real ce2 = $rke.ce2 ;
+    const real ctau = $rke.ctau ;
+    $e_srcJ -= ce2*$rho*$e*$vol/($k*max(1.0,ctau/pow($rt,0.5))) ;
+  }
+
+  $rule apply(k_srcJ<-vol,rho,k,e,rt,rts,rke,alpha,cmu,fmu,divu,strainRate,tmu)[Loci::Summation],
+    constraint(k,e,RKE) {
+    const real rvol = $rho*$vol ;
+    const real S = pow($strainRate*$strainRate - 2./3.*$divu*$divu,0.5) ;
+
+
+    if($cmu*$fmu*$k/$e < (2./3.)/(S+EPSILON)) {
+      // This approximate jacobian for the k equation is formed by
+      // multiplying some destruction terms by mu_t/mu_t, then assume
+      // the denominator mu_t is constant. It depends on the definition of mu_t,
+      // thus the logic switch
+      const real term = rvol*$alpha*$cmu*$fmu/($tmu+EPSILON) ;
+      $k_srcJ += -2.*$rho*$k*term ;
+    } else {
+      const real term = rvol*(2./3.)*$alpha/($tmu*S+EPSILON) ;
+      $k_srcJ += -$rho*$e*term ;
+    }
+  }
+
+  $rule apply(k_srcJ<-vol,rho,k,e,rt,rts,rke,alpha,cmu,fmu,tmu)[Loci::Summation],
+    constraint(k,e,RKECUBIC) {
+    const real rvol = $rho*$vol ;
+
+    const real term = rvol*$alpha*$cmu*$fmu/($tmu+EPSILON) ;
+    $k_srcJ += -2.*$rho*$k*term ;
+  }
+
+  // Compressibility Option inputs
+
+  $rule default(sarkarAlpha1),
+    comments("Sarkar's compressibility correction coefficient (as modified by Wilcox) This is used in conjunction with wilcoxMto.  Setting to zero disables the compressibility correction.  Note, this option is used only when the compressibilityCorrection option is set to 'custom'") {
+    $sarkarAlpha1 = 1.5 ;
+  }
+
+
+  $rule default(wilcoxMto),
+    comments("Wilcox's cutoff turbulent mach number.  Used in conjunction with sarkarAlpha1, note this option is only used when compressibilityCorrection is set to 'custom'") {
+    $wilcoxMto = 0.25 ;
+  }
+
+  $rule default(compressibilityCorrection),
+    comments("The compressibility correction term used to add turbulent dissipation due to compressible effects on turbulence.  The possible options for this are 'sarkar' for Sarkar's original model, 'wilcox' for Wilcox's modified model, and 'none' for no compressibility correction.") {
+      $compressibilityCorrection = "wilcox" ;
+  }
+
+  
+  $rule singleton(wilcox_Mto,wilcox_xi,wilcox_om<-
+                  compressibilityCorrection,sarkarAlpha1,wilcoxMto) {
+    $wilcox_om = 1 ;
+    if($compressibilityCorrection == "wilcox") {
+      $wilcox_xi = 1.5 ;
+      $wilcox_Mto = 0.25 ;
+    } else if($compressibilityCorrection == "sarkar") {
+      $wilcox_xi = 1 ;
+      $wilcox_Mto = 0 ;
+      $wilcox_om = 1 ;
+    } else if($compressibilityCorrection == "sarkar*") {
+      $wilcox_xi = 1 ;
+      $wilcox_Mto = 0 ;
+      $wilcox_om = 0 ;
+    } else if($compressibilityCorrection == "custom") {
+      $wilcox_xi = $sarkarAlpha1 ;
+      $wilcox_Mto = $wilcoxMto ;
+      $wilcox_om = 1 ;
+    } else if($compressibilityCorrection == "none") {
+      $wilcox_xi = 0 ;
+      $wilcox_Mto = 0 ;
+      $wilcox_om = 0 ;
+    } else {
+      $[Once] {
+        cerr << "unknown compressibilityCorrection: "
+             << $compressibilityCorrection << endl ;
+        cerr << "error not recoverable." << endl ;
+      }
+      Loci::Abort() ;
+    }
+  }
+
+  // Compressibility Correction term
+  // may need some tuning
+  $rule apply(k_src<-
+              wilcox_xi,wilcox_Mto,P_k,k,e,
+              rho,soundSpeed,vol)[Loci::Summation],
+	      constraint(k,e,RKEModel) {
+    // Compute Sarkar Compressibility Correction with Wilcox Correction
+
+    // Turbulent mach Number
+    const real Mt = pow(2.0*$k,0.5)/$soundSpeed ;
+    // Turblent mach number cutoff
+//    const real mt0 = $wilcox_Mto ;
+    const real mt0 = 0.2 ;
+    const real Mt2 = pow(max(Mt-mt0,0.0),2) ;
+    // compressibility dissipation constant used to turn
+    // correction on/off
+    const real psi = min($wilcox_xi,1.0) ;
+
+    // destruction of k due to compressibility
+  //modified sarkar with zeman turbulence mach number lag
+    const real a1 = 2.5 ;
+    const real a2 = 2.0 ;
+    $k_src -= psi*Mt2*(a1*$P_k+a2*$rho*$e)*$vol ;
+  //modified sarkar correction
+//    const real a1 = 0.4 ;
+//    const real a2 = 0.3 ;
+//    $k_src -= psi*pow(Mt,2)*(a1*$P_k+a2*$rho*$e)*$vol ;
+  }
+
+}

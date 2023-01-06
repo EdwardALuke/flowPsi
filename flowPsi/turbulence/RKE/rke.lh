@@ -1,0 +1,74 @@
+$type RKEModel Constraint ;
+$type RKE Constraint ;
+$type RKECUBIC Constraint ;
+$type total_production Constraint ;
+
+$type vorticity_production Constraint ;
+$type shear_production Constraint ;
+$type turbulence_model param<std::string> ;
+$type vortex_preserving_production Constraint ;
+
+$type MS_RKEModel Constraint ;
+$type multi_scale param<std::string> ;
+
+$type rke param<rke_param> ;
+$type k              store<flowPsi::real> ;
+$type e              store<flowPsi::real> ;
+$type k_f            store<flowPsi::real> ;
+$type e_f            store<flowPsi::real> ;
+
+$type k_src          store<flowPsi::real> ;
+$type e_src          store<flowPsi::real> ;
+
+// diagonal of jacobian
+$type k_srcJ         store<flowPsi::real> ;
+$type e_srcJ         store<flowPsi::real> ;
+
+$type k_nu_f store<flowPsi::real> ;
+$type e_nu_f store<flowPsi::real> ;
+
+$type P_k store<flowPsi::real> ;
+
+// turbulence time scale
+$type tts store<flowPsi::real> ;
+
+$type cmu store<flowPsi::real> ;
+$type divu store<flowPsi::real> ;
+// turbulent Reynolds number
+$type rt store<flowPsi::real> ;
+// realizable time scale
+$type rts store<flowPsi::real> ;
+// wall damping function
+$type fmu store<flowPsi::real> ;
+// latency parameter
+$type alpha store<flowPsi::real> ;
+// length scale for hybrid RANS/LES
+$type LG store<flowPsi::real> ;
+
+$type tmu_clip param<flowPsi::real> ;
+$type psit store<flowPsi::real> ;
+$type extra_prod store<flowPsi::real> ;
+$type stress_scalar_rke store<flowPsi::real> ;
+$type Cvor param<flowPsi::real> ;
+$type cubic_prod1 store<flowPsi::real> ;
+$type cubic_prod2 store<flowPsi::real> ;
+$type cubic_prod3 store<flowPsi::real> ;
+$type cubic_prod4 store<flowPsi::real> ;
+$type cubic_prod6 store<flowPsi::real> ;
+$type cubic_prod7 store<flowPsi::real> ;
+$type Kprod_clip param<flowPsi::real> ;
+$type sarkarAlpha1 param<flowPsi::real> ;
+$type wilcoxMto param<flowPsi::real> ;
+$type compressibilityCorrection param<string> ;
+$type wilcox_Mto param<flowPsi::real> ;
+$type wilcox_xi param<flowPsi::real> ;
+$type wilcox_om param<flowPsi::real> ;
+$type rke_k_bc store<flowPsi::real> ;
+$type rke_e_bc store<flowPsi::real> ;
+$type k_bc store<flowPsi::real> ;
+$type e_bc store<flowPsi::real> ;
+
+$type k_ic store<flowPsi::real> ;
+$type e_ic store<flowPsi::real> ;
+
+

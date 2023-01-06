@@ -1,0 +1,82 @@
+//#############################################################################
+//#
+//# Copyright 2015-2019, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "inviscidFlux.h"
+#include "readGrid.h"
+#include "bcTools.h"
+
+$include "flowPsi.lh"
+$include "rke.lh"
+
+namespace flowPsi {
+
+  $rule pointwise(rke_k_bc,rke_e_bc<-BC_options),constraint(RKEModel,BC_options) {
+    bool set_k = false ;
+    bool set_e = false ;
+    const Loci::options_list &finput = $BC_options ;
+    vect3d u = vect3d(0,0,0);
+    if(finput.optionExists("u")) {
+      finput.getOptionUnits("u","m/s",u) ;
+    }
+    if(finput.optionExists("M")) {
+      vect3d M = vect3d(0,0,0) ;
+      finput.getOptionUnits("M","",M) ;
+      u = 340.*M ;
+    }
+    // fraction of laminar values for
+    // kinetic energy and viscosity
+    const real beta = 1e-2 ;
+    real v = norm(u) ;
+    double k = (3./2.)*(beta*v)*(beta*v) ;
+    k = max(k,1e-3) ;
+    
+    if(finput.optionExists("k")) {
+      finput.getOption("k",k) ;
+      set_k = true ;
+    }
+ 
+    // Assumed reference viscosity
+    //      const real nu_frac = 1e-3 ;
+    //      const real nu = 1e-5 ;
+    //      double eps = 0.09*k*k/(nu_frac*nu) ;
+    const real len_scale = 1e-3 ;
+    double eps = 0.09*pow(k,1.5)/len_scale ;
+    
+    if(finput.optionExists("e")) {
+      finput.getOption("e",eps) ;
+      set_e = true ;
+    }
+    
+    if((!set_k || !set_e) && !(!set_k && !set_e)) {
+      cerr << "warning: Must set both k and e for rke model!" << endl ;
+      Loci::Abort() ;
+    }
+    
+    $rke_k_bc = k ;
+    $rke_e_bc = eps ;
+  } 
+
+}
+

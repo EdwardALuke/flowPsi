@@ -1,0 +1,80 @@
+//#############################################################################
+//#
+//# Copyright 2015-2019, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "flowPsiIO.h"
+#include "initialConditions.h"
+
+#include <vector>
+using std::vector ;
+
+$include "flowPsi.lh"
+
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+$include "rke.lh"
+
+namespace flowPsi {
+  // Initial conditions for general cells
+
+  $type initialConditionsTurbK param<vector<real> > ;
+  $type initialConditionsTurbE param<vector<real> > ;
+
+  $rule singleton(initialConditionsTurbK,initialConditionsTurbE<-
+		  icRegionInfo) {
+    const int sz = $icRegionInfo.size() ;
+    vector<real> k_list ;
+    vector<real> E_list ;
+    for(int i=0;i<sz;++i) {
+      real k = 1e-3 ;
+      real E = 0.045 ;
+      const Loci::options_list finput = $icRegionInfo[i].state_info ;
+      if(finput.optionExists("k")) {
+	finput.getOption("k",k) ;
+      }
+      if(finput.optionExists("e")) {
+	finput.getOption("e",E) ;
+      }
+      if(finput.optionExists("epsilon")) {
+	finput.getOption("epsilon",E) ;
+      }
+      k_list.push_back(k) ;
+      E_list.push_back(E) ;
+    }
+    $initialConditionsTurbK.swap(k_list) ;
+    $initialConditionsTurbE.swap(E_list) ;
+  }
+
+  $rule pointwise(k_ic<-initialConditionsTurbK,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $k_ic = $initialConditionsTurbK[$icRegionId] ;
+  }
+  $rule pointwise(e_ic<-initialConditionsTurbE,icRegionId),
+    constraint(icRegionInfo,geom_cells) {
+    $e_ic = $initialConditionsTurbE[$icRegionId] ;
+  }
+
+}
+
+
+
