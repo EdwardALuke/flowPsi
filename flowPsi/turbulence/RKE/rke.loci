@@ -35,6 +35,29 @@ $include "rke.lh"
 namespace flowPsi {
   const double EPSILON=1e-20 ;
 
+  class turbulence_check : public BC_Check {
+    string error_message ;
+  public:
+    std::string boundaryConditions() { return "inflow,supersonicInflow,fixedMass,farfield,isentropicInflow" ; }
+    std::string variablesChecked() { return "k,epsilon" ; }
+    bool checkOptions(const options_list& bc_options) {
+      error_message = "" ;
+      return true ;
+    }
+    std::ostream &ErrorMessage(std::ostream &s) {
+      s << error_message << endl ;
+      return s;
+    }
+  } ;
+
+  register_BC<turbulence_check> register_BC_turbulence_check ;
+  
+
+  $type turbulence_model param<std::string> ;
+
+  $rule default(turbulence_model) {
+    $turbulence_model = "RKE" ;
+  }
 
   $rule constraint(RKEModel,RKE,RKECUBIC<-turbulence_model) {
     $RKEModel = EMPTY ;
@@ -216,6 +239,12 @@ namespace flowPsi {
   }
 
   // Definition of turbulent viscosity
+  $type tmu_clip param<real> ;
+
+  $rule default(tmu_clip),
+    comments("Maximum turbulent viscosity limit for two equation turbulence models.") {
+    $tmu_clip = 1e5 ;
+  }
 
   $rule pointwise(rke::tmu<-tmu_clip,rho,k,e,cmu,fmu,alpha,strainRate,divu),
     constraint(k,e,RKE) {
@@ -590,4 +619,10 @@ namespace flowPsi {
 //    $k_src -= psi*pow(Mt,2)*(a1*$P_k+a2*$rho*$e)*$vol ;
   }
 
+  OUTPUT_SCALAR("cell2node(k)",k) ;
+  OUTPUT_SCALAR("cell2node(e)",epsilon) ;
+  OUTPUT_SCALAR("cell2node(tmu)",tmu) ;
+  OUTPUT_BNDRY_SCALAR("k_f",bk,"ci") ;
+  OUTPUT_BNDRY_SCALAR("e_f",bepsilon,"ci") ;
+  OUTPUT_BNDRY_SCALAR("tmu_f",btmu,"ci") ;
 }

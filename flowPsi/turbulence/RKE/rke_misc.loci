@@ -64,13 +64,13 @@ namespace flowPsi {
     const real len_scale = 1e-3 ;
     double eps = 0.09*pow(k,1.5)/len_scale ;
     
-    if(finput.optionExists("e")) {
-      finput.getOption("e",eps) ;
+    if(finput.optionExists("epsilon")) {
+      finput.getOption("epsilon",eps) ;
       set_e = true ;
     }
     
     if((!set_k || !set_e) && !(!set_k && !set_e)) {
-      cerr << "warning: Must set both k and e for rke model!" << endl ;
+      cerr << "warning: Must set both k and epsilon for rke model!" << endl ;
       Loci::Abort() ;
     }
     
