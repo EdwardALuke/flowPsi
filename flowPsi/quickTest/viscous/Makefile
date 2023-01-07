@@ -1,4 +1,4 @@
-TEST_FILES=adiabatic.test Twall.test lid.test periodicSA.test periodicBSL.test periodicSST.test periodicDHRL.test periodicWilcox98.test periodicWilcox08.test wallLawAdiabatic.test wallLawTwall.test
+TEST_FILES=adiabatic.test Twall.test lid.test periodicSA.test periodicBSL.test periodicSST.test periodicDHRL.test periodicWilcox98.test periodicWilcox08.test periodicRKE.test wallLawAdiabatic.test wallLawTwall.test
 
 
 include $(FLOWPSI_BASE)/test.conf
