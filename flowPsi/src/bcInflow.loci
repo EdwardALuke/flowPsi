@@ -383,11 +383,11 @@ namespace flowPsi {
     const real uit = dot($ci->$u,$area.n) - $us_n ;
     const real a0 = sqrt($gamma*$Rtilde*$temperatureRef)  ;
     if(uit > 0) { // outflow just set dirichlet
-      $gagePressure_f = $ci->$gagePressure ;
-      $temperature_f = $ci->$temperature ;
-      $u_f = $ci->$u ;
+      $gagePressure_f = $gagePressureRef ;
+      $temperature_f = $temperatureRef ;
+      $u_f = $uRef ;
     } else {
-      if(uit < a0) { // Supersonic inflow
+      if(-uit > a0) { // Supersonic inflow
 	$gagePressure_f = $gagePressureRef ;
 	$temperature_f = $temperatureRef ;
 	$u_f = $uRef ;
