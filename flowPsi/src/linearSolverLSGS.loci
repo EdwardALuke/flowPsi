@@ -88,7 +88,7 @@ namespace LGSI {
 
   $rule apply(LSGSmatrixPeriodic)[Loci::NullOp],constraint(geom_cells), prelude { } ;
   
-  $rule apply(LSGSmatrixPeriodic<-cr->fileNumber(geom_cells),pmap->cl->fileNumber(geom_cells))[Loci::NullOp], option(disable_threading), prelude {
+  $rule apply(LSGSmatrixPeriodic<-cr->fileNumber(cellcenter),pmap->cl->fileNumber(cellcenter))[Loci::NullOp], option(disable_threading), prelude {
     Loci::entitySet pset = Loci::entitySet(seq) ;
     FORALL(pset,ii) {
       int i1 = $cr[ii] ;
