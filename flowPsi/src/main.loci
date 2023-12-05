@@ -24,6 +24,11 @@
 #include <Tools/parse.h>
 #include <Tools/stream.h>
 
+#include <FVMAdapt/defines.h>
+#include <FVMAdapt/gridInterface.h>
+#include "FVMAdapt/globals.h"
+#include "FVMAdapt/dataxferDB.h"
+
 #include "flowTypes.h"
 #include "readGrid.h"
 
@@ -32,15 +37,10 @@
 #include <fcntl.h>
 
 #include <vector>
-#ifdef LOCI_V5
-#include <GLoci.h>
-#endif
+#include <set>
 
 using std::vector ;
-
-
-using flowPsi::read_grid ;
-
+using std::set ;
 
 using Loci::storeRepP ;
 using Loci::variableSet ;
@@ -169,8 +169,113 @@ void describe_inputs(rule_db &rdb) {
 
 }
 
-//#include "FVMAdapt/globals.h"
-//#include "FVMAdapt/dataxferDB.h"
+struct applicationInfo {
+  string name, caseName, nameSpace ;
+} ;
+
+void loadFlowPsiModules(fact_db &facts, rule_db &rdb,
+			const vector<int> &loadID,
+			const vector<int> &loadType,
+			const vector<string> &modulesToLoad,
+			const vector<applicationInfo> &applications) {
+  for(size_t l=0;l<loadID.size();++l) {
+    int i = loadID[l] ;
+    if(loadType[l] == 0) {
+      Loci::exprP ep = Loci::expression::create(modulesToLoad[i]) ;
+      string mod_name ;
+      string mod_namespace ;
+      string load_file ;
+      std::set<std::string> str_set ;
+      if(ep->op == Loci::OP_FUNC) {
+	mod_name = ep->name ;
+	if(ep->expr_list.front()->op == Loci::OP_NAME)
+	  load_file = ep->expr_list.front()->name ;
+	else
+	  cerr << "unable to interpret argument in " << modulesToLoad[i]
+	       << endl ;
+      } else if(ep->op == Loci::OP_NAME) {
+	mod_name = ep->name ;
+      } else if(ep->op == Loci::OP_SCOPE) {
+	Loci::exprList::const_iterator li ;
+	bool first_time = true ;
+	Loci::exprP last_ep = 0 ;
+	for(li=ep->expr_list.begin();li!=ep->expr_list.end();++li) {
+	  if(!first_time) {
+	    if(last_ep->op == Loci::OP_NAME)
+	      if(mod_namespace == "")
+		mod_namespace = last_ep->name ;
+	      else
+		mod_namespace += string("_") + last_ep->name ;
+	    else
+	      cerr << "-load_module namespace not recognized" << endl ;
+	  }
+	  last_ep = *li ;
+	  first_time = false ;
+	}
+	ep = last_ep ;
+	if(ep->op == Loci::OP_FUNC) {
+	  mod_name = ep->name ;
+	  if(ep->expr_list.front()->op == Loci::OP_NAME)
+	    load_file = ep->expr_list.front()->name ;
+	  else
+	    cerr << "unable to interpret argument in " << modulesToLoad[i]
+		 << endl ;
+	} else if(ep->op == Loci::OP_NAME) {
+	  mod_name = ep->name ;
+	} else {
+	  cerr << "unable to interpret " << modulesToLoad[i] << endl ;
+	}
+      } else {
+	cerr << "unable to interpret " << modulesToLoad[i] << endl ;
+      }        
+      mod_name += "FPSI" ; // to keep this application modules
+                          // names from overlapping with others
+      Loci::load_module(mod_name,mod_namespace,
+			load_file.c_str(),facts,rdb,str_set) ;
+    } else if(loadType[l] == 1) {
+      string ns = applications[i].nameSpace ; //applicationsNamespace[i] ;
+      string mod = applications[i].name ; //applicationsToLoad[i] ;
+      string casename = applications[i].caseName ; //applicationsCaseName[i] ;
+      std::set<std::string> str_set ;
+      if(Loci::MPI_rank == 0) {
+	cout << "loading application: " << mod << '(' << casename
+	     << ',' << ns << ')' << endl ;
+      }
+      mod += "FPSI" ; // to keep this application modules
+                      // names from overlapping with others
+      Loci::load_module(mod.c_str(),ns.c_str(),casename.c_str(),
+			facts,rdb,str_set) ;
+    } else {
+      cerr << "INTERNAL ERROR: Unknown loadType!" << endl ;
+    }
+  }
+}
+
+string extractCaseName(string input) {
+  size_t dotloc = input.rfind(".") ;
+  size_t slaloc = input.rfind("/") ;
+  if(dotloc == string::npos) 
+    dotloc = input.size() ;
+  if(slaloc == string::npos)
+    slaloc = 0 ;
+  else
+    slaloc++ ;
+  
+  if(dotloc < slaloc)
+    dotloc = input.size() ;
+
+  string result ;
+  for(size_t i=slaloc;i<dotloc;++i)
+    result += input[i] ;
+  if(result == "") 
+    result = "not" ;
+  if(result == "..") 
+    result = "dotdot" ;
+  if(result ==".")
+    result = "dot" ;
+
+  return result ;
+}
 
 
 int main(int ac, char *av[]) {
@@ -180,16 +285,34 @@ int main(int ac, char *av[]) {
 #ifdef FLOWPSI_RPATH
   { string rpath = FLOWPSI_RPATH; Loci::AddModuleSearchDir(rpath) ; }
 #endif
+  // Information for loading applications into flowPsi under namespaces
+  vector<applicationInfo> applications ;
+  set<string> applicationNamespaceSet ;
+  vector<string> modulesToLoad ;
+
+  vector<int> loadID ;
+  vector<int> loadType ;
+
   // default query 
   string query = "solution" ;
 
   bool input_desc = false ;
   bool dryrun = false ;
-  vector<string> modulesToLoad ;
   
   vector<pair<string,string> > command_vars ;
   
-   string casename ;
+  string casename ;
+
+  // Mesh adaptation stuff
+  int level = 0 ;
+  Globals::tolerance = 2e-14;
+  Globals::fold = 0.25;
+  Globals::levels = 1 ;
+  int adaptmode = 2;
+  
+  
+
+  bool enable_fpe_exceptions = false ;
 
   while(ac>=2 && av[1][0] == '-') {
     // If user specifies an alternate query, extract it from the
@@ -198,6 +321,10 @@ int main(int ac, char *av[]) {
       query = av[2] ;
       ac -= 2 ;
       av += 2 ;
+    } else if(ac >= 2 && !strcmp(av[1],"-fpe")) {
+      enable_fpe_exceptions = true ;
+      ac-- ;
+      av++ ;
     } else if(ac >= 2 && !strcmp(av[1],"-v")) {
       cout << "flowPsi version:  " << flowPsi::version() << " Compiled On "
            << flowPsi::date() << endl ;
@@ -208,12 +335,15 @@ int main(int ac, char *av[]) {
       }
       ac-- ;
       av++ ;
-    } else if(ac >= 2 && !strcmp(av[1],"-inputs")) {
+    } else if(ac >= 2 &&
+	      (!strcmp(av[1],"-inputs") || !strcmp(av[1],"--inputs"))) {
       input_desc = true ;
       ac-- ;
       av++ ;
     } else if(ac >= 3 && !strcmp(av[1],"-load_module")) {
-      modulesToLoad.push_back(string(av[2])) ;
+      modulesToLoad.push_back(extractCaseName(string(av[2]))) ;
+      loadID.push_back(modulesToLoad.size()-1) ;
+      loadType.push_back(0) ;
       ac -= 2 ;
       av += 2 ;
     } else if(ac >= 2 && !strcmp(av[1],"-dryrun")) {
@@ -254,7 +384,8 @@ int main(int ac, char *av[]) {
     ::unlink("stop") ;
   
   // set up floating point exception handlers
-  set_fpe_abort() ;
+  if(enable_fpe_exceptions)
+    set_fpe_abort() ;
   
 
   if(ac <= 1 && !input_desc) {
@@ -282,19 +413,8 @@ int main(int ac, char *av[]) {
     if(av1sz>0 && (av[1][av1sz-1] == '.'))
       av[1][av1sz-1] = '\0' ;
   }
-  
-  rule_db rdb ;
-  rdb.add_rules(global_rule_list) ;
 
-  // read grid, connectivity information, and user supplied information into
-  // the fact database
-  fact_db facts ;
-
-  Loci::load_module("fvm",rdb) ;
-  Loci::load_module("fvmoverset",rdb) ;
-
-  //  rule_db refmesh_rdb ;
-  //  Loci::load_module("fvmadapt", refmesh_rdb);
+  Loci::CPTR<Loci::refinedGridData> gridDataP = 0 ;
   
   // Now look in vars file for directives to load in modules, or solid_heat
   if(ac > 1) {
@@ -329,10 +449,65 @@ int main(int ac, char *av[]) {
                  << "' in file \"" << varsfile << '"' << endl ;
             Loci::Abort() ;
           }
+	  vector<string> arglist ;
+	  Loci::parse::kill_white_space(ifile) ;
+	  if(ifile.peek() == '(') {
+	    ifile.get() ;
+	    Loci::parse::kill_white_space(ifile) ;
+	    while(Loci::parse::is_name(ifile)) {
+	      string aval ;
+	      aval = Loci::parse::get_name(ifile) ;
+	      arglist.push_back(aval) ;
+	      Loci::parse::kill_white_space(ifile) ;
+	      if(ifile.peek() == ',') {
+		ifile.get() ;
+		Loci::parse::kill_white_space(ifile) ;
+	      }
+	    }
+	    if(ifile.peek() != ')') {
+	      cerr << "expecting to find ')' while parsing '" << argument 
+		   << "' in file \"" << varsfile << '"' << endl ;
+	    } else 
+	      ifile.get() ;
+	  }
           if(name == "loadModule") {
             modulesToLoad.push_back(argument) ;
+	    loadID.push_back(modulesToLoad.size()-1) ;
+	    loadType.push_back(0) ;
+	    if(!arglist.empty()) 
+	      cerr << "Warning, loadModule ignoring arguments in parenthesis!"
+		   << endl ;
+	  } else if(name == "loadApplication") {
+	    string appcasename = "NOCASENAME" ;
+	    if(arglist.empty()) {
+	      cerr << "ERROR, loadApplication needs the casename to be provided in parenthesis!" << endl ;
+	    } else
+	      appcasename = arglist[0] ;
+	    string anamespace = argument ;
+	    if(arglist.size() == 2) {
+	      anamespace = arglist[1] ;
+	    } else {
+	      int cnt = 1 ;
+	      while(applicationNamespaceSet.find(anamespace) != 
+		    applicationNamespaceSet.end()) {
+		char buf[512] ;
+		snprintf(buf,512,"%s%d",name.c_str(),cnt) ;
+		anamespace = string(buf) ;
+		cnt++ ;
+	      }
+	    }
+	    applications.push_back(applicationInfo()) ;
+	    applications.back().name = argument ;
+	    applications.back().caseName = appcasename ;
+	    applications.back().nameSpace = anamespace ;
+	    applicationNamespaceSet.insert(anamespace) ;
+	    loadID.push_back(applications.size()-1) ;
+	    loadType.push_back(1) ;
           } else if(name == "query") {
             query = argument ;
+	    if(!arglist.empty()) 
+	      cerr << "Warning, query ignoring arguments in parenthesis!"
+		   << endl ;
           } else {
             cerr << "unable to interpret preamble directive '"
                  << name << "' found in file \"" << varsfile << '"' << endl ;
@@ -354,113 +529,22 @@ int main(int ac, char *av[]) {
       Loci::Abort() ;
     }
   }
-    
-  if(modulesToLoad.size() > 0) {
-    for(size_t i=0;i<modulesToLoad.size();++i) {
-      Loci::exprP ep = Loci::expression::create(modulesToLoad[i]) ;
-      string mod_name ;
-      string mod_namespace ;
-      string load_file ;
-      std::set<std::string> str_set ;
-      if(ep->op == Loci::OP_FUNC) {
-        mod_name = ep->name ;
-        //        mod_namespace = ep->name ;
-        if(ep->expr_list.front()->op == Loci::OP_NAME)
-          load_file = ep->expr_list.front()->name ;
-        else
-          cerr << "unable to interpret argument in " << modulesToLoad[i]
-               << endl ;
-      } else if(ep->op == Loci::OP_NAME) {
-        mod_name = ep->name ;
-      } else if(ep->op == Loci::OP_SCOPE) {
-        Loci::exprList::const_iterator li ;
-        bool first_time = true ;
-        Loci::exprP last_ep = 0 ;
-        for(li=ep->expr_list.begin();li!=ep->expr_list.end();++li) {
-          if(!first_time) {
-            if(last_ep->op == Loci::OP_NAME)
-              if(mod_namespace == "")
-                mod_namespace = last_ep->name ;
-              else
-                mod_namespace += string("_") + last_ep->name ;
-            else
-              cerr << "-load_module namespace not recognized" << endl ;
-          }
-          last_ep = *li ;
-          first_time = false ;
-        }
-        ep = last_ep ;
-        if(ep->op == Loci::OP_FUNC) {
-          mod_name = ep->name ;
-          if(ep->expr_list.front()->op == Loci::OP_NAME)
-            load_file = ep->expr_list.front()->name ;
-          else
-            cerr << "unable to interpret argument in " << modulesToLoad[i]
-                 << endl ;
-        } else if(ep->op == Loci::OP_NAME) {
-          mod_name = ep->name ;
-        } else {
-          cerr << "unable to interpret " << modulesToLoad[i] << endl ;
-        }
-      } else {
-        cerr << "unable to interpret " << modulesToLoad[i] << endl ;
-      }
-      mod_name += "FPSI" ; // to keep this application modules
-                          // names from overlapping with others
-      Loci::load_module(mod_name,mod_namespace,
-                        load_file.c_str(),facts,rdb,str_set) ;
-    }
-  }
 
-  if(input_desc) {
-    describe_inputs(rdb) ;
-    Loci::Finalize() ;
-    exit(0) ;
-  }
-
-  read_grid(facts,rdb,av[1],dryrun) ;
-
-  if(command_vars.size() > 0) {
-    for(size_t i=0;i<command_vars.size();++i) {
-      string vname = command_vars[i].first ;
-      Loci::variable var(vname) ;
-      Loci::storeRepP vp = facts.get_variable(var) ;
-      if(vp == 0) {
-        vp = facts.get_variable_type(var) ;
-        if(vp != 0) {
-          facts.create_fact(var,vp) ;
-        }
-        vp = facts.get_variable(var) ;
-      }
-      if(vp == 0) {
-        cerr << "unable to set variable '" << vname << "'" << endl ;
-        Loci::Abort() ;
-      }
-      ostringstream ss1 ;
-      ss1 << command_vars[i].second << endl ;
-      istringstream ssi(ss1.str()) ;
-      vp->Input(ssi) ;
-    }
-      
-  }
-    
-  if(dryrun) {
-    Loci::Finalize() ;
-    exit(0) ;
-  }
-  if(flowPsi::gridPostList::postlist != 0) {
-    flowPsi::gridPostList::gridPostListEnt *p = flowPsi::gridPostList::postlist ;
-    while(p!=0) {
-      p->entry->processData(facts,rdb) ;
-      p = p->next ;
-    }
-  }
   
+  rule_db flow_rdb ;
+  flow_rdb.add_rules(global_rule_list) ;
+
+  Loci::load_module("fvm",flow_rdb) ;
+  Loci::load_module("fvmoverset",flow_rdb) ;
+
+  bool restart_flowpsi = false ;
+    
   // If an initial condition file is given on the command line, add this
   // information to the fact_dabase
+  string restartDir ;
   if(ac >= 3) {
-
-    string restartDir = string(av[2]) ;
+    restart_flowpsi = true ;
+    restartDir = string(av[2]) ;
     string firstTest = string("restart/") + restartDir ;
     if(stat(firstTest.c_str(),&statbuf)) {
       if(stat(restartDir.c_str(),&statbuf)) {
@@ -475,53 +559,333 @@ int main(int ac, char *av[]) {
       exit(-1) ;
     }
     restartDir += "/" ;
-#ifdef LOCI_V5
-    gParam<string> icfile ;
-    *icfile = restartDir ;
-    facts.create_gfact("icfile",icfile) ;
-#else
-    param<string> icfile ;
+  }
+  bool adaptOnRestart = false ;
+  string restartplanfile ;
 
-    *icfile = restartDir ;
-    facts.create_fact("icfile",icfile) ;
-#endif
+  if(restart_flowpsi) {
+    // Check to see if we are restarting an online adapted
+    // case
+    // If adapted restart, then read in plan and refine grid
+    // Check to see if a restart plan exists
+    restartplanfile = restartDir + string("planRestart_")+casename ;
+    int has_plan = 0 ;
+    if(Loci::MPI_rank == 0) {
+      if(!stat(restartplanfile.c_str(),&statbuf))
+	has_plan=1 ;
+    }
+    int has_plang= 0 ;
+    MPI_Allreduce(&has_plan,&has_plang,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+    if(has_plang != 0)
+      adaptOnRestart = true ;
   }
 
-  // Dump out parameters from fact database
-  if(Loci::MPI_rank == 0) {
-    char buf[512] ;
-    bzero(buf,512) ;
-    snprintf(buf,511,"output/run_info.%s",av[1]) ;
-    ofstream db_file(buf) ;
-    if(!db_file.fail()) {
-      using namespace Loci ;
-      db_file << "case = " << av[1] << endl ;
-      db_file << "Query = \"" << query << '"' << endl ;
-      db_file << "facts = {" << endl ;
-      variableSet ext_facts = facts.get_extensional_facts() ;
-      for(variableSet::const_iterator vi=ext_facts.begin();
-          vi!=ext_facts.end();++vi) {
-        storeRepP sp = facts.get_variable(*vi) ;
-        if(sp != 0) {
-          if(sp->RepType() == PARAMETER) {
-            db_file << *vi << ": " ;
-            sp->Print(db_file) ;
+  rule_db refmesh_rdb ;
+  Loci::load_module("fvmadapt", refmesh_rdb);
+  
+
+  bool first_run = true ;
+  do {
+    { // Run flowpsi, initialize rule and fact databases
+      rule_db rdb ;
+      rdb = flow_rdb ;
+
+
+      // read grid, connectivity information, and user supplied information into
+      // the fact database
+      fact_db facts ;
+
+      loadFlowPsiModules(facts,rdb,
+			 loadID,loadType,modulesToLoad, applications) ;
+
+      if(input_desc) {
+        describe_inputs(rdb) ;
+        Loci::Finalize() ;
+        exit(0) ;
+      }
+
+      // read in vars file
+      flowPsi::read_vars(facts,rdb,casename.c_str()) ;
+
+      // if dryrun then exit after reading in vars file and checking
+      // bcs
+      if(dryrun) {
+	Loci::Finalize() ;
+	exit(0) ;
+      }
+
+      // Read Grid for flowPsi run
+      if(gridDataP == 0) {
+	// since there is no gridData structure created then this is the
+	// first time through the adapt loop.
+
+	if(!adaptOnRestart) { // no plan file in restart so basic restart
+	  flowPsi::read_vog(facts,casename.c_str()) ;
+	} else {
+	  // When restarting adapted case, we need to balance the
+	  // mesh refinement phase based on how many child cells are
+	  // generated.  The restart files should contain this load
+	  // balancing file.
+	  string weightfile = restartDir + string("weightRestart_")+casename ;
+
+	  // Generate the adapted mesh from the refinement plan and store it
+	  // in gridDataP
+	  Loci::initializeGridFromPlan(gridDataP, level,
+				       refmesh_rdb, casename,  weightfile,
+				       restartplanfile) ;
+	  // set cellptn from file here
+	}
+      } else {
+	//  This means we are in an online adaptation phase
+	// so the code needs to get the restart information form
+	// the data transfer db
+	param<int> refineRestart ;
+	*refineRestart = 1 ;
+	facts.create_fact("refineRestart",refineRestart) ;
+	// get cellptn from transfer DB and remap based on c2p
+      }
+
+      // If there is a gridDataP then we need to extract the grid file from it
+      // and put the results in the flowPsi fact database
+      if(gridDataP != 0)  {
+	// setup grid from adapted mesh saved in gridDataP
+	Loci::storeRepP cellwts = 0 ;
+	if(adaptOnRestart) {
+	  // if restarting then the flowPsi load balancing weights will come
+	  // from the restart directory
+	  
+	  string LBfile = restartDir + string("SimLBWeights_")+casename ;
+	  int has_LB = 0 ;
+	  if(Loci::MPI_rank == 0) {
+	    if(!stat(LBfile.c_str(),&statbuf))
+	      has_LB=1 ;
+	  }
+	  int has_LBg= 0 ;
+	  MPI_Allreduce(&has_LB,&has_LBg,1,MPI_INT,MPI_SUM,MPI_COMM_WORLD) ;
+	  if(has_LBg > 0) {
+	    if(Loci::MPI_rank == 0) 
+	      cout << "reading "<< LBfile << endl ;
+	    hid_t file_id = Loci::hdf5OpenFile(LBfile.c_str(),
+					       H5F_ACC_RDONLY, H5P_DEFAULT) ;
+	    if(file_id < 0) {
+	      std::cerr << "...file reading failed..., Aborting" << std::endl ;
+	      Loci::Abort() ;
+	    }
+
+	    store<int> cell_weights ;
+	    readContainerRAW(file_id,"cellweights", cell_weights.Rep(),
+			     MPI_COMM_WORLD) ;
+
+
+	    Loci::hdf5CloseFile(file_id) ;
+	    cellwts = cell_weights.Rep() ;
+	  }
+
+	} else {
+	  // online adapt step, we need to get the weights from the parent
+	  // mesh and map it to the next adaptation level using te cell 2 parent
+	  // map
+	  Loci::storeRepP wptr =
+	    Loci::DataXFER_DB.getItem("cellPartitionWeights") ;
+	  Loci::storeRepP c2p_ptr = Loci::DataXFER_DB.getItem("c2p") ;
+	  cellwts = Loci::mapCellPartitionWeights(wptr,c2p_ptr,
+				 gridDataP->local_cells[MPI_rank]) ;
+					    
+	}
+        flowPsi::input_grid(facts, rdb,casename.c_str(),
+                         level,
+                         gridDataP->local_nodes,
+                         gridDataP->local_faces,
+                         gridDataP->local_cells,
+                         gridDataP->new_pos,
+                         gridDataP->new_cl,
+                         gridDataP->new_cr,
+                         gridDataP->new_face2node,
+                         gridDataP->boundary_ids,
+                         gridDataP->volTags,cellwts);
+	gridDataP = 0 ; // gridDataP no longer needed so release it.
+      }
+
+      // Set variables from command line
+      if(command_vars.size() > 0) {
+        for(size_t i=0;i<command_vars.size();++i) {
+          string vname = command_vars[i].first ;
+          Loci::variable var(vname) ;
+          Loci::storeRepP vp = facts.get_variable(var) ;
+          if(vp == 0) {
+            vp = facts.get_variable_type(var) ;
+            if(vp != 0) {
+              facts.create_fact(var,vp) ;
+            }
+            vp = facts.get_variable(var) ;
           }
+          if(vp == 0) {
+            cerr << "unable to set variable '" << vname << "'" << endl ;
+            Loci::Abort() ;
+          }
+          ostringstream ss1 ;
+          ss1 << command_vars[i].second << endl ;
+          istringstream ssi(ss1.str()) ;
+          vp->Input(ssi) ;
+        }
+        
+      }
+
+      // Extract parameters controlling adaptation code
+      param<string> modeParam ;
+      modeParam = facts.get_variable("adaptMode") ;
+      if(*modeParam == "anisotropic") {
+        adaptmode = 0 ;
+      } else if(*modeParam == "2D") {
+        adaptmode = 1 ;
+      } else if(*modeParam == "isotropic") {
+        adaptmode = 2 ;
+      }
+      param<double> adaptMinEdgeLength ;
+      adaptMinEdgeLength = facts.get_variable("adaptMinEdgeLength") ;
+      Globals::tolerance = (*adaptMinEdgeLength)/10.0 ;
+
+      param<double> adaptFaceFold ;
+      adaptFaceFold = facts.get_variable("adaptFaceFold") ;
+      Globals::fold = *adaptFaceFold ;
+
+      // If an initial condition file is given on the command line, add this
+      // information to the fact_dabase
+      if(restart_flowpsi) {
+	param<std::string> icfile ;
+        *icfile = restartDir ;
+        facts.create_fact("icfile",icfile) ;
+	restart_flowpsi = false ;
+      }
+
+      // Run fact_db processing of any loaded modules
+      if(flowPsi::gridPostList::postlist != 0) {
+        flowPsi::gridPostList::gridPostListEnt *p = flowPsi::gridPostList::postlist ;
+        while(p!=0) {
+          p->entry->processData(facts,rdb) ;
+          p = p->next ;
         }
       }
-      db_file << "}" << endl ;
+  
+#ifdef ACCESSMAP_H
+      constraint geom_cells ;
+      geom_cells.setRep(facts.get_fact("geom_cells")) ;
+      accessMap cellAccess ;
+      cellAccess.allocate(*geom_cells) ;
+      facts.create_fact("cellAccess",cellAccess.Rep()) ;
+#endif
+
+      // Dump out parameters from fact database
+      if(Loci::MPI_rank == 0 && level == 0) {
+        char buf[512] ;
+        bzero(buf,512) ;
+        snprintf(buf,511,"output/run_info.%s",casename.c_str()) ;
+        ofstream db_file(buf) ;
+        if(!db_file.fail()) {
+          using namespace Loci ;
+          db_file << "case = " << casename << endl ;
+          db_file << "Query = \"" << query << '"' << endl ;
+          db_file << "facts = {" << endl ;
+          variableSet ext_facts = facts.get_extensional_facts() ;
+          for(variableSet::const_iterator vi=ext_facts.begin();
+              vi!=ext_facts.end();++vi) {
+            storeRepP sp = facts.get_variable(*vi) ;
+            if(sp != 0) {
+              if(sp->RepType() == PARAMETER) {
+                db_file << *vi << ": " ;
+                sp->Print(db_file) ;
+              }
+            }
+          }
+          db_file << "}" << endl ;
+        }
+      }
+
+      // create parametric varaibles for the adapt sensors that
+      // will be used for the online refinement.
+      Loci:: storeRepP asensor = (facts.get_variable("adaptSensor")) ;
+      if(asensor != 0 ) {
+	param<flowPsi::list_input> adaptSensor ;
+	adaptSensor = asensor ;
+	Loci::expression::exprP ep = Loci::expression::create((*adaptSensor).namelist) ;
+	if(ep->op == Loci::OP_NAME) {
+	  string varname = ep->name ;
+	  param<bool> adaptSwitch ;
+	  *adaptSwitch = true ;
+	  string switchVar = string("adaptSensor(")+ varname +string(")") ;
+	  facts.create_fact(switchVar,adaptSwitch) ;
+	} else if(ep->op == Loci::OP_COMMA) {
+	  Loci::expression::exprList::const_iterator li ;
+	  for(li=ep->expr_list.begin();li!=ep->expr_list.end();++li) {
+	    if((*li)->op == Loci::OP_NAME) {
+	      string varname = (*li)->name ;
+	      param<bool> adaptSwitch ;
+	      *adaptSwitch = true ;
+	      string switchVar = string("adaptSensor(")+ varname +string(")") ;
+	      facts.create_fact(switchVar,adaptSwitch) ;
+	    } else {
+	      cerr << "unable to interpret expression in 'adaptSensor'"
+		   << endl ;
+	      (*li)->Print(cerr) ;
+	      Loci::Abort() ;
+	    }
+	  }
+	} else {
+	  cerr << "unable to interpret expression in 'adaptSensor'"
+	       << endl ;
+	  ep->Print(cerr) ;
+	  Loci::Abort() ;
+	}
+      }
+
+      param<int> refineLevel ;
+      *refineLevel = level ;
+      facts.create_fact("refineLevel",refineLevel) ;
+      param<bool> firstRun ;
+      *firstRun = first_run ;
+      facts.create_fact("firstRun",firstRun) ;
+      //----------------------------------------------------------------------
+      // This is where the flowPsi code is executed
+      //
+      // Create execution schedule that derives the variable named 'solution'
+      // from the database of facts using the rule database rdb.
+      if(!Loci::makeQuery(rdb,facts,query)) {
+        cerr << "query failed!" << endl ;
+        Loci::Abort() ;
+      }
+      first_run = false ;
     }
-  }
 
-  // Create execution schedule that derives the variable named 'solution'
-  // from the database of facts using the rule database rdb.
+    // flowPsi schedule has completed, now we are checking to see if  we need to
+    // run an mesh adaptation cycle or otherwise exit
+    // check to see if we need to run an adaption cycle
+    Loci::storeRepP ac = Loci::DataXFER_DB.getItem("adaptCycle") ;
+    if(ac == 0)
+      break ; 
+    param<bool> adaptCycle ;
+    adaptCycle = ac ;
+    Loci::DataXFER_DB.deleteItem("adaptCycle") ;
 
-  if(!Loci::makeQuery(rdb,facts,query)) {
-    cerr << "query failed!" << endl ;
-    Loci::Abort() ;
-  }
+    // If there is no adaption cycle, then we just break out of the loop
+    // so that we can exit gracefully
+    if(!*adaptCycle)
+      break ;
 
-      
+    // get the refinement tags that mark regions for refinement
+    Loci::storeRepP tags = Loci::DataXFER_DB.getItem("refineTag") ;
+    if(tags == 0) {
+      break ;
+    }
+
+    // Do online adaptive mesh refinement, store resulting mesh in
+    // gridDataP
+    Loci::onlineRefineMesh(gridDataP, refmesh_rdb, adaptmode, level, tags,
+			   casename) ;
+
+    //prepare for next step
+    level++;
+  } while (true) ; // while adapting loop back to beginning
+
   Loci::Finalize() ;
 }
 

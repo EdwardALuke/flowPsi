@@ -26,6 +26,10 @@
 #include "readGrid.h"
 #include "flowPsiIO.h"
 
+#include "FVMAdapt/globals.h"
+#include "FVMAdapt/dataxferDB.h"
+#include "FVMAdapt/defines.h"
+
 #include <map>
 
 using std::map ;
@@ -60,9 +64,7 @@ namespace Loci {
 
 namespace flowPsi {
 
-
-  void read_grid(fact_db &facts, const rule_db &rdb, const char *filename,
-                 bool dryrun) {
+  void read_vars(fact_db &facts, const rule_db &rdb, const char *filename) {
     
     // Add grid_file_info and boundary condition info to fact database so
     // that they can be specified in the vars file
@@ -219,29 +221,9 @@ namespace flowPsi {
         Loci::Abort() ;
     }
     
-    string extension = ".vog" ;
-    
-    if(dryrun)
-      return ;
+  }
 
-    // Read in the grid file
-    string file = string(filename) + extension ;
-    if(Loci::MPI_rank == 0)
-      cout << "Grid File Input, reading file = " << file << endl ;
-
-    if(!Loci::setupFVMGrid(facts,file)) {
-      // Failure to read file
-      if(Loci::MPI_rank == 0) {
-        cerr << "Reading grid file '" << file
-             <<"' failed in grid reader!" << endl ;
-      }	     
-      Loci::Abort() ;
-    }
-    
-    if(Loci::MPI_rank == 0)
-      cout << "Reading Grid File Complete" << endl ;
-
-
+  void postprocess_grid(fact_db &facts) {
     Loci::setupBoundaryConditions(facts) ;
 
     Loci::createLowerUpper(facts) ;
@@ -303,9 +285,76 @@ namespace flowPsi {
     constraint FLOWPSI ;
     FLOWPSI = ~EMPTY ;
     facts.create_fact("FLOWPSI",FLOWPSI) ;  
+  }
+  void read_vog(fact_db &facts, const char *filename) {
+    string extension = ".vog" ;
+    
+    // Read in the grid file
+    string file = string(filename) + extension ;
+    if(Loci::MPI_rank == 0)
+      cout << "Grid File Input, reading file = " << file << endl ;
+
+    if(!Loci::setupFVMGrid(facts,file)) {
+      // Failure to read file
+      if(Loci::MPI_rank == 0) {
+        cerr << "Reading grid file '" << file
+             <<"' failed in grid reader!" << endl ;
+      }	     
+      Loci::Abort() ;
+    }
+    
+    if(Loci::MPI_rank == 0)
+      cout << "Reading Grid File Complete" << endl ;
+
+
+    postprocess_grid(facts) ;
 #ifdef USE_AUTODIFF
     setupPosAutoDiff(facts) ;
 #endif
   }
+
+  void input_grid(fact_db &facts, const rule_db &rdb, const char *filename,
+                  int adapt_step,
+                  vector<entitySet>& local_nodes,
+                  vector<entitySet>& local_faces,
+                  vector<entitySet>& local_cells,
+                  store<vector3d<double> >& t_pos,
+                  Map& tmp_cl,
+                  Map& tmp_cr,
+                  multiMap& tmp_face2node,
+                  vector<pair<int,string> >& boundary_ids,
+                  vector<pair<string,entitySet> >& volTags,
+		  Loci::storeRepP cellptn) {
+    
+    
+    if(!Loci::setupFVMGridFromContainer(facts,
+                                        local_nodes,
+                                        local_faces,
+                                        local_cells,
+                                        t_pos,
+                                        tmp_cl,
+                                        tmp_cr,
+                                        tmp_face2node,
+                                        boundary_ids,
+                                        volTags,
+					cellptn)) {
+      // Failure to read file
+      if(Loci::MPI_rank == 0) {
+        cerr << "Reading grid file failed in grid reader!" << endl ;
+        cerr << "aborting!" << endl ;
+      }
+      Loci::Abort() ;
+    }
+  
+    if(Loci::MPI_rank == 0)
+      cout << "Reading Grid File Complete" << endl ;
+
+    postprocess_grid(facts) ;
+#ifdef USE_AUTODIFF
+    setupPosAutoDiff(facts) ;
+#endif
+  }
+
+  
 }
 

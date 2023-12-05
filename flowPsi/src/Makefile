@@ -14,7 +14,7 @@ INCLUDES = -I../include
 TARGET = flowpsi
 
 OBJS =  \
-	main.o gridTools.o gridSetup.o gridReader.o gridDynamic.o \
+	main.o gridTools.o gridSetup.o gridReader.o gridDynamic.o gridAdapt.o\
 	gridAxisymmetry.o gridCoriolis.o gridComponents.o gridMRF.o\
 	bcInputs.o bcTurboInterface.o bcTools.o bcInterface.o \
 	bcPrescribed.o bcImpermeable.o bcInflow.o bcOutflow.o \

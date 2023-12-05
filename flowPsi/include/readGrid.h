@@ -23,10 +23,23 @@
 
 #include <Loci.h>
 #include <flowTypes.h>
+#include <vector>
 
 namespace flowPsi {
-  void read_grid(fact_db &facts, const rule_db &rdb, const char *filename,
-                 bool dryrun);
+  void read_vars(fact_db &facts, const rule_db &rdb, const char *filename) ;
+  void read_vog(fact_db &facts, const char *filename) ;
+  void input_grid(fact_db &facts, const rule_db &rdb, const char *filename,
+                  int adapt_step,
+                  std::vector<entitySet>& local_nodes,
+                  std::vector<entitySet>& local_faces,
+                  std::vector<entitySet>& local_cells,
+                  store<vector3d<double> >& t_pos,
+                  Map& tmp_cl,
+                  Map& tmp_cr,
+                  multiMap& tmp_face2node,
+                  std::vector<pair<int,string> >& boundary_ids,
+                  std::vector<pair<string,entitySet> >& volTags,
+		  Loci::storeRepP cellptn) ;
 
   void find_mind_noslip(fact_db &facts) ;
   void find_mind_surf(fact_db &facts) ;
