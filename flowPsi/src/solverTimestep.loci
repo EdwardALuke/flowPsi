@@ -21,6 +21,7 @@
 
 #include <Loci.h>
 $include "flowPsi.lh"
+#include "FVMAdapt/dataxferDB.h"
 
 namespace flowPsi {
   $type solution store<real> ;
@@ -47,6 +48,21 @@ namespace flowPsi {
     $timestepFinished{n} = (($$n{n}>$stop_iter+1) ||
 			    ($plot_status{n-1}>1) ||
 			    ($stime{n} > real($stop_time))) ;
+
+    Loci::storeRepP ac = Loci::DataXFER_DB.getItem("adaptCycle") ;
+    if(ac != 0) {
+      param<bool> adaptCycle ;
+      adaptCycle = ac ;
+      if($timestepFinished{n}) {
+	std::cout << "undoing adapt request as this is a real termination" << std::endl ;
+	*adaptCycle = false ;
+	Loci::DataXFER_DB.deleteItem("adaptCycle") ;
+      }	
+      if(*adaptCycle) {
+	$timestepFinished{n} = true ;
+      }
+    }
+    
   }
 					    
   $rule pointwise(solution<-gagePressure{n},temperature{n},u{n}),
