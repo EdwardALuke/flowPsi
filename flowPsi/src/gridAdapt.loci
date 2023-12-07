@@ -1,0 +1,443 @@
+#include <Loci.h>
+#include <Tools/fpe.h>
+#include <Tools/parse.h>
+#include <Tools/stream.h>
+#include "flowTypes.h"
+#include "gridComponent.h"
+#include "readGrid.h"
+#include "flowPsiIO.h"
+
+#include "FVMAdapt/globals.h"
+#include "FVMAdapt/defines.h"
+#include "FVMAdapt/dataxferDB.h"
+
+#include <map>
+#include <vector>
+
+$include "FVM.lh"
+$include "flowPsi.lh"
+
+namespace Loci {
+  std::vector<entitySet> simplePartition(int mn, int mx, MPI_Comm comm) ;
+  storeRepP Local2FileOrder(storeRepP sp, entitySet dom, int &offset,
+                            fact_db::distribute_infoP dist, MPI_Comm comm) ;
+
+  void File2LocalOrder(storeRepP &result, entitySet resultSet,
+                       storeRepP input, int offset,
+                       fact_db::distribute_infoP dist,
+                       MPI_Comm comm) ;
+}
+
+namespace flowPsi {
+  using std::cout ;
+  using std::endl ;
+  using std::cerr ;
+  using std::vector;
+  using std::map ;
+
+  //--------------------------------------------------------------------------
+  // Setup vars file variables for mesh adaptation
+
+  $type maxAdaptSteps param<int> ;
+  $type adaptMode param<string> ;
+  $type adaptMode2D Constraint ;
+  $type adaptMode3D Constraint ;
+  $type adaptMinEdgeLength param<double> ;
+  $type adaptGeometryEdgeLength param<double> ;
+  $type adaptGeometryLayers param<double> ;
+  $type adaptFaceFold param<double> ;
+  $type adaptBalanceType param<int> ;
+  $type adaptFrequency param<int> ;
+  $type adaptStart param<int> ;
+  $type adaptSensitivity param<double> ;
+  $type coarsenSensitivity param<double> ;
+  $type adaptSensor param<flowPsi::list_input>  ;
+
+  $rule default(maxAdaptSteps) {
+    $maxAdaptSteps = 0 ;
+  }
+
+  $rule default(adaptMode),comments("adaptMode can be isotropic, anisotropic, or 2D") {
+    $adaptMode = "anisotropic" ;
+  }
+
+  $rule constraint(adaptMode2D,adaptMode3D<-adaptMode) {
+    if($adaptMode == "2D") {
+      $adaptMode2D = ~EMPTY ;
+      $adaptMode3D = EMPTY ;
+    } else {
+      $adaptMode2D = EMPTY ;
+      $adaptMode3D = ~EMPTY ;
+    }
+  }
+    
+  $rule default(adaptMinEdgeLength), 
+    comments("Sets minimum edge length allowed for refinement")  
+  { $adaptMinEdgeLength = 1e-6 ; }
+
+  $rule optional(adaptGeometryEdgeLength), 
+    comments("Sets target edge length for overset geometry refinement") { }
+
+  $rule default(adaptGeometryLayers),
+    comments("Sets thickness of derefinement levels for overset geometry refinement")
+  { $adaptGeometryLayers = 8 ;  }
+
+  $rule default(adaptFaceFold),
+    comments("Sets face folding criterion to disable refining highly twisted faces")
+  { $adaptFaceFold = 1.5708 ; }
+
+  $rule default(adaptBalanceType),
+    comments("Sets mesh balancing method used to balance refinement levels")
+  { $adaptBalanceType = 0 ; }
+
+  $rule optional(adaptFrequency),
+    comments("Sets how frequently in solver iterations before mesh adaptation will be evaluated")
+  { $adaptFrequency = 100 ;  }
+
+  $rule default(adaptStart),
+    comments("Disables refinement until this timestep is reached")
+  { $adaptStart = 100 ; }
+
+  $rule default(adaptSensitivity),
+    comments("Sets error threshold for refinement")
+  { $adaptSensitivity = 1.0 ;  }
+
+
+  $rule default(coarsenSensitivity),
+    comments("Sets error threshold for derefinement")
+  { $coarsenSensitivity = 0.5 ;  }
+
+  $rule optional(adaptSensor),
+    comments("Selects error metrics to use for refinement")
+  { $adaptSensor.namelist = "" ;  }
+  
+  
+
+  $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
+  $type componentID store<int> ;
+  $type nblank store<flowPsi::byte_t> ;
+  $type componentTransformMap blackbox<map<string,vector<componentXform> > > ;
+
+  //--------------------------------------------------------------------------
+  // Code for cell based mesh adaptation flags
+
+    
+  $type cellMaxEdgeLength store<real> ;
+  $type cellAdaptMask store<int> ;
+  $type cellMeanCount param<int> ;
+  $type cellMean(X) param<double> ;
+  $type cellSigmaSq(X) param<double> ;
+  $type cellThreshold(X)  param<float> ;
+  $type cellThresholdLow(X) param<float> ;
+  $type cellRefFlag store<int> ;
+  $type refineCell(X) store<int> ;
+
+  $rule unit(cellMaxEdgeLength),constraint(geom_cells) {
+    $cellMaxEdgeLength = 0 ;
+  }
+
+  $rule apply((cl,cr)->cellMaxEdgeLength<-area,face2node->pos)[Loci::Maximum],
+    constraint(adaptMode3D,(cl,cr)->geom_cells) {
+    real len = 0 ;
+    int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i) {
+      int ip = ((i+1)==fsz)?0:i+1 ;
+      real elen = norm($face2node[ip]->$pos-$face2node[i]->$pos) ;
+      join($cl->$cellMaxEdgeLength,elen) ;
+      join($cr->$cellMaxEdgeLength,elen) ;
+      len += elen ; 
+    }
+    real estlen = 4.*$area.sada/len ;
+    join($cl->$cellMaxEdgeLength,estlen) ;
+    join($cr->$cellMaxEdgeLength,estlen) ;
+  }
+
+  $rule apply(ci->cellMaxEdgeLength<-area,face2node->pos)[Loci::Maximum],
+    constraint(adaptMode2D,ci->geom_cells) {
+    // normals aligned with the z direction will be considered for 2D
+    if(fabs(fabs($area.n.z)-1.0) < 1e-8) {
+      real len = 0 ;
+      int fsz = $face2node.size() ;
+      for(int i=0;i<fsz;++i) {
+	int ip = ((i+1)==fsz)?0:i+1 ;
+	real elen = norm($face2node[ip]->$pos-$face2node[i]->$pos) ;
+	join($ci->$cellMaxEdgeLength,elen) ;
+	len += elen ; 
+      }
+      join($ci->$cellMaxEdgeLength,4.*$area.sada/len) ;
+    }
+  }
+      
+  $rule pointwise(cellAdaptMask<-cellMaxEdgeLength,adaptMinEdgeLength) {
+    $cellAdaptMask = 0 ;
+    if($cellMaxEdgeLength < $adaptMinEdgeLength)
+      $cellAdaptMask = 1 ;
+  }
+
+  $type adaptMaskDistance param<real> ;
+
+  $rule optional(adaptMaskDistance) {
+    $adaptMaskDistance = 0.0 ;
+  }
+
+  $rule pointwise(wall::cellAdaptMask<-cellMaxEdgeLength,adaptMinEdgeLength,
+		  adaptMaskDistance,dist_noslip) {
+    $cellAdaptMask = 0 ;
+    if($cellMaxEdgeLength < $adaptMinEdgeLength)
+      $cellAdaptMask = 1 ;
+    if($dist_noslip < $adaptMaskDistance)
+      $cellAdaptMask = 1 ;
+  }
+
+  $rule unit(cellMeanCount),constraint(geom_cells) {
+    $cellMeanCount = 0 ;
+  }
+
+  $rule apply(cellMeanCount<-vol)[Loci::Summation],constraint(geom_cells) {
+    join($cellMeanCount,1) ;
+  }
+
+  $type X store<float> ;
+  $rule unit(cellMean(X)),constraint(X,geom_cells) {
+    $cellMean(X) = 0 ;
+  }
+  $rule apply(cellMean(X)<-X,cellMeanCount)[Loci::Summation] {
+    join($cellMean(X),double($X)/double($cellMeanCount)) ;
+  }
+
+  $rule unit(cellSigmaSq(X)), constraint(X,geom_cells) {
+    $cellSigmaSq(X) = 0 ;
+  }
+  $rule apply(cellSigmaSq(X)<-X,cellMean(X),cellMeanCount)[Loci::Summation] {
+    double delta = $X-$cellMean(X) ;
+    double term = delta*delta/($cellMeanCount-1) ;
+    join($cellSigmaSq(X),term) ;
+  }
+
+  $rule singleton(cellThreshold(X)<-cellSigmaSq(X),cellMean(X),adaptSensitivity) {
+    float sigma = sqrt($cellSigmaSq(X)) ;
+    $cellThreshold(X) = $cellMean(X)+$adaptSensitivity*sigma ;
+    //cout << "cellThreshold" << $cellThreshold(X) << endl ;
+  }
+  
+  $rule singleton(cellThresholdLow(X)<-cellSigmaSq(X),cellMean(X),coarsenSensitivity) {
+    float sigma = sqrt($cellSigmaSq(X)) ;
+    $cellThresholdLow(X) = $cellMean(X)-$coarsenSensitivity*sigma ;
+    //cout << "cellThresholdLow=" << $cellThresholdLow(X) << endl ;
+  }
+  
+  $rule pointwise(refineCell(X)<-cellThreshold(X),cellThresholdLow(X),X) {
+    $refineCell(X) = 0 ;
+    if($X > $cellThreshold(X))
+      $refineCell(X) = 1 ;
+    if($X < $cellThresholdLow(X))
+      $refineCell(X) = -1 ;
+  }
+  
+  // Compute refinement flag
+
+
+  $rule unit(cellRefFlag),constraint(geom_cells,adaptSensor) {
+    $cellRefFlag = -1 ;
+  }
+
+  $type ERRVAR store<float> ;
+  $rule apply(cellRefFlag<-refineCell(ERRVAR))[Loci::Maximum],constraint(ERRVAR),parametric(adaptSensor(ERRVAR)) {
+    join($cellRefFlag,$refineCell(ERRVAR)) ;
+  }
+  
+  $rule apply(cellRefFlag<-adaptGeometryLayers,adaptGeometryEdgeLength,
+	      componentGeometryList,componentID,iblank,cellcenter,
+	      cellMaxEdgeLength)[Loci::Maximum] {
+    int cid = $componentID ;
+    const vector<Loci::CPTR<geometry_type> > &geom = $componentGeometryList ;
+    int csz = geom.size() ;
+    if(cid >= 0 && cid < csz && geom[cid] == 0) {
+      // Find closest distance
+      real dist = 1e30 ;
+      for(int i=0;i<csz;++i) {
+	if(geom[i]!= 0) {
+	  dist = min(dist,geom[i]->distToSurface($cellcenter)) ;
+	}
+      }
+      real Llay = $adaptGeometryEdgeLength*$adaptGeometryLayers ;
+      dist = max<real>(dist-1.25*Llay-.5*$cellMaxEdgeLength,0.0) ;
+
+      real length = $adaptGeometryEdgeLength*(1.+dist/Llay) ;
+      int command = 0 ;
+      if($cellMaxEdgeLength > length) 
+	command = 1 ;
+      if($cellMaxEdgeLength < .5*length)
+	command = -1 ;
+      if($iblank == 3)
+	command = -1 ;
+      join($cellRefFlag,command) ;
+    }
+  }
+
+  $type cellRefFlagMask store<int> ;
+  $rule pointwise(cellRefFlagMask<-cellAdaptMask,cellRefFlag) {
+    $cellRefFlagMask = $cellRefFlag ;
+    if($cellRefFlag > 0 && $cellAdaptMask != 0)
+      $cellRefFlagMask = 0 ;
+  }
+
+  $rule pointwise(OUTPUT{n,it}<-cellRefFlagMask{n,it}),conditional(do_adapt{n,it}),option(disable_threading), prelude {
+    entitySet dom = entitySet(seq) ;
+
+    store<char> flags ;
+    flags.allocate(dom) ;
+    FORALL(dom,ii) {
+      int fl =$cellRefFlagMask{n,it}[ii] ;
+      flags[ii] = ((0==fl)?0:((fl > 0)?1:2)) ;
+    } ENDFORALL ;
+
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+    if(dist==0) {
+      Loci::DataXFER_DB.insertItem("refineTag",flags.Rep()) ;
+    } else {
+      int offset = 0 ;
+      Loci::storeRepP vardist = Loci::Local2FileOrder(flags.Rep(),dom,offset,
+						      dist,
+						      MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("refineTag",vardist) ;
+    }
+    
+  } ;
+
+  //---diagnostics
+  $type cellRefFlagf store<real> ;
+  $rule pointwise(cellRefFlagf<-cellRefFlag) {$cellRefFlagf = $cellRefFlag;}
+    
+  OUTPUT_SCALAR("cell2nodeMax(cellRefFlagf)",refFlag) ;
+  OUTPUT_SCALAR("cell2nodeMax(cellMaxEdgeLength)",cellMaxEdgeLength) ;
+
+  $type scalarCellError(X,Y) store<float> ;
+  $type X store<real> ;
+  $type Y store<real> ;
+
+  $rule unit(scalarCellError(X,Y)),constraint(geom_cells) {
+    $scalarCellError(X,Y) = 0 ;
+  }
+  $rule apply((cl,cr)->scalarCellError(X,Y)<-X,Y)[Loci::Maximum],
+    constraint((cl,cr)->geom_cells,X,Y) {
+    float val = realToFloat(fabs($X-$Y)) ;
+    join($cl->$scalarCellError(X,Y),val) ;
+    join($cr->$scalarCellError(X,Y),val) ;
+  }
+
+  $type vect3d_cell_error(X,Y) store<float> ;
+  $type X store<vect3d> ;
+  $type Y store<vect3d> ;
+
+  $rule unit(vect3d_cell_error(X,Y)),constraint(geom_cells) {
+    $vect3d_cell_error(X,Y) = 0 ;
+  }
+  $rule apply((cl,cr)->vect3d_cell_error(X,Y)<-X,Y)[Loci::Maximum],
+    constraint((cl,cr)->geom_cells,X,Y) {
+    float val = realToFloat(norm($X-$Y)) ;
+    join($cl->$vect3d_cell_error(X,Y),val) ;
+    join($cr->$vect3d_cell_error(X,Y),val) ;
+  }
+  
+
+  //--------------------------------------------------------------------------
+  // Code for computing node based error estimators and saving nodal refine
+  // tag
+
+
+  // Temperature error
+  $type Terror store<float> ;
+  $rule pointwise(Terror<-scalarCellError(leftsP(temperature,Zero),rightsP(temperature,Zero))), inplace(Terror|scalarCellError(leftsP(temperature,Zero),rightsP(temperature,Zero))),prelude {} ;
+
+  // Density error
+  $type Rerror store<float> ;
+  $rule pointwise(Rerror<-scalarCellError(leftsP(rho,Zero),rightsP(rho,Zero))),inplace(Rerror|scalarCellError(leftsP(rho,Zero),rightsP(rho,Zero))),prelude {} ;
+
+  // Pressure error
+  $type Perror store<float> ;
+  $rule pointwise(Perror<-scalarCellError(leftsP(gaugePressure,minPg),rightsP(gaugePressure,minPg))),inplace(Perror|scalarCellError(leftsP(gaugePressure,minPg),rightsP(gaugePressure,minPg))),prelude {} ;
+
+  // Velocity error
+  $type Uerror store<float> ;
+  $rule pointwise(Uerror<-vect3d_cell_error(leftv3d(u),rightv3d(u))),inplace(Uerror|vect3d_cell_error(leftv3d(u),rightv3d(u))),prelude {} ;
+		  
+
+  //--------------------------------------------------------------------------
+  // Adapt cycle control
+  $type refCount param<int> ;
+  $type do_adapt param<bool> ;
+  $type refineLevel param<int> ;
+
+  $rule unit(refCount),constraint(UNIVERSE) {
+    $refCount = 0 ;
+  }
+
+  $rule apply(refCount<-cellRefFlagMask)[Loci::Summation] {
+    int cnt = ($cellRefFlagMask > 0)?1:0 ;
+    join($refCount,cnt) ;
+  }
+
+  $rule singleton(do_adapt{n,it}<- ncycle{n},stime{n,it},$it{n,it},refCount{n,it},newtonMaxIter,timeSteppingMode,adaptFrequency,adaptStart,refineLevel,maxAdaptSteps) {
+    $do_adapt{n,it} = false ;
+
+    int newton_iter = $timeSteppingMode==1?($newtonMaxIter):1 ;
+    int ncyc = $ncycle{n}+1 ;
+    if($$it{n,it}+1 == newton_iter && 
+       $refineLevel < $maxAdaptSteps &&
+       ncyc >= $adaptStart && 
+       (ncyc%$adaptFrequency) == 0 &&
+       $refCount{n,it} > 0) {
+      $[Once] {
+	cout << "refCount = " << $refCount{n,it} << endl ;
+      }
+      $do_adapt{n,it} = true ;
+      param<int> nc ; 
+      *nc = ncyc ;
+      Loci::DataXFER_DB.insertItem("ncycle",nc.Rep()) ;
+      param<real> st ;
+     *st = $stime{n,it} ;
+      Loci::DataXFER_DB.insertItem("stime",st.Rep()) ;
+
+      param<bool> adaptCycle ;
+      *adaptCycle = true ;
+      Loci::DataXFER_DB.insertItem("adaptCycle",adaptCycle.Rep()) ;
+    }
+  }
+
+
+  //--------------------------------------------------------------------------
+  // Interpolation I/O parts
+
+  $rule pointwise(OUTPUT{n,it}<-componentTransformMap{n,it}), conditional(do_adapt{n,it}),option(disable_threading),prelude {
+    blackbox<map<string,vector<componentXform> > > tmp ;
+    tmp.Rep()->allocate(~EMPTY) ;
+    *tmp = *($componentTransformMap{n,it}) ;
+    Loci::DataXFER_DB.insertItem("componentXform",tmp.Rep()) ;
+  } ;
+
+  //--------------------------------------------------------------------------
+  // restart after adapt
+  $type ic_stime param<real> ; //computing time ;
+  $type ic_ncycle param<int> ; //starting cycle number ;
+ 
+  $rule apply(ic_ncycle<-timeSteppingMode)[Loci::Maximum], prelude {
+    Loci::storeRepP nc = Loci::DataXFER_DB.getItem("ncycle") ;
+    if(nc != 0) {
+      param<int> ncyc ;
+      ncyc = nc ;
+      *$ic_ncycle = max(*$ic_ncycle,*ncyc) ;
+      Loci::DataXFER_DB.deleteItem("ncycle") ;
+    }
+  } ;
+  $rule apply(ic_stime<-dtmax)[Loci::Maximum], prelude {
+    Loci::storeRepP sc = Loci::DataXFER_DB.getItem("stime") ;
+    if(sc != 0) {
+      param<real> stime ;
+      stime = sc ;
+      *$ic_stime = max(*$ic_stime,*stime) ;
+    }
+  } ;
+
+
+}

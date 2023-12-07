@@ -138,6 +138,7 @@ namespace flowPsi {
     const_store<string> boundary_names ;
     const_param<string> modelName ;
     const_param<bool> firstPlot ;
+    const_param<int> refineLevel ;
     const_param<string> plot_postfix ;
   public:
     output_grid_topology() {
@@ -150,8 +151,11 @@ namespace flowPsi {
       name_store("boundary_names{n,plot}",boundary_names) ;
       name_store("modelName",modelName) ;
       name_store("pos{n,plot}",pos) ;
-      //      name_store("firstPlot{n,plot}",firstPlot) ;
+      name_store("refineLevel",refineLevel) ;
+      name_store("firstPlot{n,plot}",firstPlot) ;
       name_store("plot_postfix{n,plot}",plot_postfix) ;
+      input("firstPlot{n,plot}") ;
+      inout("refineLevel") ;
       input("plot_postfix{n,plot}") ;
       input("modelName") ;
       input("(upper,lower,boundary_map)->face2node->pos{n,plot}") ;
@@ -178,6 +182,7 @@ namespace flowPsi {
     const_store<string> boundary_names ;
     const_param<string> modelName ;
     const_param<bool> firstPlot ;
+    const_param<int> refineLevel ;
     const_param<string> plot_postfix ;
   public:
     output_grid_topology() {
@@ -189,10 +194,13 @@ namespace flowPsi {
       name_store("ref",ref) ;
       name_store("boundary_names",boundary_names) ;
       name_store("modelName",modelName) ;
+      name_store("refineLevel",refineLevel) ;
       name_store("pos",pos) ;
-      //      name_store("firstPlot{n,it}",firstPlot) ;
+      name_store("firstPlot",firstPlot) ;
       name_store("plot_postfix",plot_postfix) ;
       input("plot_postfix") ;
+      input("refineLevel") ;
+      input("firstPlot") ;
       input("modelName") ;
       input("(upper,lower,boundary_map)->face2node->pos") ;
       input("boundary_map->ref->boundary_names") ;
@@ -209,44 +217,66 @@ namespace flowPsi {
 
   void output_grid_topology::compute(const sequence &seq) {
     string basename = *modelName + ".topo" ;
-    string filename = "output/"+basename ;
-
-    if(Loci::MPI_rank==0) {    
-      string topolink = (string("output/topo_file.") +
-			 *plot_postfix + string("_") + *modelName ) ;
-      ofstream file(topolink.c_str(),ios::trunc) ;
-      file << basename << endl ;
-      file.close() ;
+    if(*refineLevel > 0) {
+      char buf[512] ;
+      snprintf(buf,511,"%d",*refineLevel) ;
+      basename = *modelName + "_" + string(buf) + ".topo" ;
     }
-    //    if(*firstPlot) {
-    if(Loci::MPI_rank == 0)
-      cout << "writing grid topology file: " << basename << endl ;
+    string filename = "output/"+basename ;
+    
+    if(*firstPlot) {
+      if(Loci::MPI_rank == 0)
+	cout << "writing grid topology file: " << basename << endl ;
 
-    Loci::parallelWriteGridTopology(filename.c_str(),
-				    upper.Rep(),lower.Rep(),
-				    boundary_map.Rep(),
-				    face2node.Rep(),
-				    ref.Rep(),
-				    boundary_names.Rep(),
-				    pos.Rep(),
-				    entitySet(seq)) ;
+      Loci::parallelWriteGridTopology(filename.c_str(),
+				      upper.Rep(),lower.Rep(),
+				      boundary_map.Rep(),
+				      face2node.Rep(),
+				      ref.Rep(),
+				      boundary_names.Rep(),
+				      pos.Rep(),
+				      entitySet(seq)) ;
+    }
   }
 
 
   register_rule<output_grid_topology> register_output_grid_topology ;
 
+
+  $rule pointwise(OUTPUT<-refineLevel,modelName,plot_postfix),conditional(do_plot),
+    prelude {
+    string basename = *$modelName + ".topo" ;
+    if(*$refineLevel > 0) {
+      char buf[512] ;
+      snprintf(buf,511,"%d",*$refineLevel) ;
+      basename = *$modelName + "_" + string(buf) + ".topo" ;
+    }
+    string filename = "output/"+basename ;
+    
+    string topolink = string("output/topo_file.") +
+      *$plot_postfix + string("_") + *$modelName ;
+
+    $[Once] {
+      ofstream file(topolink.c_str(),ios::trunc) ;
+      file << basename << endl ;
+      file.close() ;
+    }
+  } ;
   
   class output_grid_positions_topo: public pointwise_rule {
     const_store<vector3d<real> > pos ;
     const_param<string> plot_postfix ;
     const_param<string> modelName ;
+    const_param<int> refineLevel ;
     param<bool> OUTPUT ;
   public:
     output_grid_positions_topo() {
       name_store("pos",pos) ;
       name_store("modelName",modelName) ;
       name_store("OUTPUT",OUTPUT) ;
+      name_store("refineLevel",refineLevel) ;
       name_store("plot_postfix",plot_postfix) ;
+      input("refineLevel") ;
       conditional("do_plot") ;
       constraint("pos") ;
       input("pos") ;
@@ -255,12 +285,19 @@ namespace flowPsi {
       output("OUTPUT") ;
     }
     void compute(const sequence &seq) {
-      dump_pos(seq,pos,string(""),*modelName) ;
-      if(Loci::MPI_rank==0) {
-	string filename = string("output/grid_pos.") +
-	  *plot_postfix + string("_") + *modelName ;
-	cout << "unlink filename = " << filename << endl ;
-	::unlink(filename.c_str()) ;
+      if(*refineLevel == 0) {
+	dump_pos(seq,pos,string(""),*modelName) ;
+        if(Loci::MPI_rank==0) {
+          string filename = string("output/grid_pos.") +
+            *plot_postfix + string("_") + *modelName ;
+	  cout << "unlink filename = " << filename << endl ;
+          ::unlink(filename.c_str()) ;
+	}
+      } else {
+        dump_pos(seq,pos,*plot_postfix,*modelName) ;
+	if(Loci::MPI_rank == 0) {
+	  cout << "writing out file output/grid_pos." << *plot_postfix << "_" << *modelName << endl ;
+	}
       }
     }
   } ;

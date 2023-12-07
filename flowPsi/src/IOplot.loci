@@ -437,5 +437,38 @@ namespace flowPsi {
   }	
 
   register_rule<dump_timestep_info> register_dump_timestep_info ;
+
+  $type firstPlot param<bool> ;
+  
+  $rule singleton(firstPlot{n=0}),constraint(UNIVERSE) {
+    $firstPlot{n=0} = true ;
+  }
+  $rule singleton(firstPlot{n,it=0}<-firstPlot{n}),constraint(timeStepImplicit) {
+    $firstPlot{n,it=0} = $firstPlot{n} ;
+  }
+  $rule singleton(firstPlot{n,it+1}<-firstPlot{n,it},do_plot{n,it}),
+  constraint(timeStepImplicit) {
+    $firstPlot{n,it+1} = $firstPlot{n,it} && !$do_plot{n,it} ;
+  }
+  $rule singleton(firstPlot{n+1}<-firstPlot{n,it}),
+    constraint(timeStepImplicit),
+    conditional(newtonFinished{n,it}) {
+    $firstPlot{n+1} = $firstPlot{n,it} ;
+  }
+
+  $rule singleton(firstPlot{n,rk=0}<-firstPlot{n}),constraint(timeStepExplicit) {
+    $firstPlot{n,rk=0} = $firstPlot{n} ;
+  }
+  $rule singleton(firstPlot{n,rk+1}<-firstPlot{n,rk},do_plot{n,rk}),
+  constraint(timeStepExplicit) {
+    $firstPlot{n,rk+1} = $firstPlot{n,rk} && !$do_plot{n,rk} ;
+  }
+  $rule singleton(firstPlot{n+1}<-firstPlot{n,rk}),
+    constraint(timeStepExplicit),
+    conditional(rkFinished{n,rk}) {
+    $firstPlot{n+1} = $firstPlot{n,rk} ;
+  }
+
+
 }
 

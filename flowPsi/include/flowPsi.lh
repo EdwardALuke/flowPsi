@@ -224,6 +224,8 @@ $type plot_modulo param<int> ;
 $type do_plot     param<bool> ;
 $type plot_postfix param<std::string> ;
 $type do_boundary_plot     param<bool> ;
+$type firstPlot   param<bool> ;
+$type refineLevel param<int> ;
 
 $type plot_status       param<int> ;
 $type restart_freq      param<int> ;
@@ -231,6 +233,7 @@ $type restart_modulo    param<int> ;
 $type restart_directory param<std::string> ;
 $type restart_postfix   param<std::string> ;
 $type do_restart        param<bool> ;
+$type do_adapt          param<bool> ;
 $type icfile            param<std::string> ;
 
 $type maximumRunTime    param<flowPsi::TimeValue> ;
