@@ -356,7 +356,7 @@ namespace flowPsi {
 
   // Pressure error
   $type Perror store<float> ;
-  $rule pointwise(Perror<-scalarCellError(leftsP(gaugePressure,minPg),rightsP(gaugePressure,minPg))),inplace(Perror|scalarCellError(leftsP(gaugePressure,minPg),rightsP(gaugePressure,minPg))),prelude {} ;
+  $rule pointwise(Perror<-scalarCellError(leftsP(gagePressure,minPg),rightsP(gagePressure,minPg))),inplace(Perror|scalarCellError(leftsP(gagePressure,minPg),rightsP(gagePressure,minPg))),prelude {} ;
 
   // Velocity error
   $type Uerror store<float> ;
@@ -378,12 +378,14 @@ namespace flowPsi {
     join($refCount,cnt) ;
   }
 
-  $rule singleton(do_adapt{n,it}<- ncycle{n},stime{n,it},$it{n,it},refCount{n,it},newtonMaxIter,timeSteppingMode,adaptFrequency,adaptStart,refineLevel,maxAdaptSteps) {
+  $type stop_iter param<int> ;
+  $rule singleton(do_adapt{n,it}<- ncycle{n},stime{n,it},$it{n,it},refCount{n,it},newtonMaxIter,timeSteppingMode,adaptFrequency,adaptStart,refineLevel,maxAdaptSteps,stop_iter) {
     $do_adapt{n,it} = false ;
 
     int newton_iter = $timeSteppingMode==1?($newtonMaxIter):1 ;
     int ncyc = $ncycle{n}+1 ;
-    if($$it{n,it}+1 == newton_iter && 
+    if(
+       $$it{n,it}+1 == newton_iter && 
        $refineLevel < $maxAdaptSteps &&
        ncyc >= $adaptStart && 
        (ncyc%$adaptFrequency) == 0 &&
@@ -416,8 +418,435 @@ namespace flowPsi {
     Loci::DataXFER_DB.insertItem("componentXform",tmp.Rep()) ;
   } ;
 
+
+  $rule pointwise(OUTPUT{n,it}<-gagePressure{n,it},temperature{n,it},u{n,it}),constraint(geom_cells{n,it}),conditional(do_adapt{n,it}),option(disable_threading), prelude {
+    entitySet dom = entitySet(seq) ;
+
+    store<double> pg ;
+    store<double> t ;
+    store<vect3d> vel ;
+    pg.allocate(dom) ;
+    t.allocate(dom) ;
+    vel.allocate(dom) ;
+    FORALL(dom,ii) {
+      pg[ii] = realToDouble($gagePressure{n,it}[ii]) ;
+      t[ii] = realToDouble($temperature{n,it}[ii]) ;
+      vel[ii] = realToDouble($u{n,it}[ii]) ;
+    } ENDFORALL ;
+
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+    if(dist==0) {
+      Loci::DataXFER_DB.insertItem("pgrestart",pg.Rep()) ;
+      Loci::DataXFER_DB.insertItem("trestart",t.Rep()) ;
+      Loci::DataXFER_DB.insertItem("urestart",vel.Rep()) ;
+    } else {
+      int offset = 0 ;
+      Loci::storeRepP vardist = Loci::Local2FileOrder(pg.Rep(),dom,offset,
+						      dist,
+						      MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("pgrestart",vardist) ;
+
+      vardist = Loci::Local2FileOrder(t.Rep(),dom,offset,
+				      dist,
+				      MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("trestart",vardist) ;
+      vardist = Loci::Local2FileOrder(vel.Rep(),dom,offset,
+				      dist,
+				      MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("urestart",vardist) ;
+    }
+  } ;
+
+  template <typename T> struct unit_traits {
+    static T unit() {return 0 ; } ;
+  } ;
+  template <> struct unit_traits<double> {
+    static double unit() { return 0.0; }
+  } ;
+  template <> struct unit_traits<vect3d> {
+    static vect3d unit() { return vect3d(0.0,0.0,0.0) ; }
+  } ;
   //--------------------------------------------------------------------------
   // restart after adapt
+  template<class T> void interpolateStore(store<T> &qvecout,
+					  store<T> &qvecin,
+					  store<pair<int,int> > &c2pset,
+					  entitySet dom ) {
+    
+    store<float> weights ;
+    weights.allocate(dom) ;
+    FORALL(dom,ii) {
+      qvecout[ii] = unit_traits<T>::unit() ;
+      weights[ii] = 0 ;
+    } ENDFORALL ;
+
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+    if(dist==0) {
+      entitySet parentSet ;
+      entitySet targetSet ;
+      entitySet domc2p = c2pset.domain() ;
+
+      FORALL(domc2p,ii) {
+	parentSet += c2pset[ii].second ;
+	targetSet += c2pset[ii].first ;
+      } ENDFORALL ;
+
+      int parent_offset = qvecin.domain().Min() - parentSet.Min() ;
+      int local_offset = dom.Min()-targetSet.Min() ;
+      int sz = domc2p.size() ;
+      vector<pair<int,int> > c2p(sz) ;
+      int cnt = 0 ;
+      FORALL(domc2p,ii) {
+	c2p[cnt].first = c2pset[ii].second+parent_offset ;
+	c2p[cnt].second = c2pset[ii].first+local_offset ;
+	cnt++ ;;
+      } ENDFORALL ;
+
+      sort(c2p.begin(),c2p.end()) ;
+
+      for(int ii=0;ii<sz;) {
+	int pid = c2p[ii].first ;
+	int j = 1 ;
+	while(((ii+j) < sz) && (pid == c2p[ii+j].first))
+	  j++ ;
+	if(j == 1) {
+	  int tid = c2p[ii].second ;
+	  double w = 1.0 ;
+	  qvecout[tid] += qvecin[pid] ;
+	  weights[tid] += w ;
+	} else {
+	  for(int k=ii;k<ii+j;++k) {
+	    int tid = c2p[k].second ;
+	    qvecout[tid] += qvecin[pid] ;
+	    weights[tid] += 1. ;
+	  }
+	}
+	
+	ii += j ;
+      }
+      FORALL(dom,ii) {
+	if(weights[ii] > 0) {
+	  double w = 1./double(weights[ii]) ;
+	  qvecout[ii] *= w ;
+	}
+      } ENDFORALL ;
+    } else { // Parallel interpolation
+      int r = Loci::MPI_rank ;
+      int p = Loci::MPI_processes ;
+     
+      entitySet domc2p = c2pset.domain() ;
+
+      int first = domc2p.Min() ;
+      int minParent = c2pset[first].second ;
+      int minTarget = c2pset[first].first ;
+      FORALL(domc2p,ii) {
+	minParent = min(minParent,c2pset[ii].second) ;
+	minTarget = min(minTarget,c2pset[ii].first) ;
+      } ENDFORALL ;
+
+      int parentOffset = minParent ;
+      int targetOffset = minTarget ;
+      MPI_Allreduce(&minParent,&parentOffset,1,MPI_INT,MPI_MIN,
+		    MPI_COMM_WORLD) ;
+      MPI_Allreduce(&minTarget,&targetOffset,1,MPI_INT,MPI_MIN,
+		    MPI_COMM_WORLD) ;
+      int sz = domc2p.size() ;
+      vector<pair<int,int> > p2c(sz) ;
+      int cnt = 0 ;
+      FORALL(domc2p,ii) {
+	p2c[cnt].first = c2pset[ii].second-parentOffset ;
+	p2c[cnt].second = c2pset[ii].first-targetOffset ;
+	cnt++ ;;
+      } ENDFORALL ;
+
+      sort(p2c.begin(),p2c.end()) ;
+      
+      // Now distribute c2p to processors in parent file ordering
+      int prevdomsz = qvecin.domain().size() ;
+      vector<int> parentsizes(p) ;
+      MPI_Allgather(&prevdomsz,1,MPI_INT,&parentsizes[0],1,MPI_INT,
+		    MPI_COMM_WORLD) ;
+      vector<int> parentoffsets(p+1,0) ;
+      for(int i=0;i<p;++i)
+	parentoffsets[i+1] = parentoffsets[i]+parentsizes[i] ;
+      
+      vector<pair<int,int> > splits(p-1) ;
+      for(int i=0;i<p-1;++i)
+	splits[i] = pair<int,int>(parentoffsets[i+1],-1) ;
+
+      Loci::parSplitSort(p2c,splits,MPI_COMM_WORLD) ;
+
+      int p2csz = p2c.size() ;
+      // convert parent to local numbering and collect 
+      // id's of target cells in new mesh
+      vector<int> tlist(p2csz) ;
+      for(int i =0;i<p2csz;++i) {
+	p2c[i].first -= parentoffsets[r] ;
+	tlist[i] = p2c[i].second ;
+      }
+      // identify list of target points to which we are interpolating
+      sort(tlist.begin(),tlist.end()) ;
+      vector<int>::iterator l = std::unique(tlist.begin(),tlist.end()) ;
+      tlist.resize(std::distance(tlist.begin(),l)) ;
+      // Grab data needed for interpolation from target mesh 
+      // First reorder into file numbering the cellcenter and vol
+      // data which will be used to compute the interpolation
+
+      // first compute distribution of file numbered data
+      dMap g2f ;
+      g2f = dist->g2f.Rep() ;
+      // Get mapping from local to global numbering
+      Map l2g ;
+      l2g = dist->l2g.Rep() ;
+      int imx = std::numeric_limits<int>::min() ;
+      int imn = std::numeric_limits<int>::max() ;
+
+      // Find bounds in file numbering from this processor
+      FORALL(dom,i) {
+	int num = g2f[l2g[i]] ;
+	imx = max(num,imx) ;
+	imn = min(num,imn) ;
+      } ENDFORALL ;
+
+      // Find overall bounds
+      imx = Loci::GLOBAL_MAX(imx) ;
+      imn = Loci::GLOBAL_MIN(imn) ;
+      // Get partitioning of file numbers across processors
+      vector<entitySet> out_ptn = Loci::simplePartition(imn,imx,MPI_COMM_WORLD) ;
+      entitySet fdom = out_ptn[Loci::MPI_rank] ;
+      int offset = fdom.Min() ;
+      fdom <<= offset ;
+      // Compute how the file ordering is distributed to processors
+      vector<int> targetsizes(p) ;
+      int tlsize = fdom.size() ;
+      MPI_Allgather(&tlsize,1,MPI_INT,&targetsizes[0],1,MPI_INT,
+		    MPI_COMM_WORLD) ;
+      vector<int> toffsets(p+1,0) ;
+      for(int i=0;i<p;++i)
+	toffsets[i+1] = toffsets[i]+targetsizes[i] ;
+      // Now compute which processors to communicate with
+      vector<int> tlistoffsets(p+1,0) ;
+      int tsz = tlist.size() ;
+      tlistoffsets[p] = tsz ;
+      cnt = 1 ;
+      for(int i=0;i<tsz;++i) {
+	while(cnt != p && tlist[i] >= toffsets[cnt]) {
+	  tlistoffsets[cnt] = i ;
+	  cnt++ ;
+	}
+	if(cnt == p)
+	  break ;
+      }
+      if(cnt != p) { // handle end case
+	for(int i=cnt;i<p;++i)
+	  tlistoffsets[i] = tsz ;
+      }
+      // Now send the requests
+      vector<int> tlistsizes(p) ;
+      for(int i=0;i<p;++i)
+	tlistsizes[i] = tlistoffsets[i+1]-tlistoffsets[i] ;
+      vector<int> rlistsizes(p) ;
+      MPI_Alltoall(&tlistsizes[0],1,MPI_INT,
+		   &rlistsizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+      vector<int> rlistoffsets(p+1,0) ;
+      for(int i=0;i<p;++i)
+	rlistoffsets[i+1] = rlistoffsets[i]+rlistsizes[i] ;
+      
+      vector<int> recvlists(rlistoffsets[p]) ;
+      vector<MPI_Request> req_queue ;
+      for(int i=0;i<p;++i) {
+	if(rlistsizes[i] > 0) {
+	  MPI_Request tmp ;
+	  MPI_Irecv(&recvlists[rlistoffsets[i]],rlistsizes[i],MPI_INT,i,99,
+		    MPI_COMM_WORLD,&tmp) ;
+	  req_queue.push_back(tmp) ;
+	}
+      }
+      for(int i=0;i<p;++i) {
+	if(tlistsizes[i] > 0) {
+	  MPI_Send(&tlist[tlistoffsets[i]],tlistsizes[i],MPI_INT,i,99,
+		   MPI_COMM_WORLD) ;
+	}
+      }
+      if(req_queue.size() > 0) {
+	vector<MPI_Status> stat_queue(req_queue.size()) ;
+	MPI_Waitall(req_queue.size(),&req_queue[0],&stat_queue[0]) ;
+	req_queue.clear() ;
+      }
+
+      int rsz = recvlists.size() ;
+      // correct indexes to local numbering
+      
+      for(int i=0;i<rsz;++i)
+	recvlists[i] -= toffsets[r] ;
+      
+      // Now translate the p2c map target to the local numbering
+      std::map<int,int> f2c ;
+      for(int i=0;i<tsz;++i)
+	f2c[tlist[i]] = i ;
+      
+      for(int i=0;i<p2csz;++i) {
+	std::map<int,int>::const_iterator mi = f2c.find(p2c[i].second) ;
+	if(mi == f2c.end()) {
+	  cerr << "unable to remap p2c to local number" << endl ;
+	  Loci::Abort() ;
+	}
+	
+	p2c[i].second = mi->second ;
+      }
+      
+      entitySet locdom = interval(0,tsz-1) ;
+      store<T> qic_loc ;
+      qic_loc.allocate(locdom) ;
+      store<double> weights ;
+      weights.allocate(locdom) ;
+      // Now compute interpolated value 
+      entitySet qpdom = qvecin.domain() ;
+      for(int i=0;i<tsz;++i) {
+	weights[i] = 0 ;
+	qic_loc[i] = unit_traits<T>::unit() ;
+      }
+	
+      for(int ii=0;ii<p2csz;) {
+	int pid = p2c[ii].first ;
+
+	int j = 1 ;
+	while(((ii+j) < p2csz) && (pid == p2c[ii+j].first))
+	  j++ ;
+	if(j == 1) {
+	  int tid = p2c[ii].second ;
+	  double w = 1.0 ;
+	  
+	  qic_loc[tid] += qvecin[pid] ;
+	  weights[tid] += w ;
+	} else {
+	  for(int k=ii;k<ii+j;++k) {
+	    int tid = p2c[k].second ;
+	    qic_loc[tid] += qvecin[pid] ;
+	    weights[tid] += 1. ;
+	  }
+	}
+	
+	ii += j ;
+      }
+
+      // Now return interpolated versions to new file numbering
+      int nvs = 2 ; 
+      vector<pair<T,double> > senddata(tsz*nvs) ;
+      vector<pair<T,double> > recvdata(rsz*nvs) ;
+      // Fill send data buffer
+      for(int i=0;i<tsz;++i) {
+	senddata[i*nvs].first = qic_loc[i] ;
+	senddata[i*nvs+1].second = weights[i] ;
+      }
+      for(int i=0;i<p;++i) {
+	if(rlistsizes[i] > 0) {
+	  MPI_Request tmp ;
+	  MPI_Irecv(&recvdata[rlistoffsets[i]*nvs],
+		    rlistsizes[i]*nvs*sizeof(pair<T,double>),
+		    MPI_BYTE,i,99,MPI_COMM_WORLD,&tmp) ;
+	  req_queue.push_back(tmp) ;
+	}
+      }
+      for(int i=0;i<p;++i) {
+	if(tlistsizes[i] > 0) {
+	  MPI_Send(&senddata[tlistoffsets[i]*nvs],
+		   tlistsizes[i]*nvs*sizeof(pair<T,double>),
+		   MPI_BYTE,i,99,MPI_COMM_WORLD) ;
+	}
+      }
+      if(req_queue.size() > 0) {
+	vector<MPI_Status> stat_queue(req_queue.size()) ;
+	MPI_Waitall(req_queue.size(),&req_queue[0],&stat_queue[0]) ;
+	req_queue.clear() ;
+      }
+
+      store<T> q_ic_fn ;
+      store<double> wt_fn ;
+
+      q_ic_fn.allocate(fdom) ;
+      wt_fn.allocate(fdom) ;
+      // sum contribtions from processors
+      FORALL(fdom,ii) {
+	q_ic_fn[ii] = unit_traits<T>::unit();
+	wt_fn[ii] = 0 ;
+      } ENDFORALL ;
+      for(int i=0;i<rsz;++i) {
+	int id = recvlists[i] ;
+
+	q_ic_fn[id] += recvdata[i*nvs].first ;
+	wt_fn[id] += recvdata[i*nvs+1].second ;
+      }
+
+      // renormalize
+      FORALL(fdom,ii) {
+	double rw = 1./(wt_fn[ii]) ;
+	q_ic_fn[ii] *= rw;
+      } ENDFORALL ;
+      // Now distribute q_ic  to local numbering
+      store<T> q_ic_ln ;
+      q_ic_ln.allocate(dom) ;
+      Loci::storeRepP orep = q_ic_ln.Rep() ;
+
+      Loci::File2LocalOrder(orep,dom,q_ic_fn.Rep(),offset,dist,
+			    MPI_COMM_WORLD) ;
+
+      FORALL(dom,ii) {
+	qvecout[ii] = q_ic_ln[ii] ;
+      } ENDFORALL ;
+      
+    }
+  }
+
+  $type refineRestart param<int> ;
+  $rule pointwise(priority::gagePressure_ic<-refineRestart),option(disable_threading),prelude {
+    entitySet dom = entitySet(seq) ;
+    store<double> pgprev ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("pgrestart") ;
+    if(ptr == 0)
+      cerr << "pgrestart not in DB!" << endl ;
+
+    pgprev = ptr ;
+
+    store<pair<int,int> > c2pset ;
+    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
+    
+    interpolateStore($gagePressure_ic, pgprev,c2pset,dom) ;
+    Loci::DataXFER_DB.deleteItem("pgrestart") ;
+  } ;
+    
+  $rule pointwise(priority::temperature_ic<-refineRestart),option(disable_threading),prelude {
+    entitySet dom = entitySet(seq) ;
+    store<double> tprev ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("trestart") ;
+    if(ptr == 0)
+      cerr << "trestart not in DB!" << endl ;
+
+    tprev = ptr ;
+
+    store<pair<int,int> > c2pset ;
+    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
+    
+    interpolateStore($temperature_ic, tprev,c2pset,dom) ;
+    Loci::DataXFER_DB.deleteItem("trestart") ;
+  } ;
+
+  $rule pointwise(priority::u_ic<-refineRestart),option(disable_threading),prelude {
+    entitySet dom = entitySet(seq) ;
+    store<vect3d> uprev ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("urestart") ;
+    if(ptr == 0)
+      cerr << "trestart not in DB!" << endl ;
+
+    uprev = ptr ;
+
+    store<pair<int,int> > c2pset ;
+    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
+    
+    interpolateStore($u_ic, uprev,c2pset,dom) ;
+    Loci::DataXFER_DB.deleteItem("urestart") ;
+  } ;
+
   $type ic_stime param<real> ; //computing time ;
   $type ic_ncycle param<int> ; //starting cycle number ;
  
@@ -439,5 +868,60 @@ namespace flowPsi {
     }
   } ;
 
+  $type X store<real> ;
+  $type C Constraint ;
+  $type scalarTransportName(X) param<std::string> ;
+  // Scalar transport equation adapt restart
+  $rule pointwise(OUTPUT{n,it}<-
+		  X{n,it},scalarTransportName(X)),
+    constraint(geom_cells{n,it},C{n,it}),conditional(do_adapt{n,it}),
+    parametric(scalarTransportP(X,C)), option(disable_threading),
+    prelude {
+    string name = string("scalar_")+*$scalarTransportName(X) ;
+    store<real> xtmp ;
+    entitySet dom = entitySet(seq) ;
+    xtmp.allocate(dom) ;
+    FORALL(dom,ii) {
+      xtmp[ii] = $X{n,it}[ii] ;
+
+    } ENDFORALL ;
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+    if(dist==0) {
+      Loci::DataXFER_DB.insertItem(name,xtmp.Rep()) ;
+    } else {
+      int offset = 0 ;
+      Loci::storeRepP vardist = Loci::Local2FileOrder(xtmp.Rep(),dom,offset,
+						      dist,MPI_COMM_WORLD) ;
+      if(vardist == 0) {
+	cerr << "vardist is null for '" << name << "'" << endl ;
+      }
+      Loci::DataXFER_DB.insertItem(name,vardist) ;
+    }
+  } ;
+
+  // scalar transport restart on adapt
+  $type X_ic store<real> ;
+  $rule pointwise(priority::X_ic<-refineRestart,scalarTransportName(X)),
+    constraint(geom_cells,C),
+    parametric(scalarTransportP(X,C)), option(disable_threading),
+    prelude {
+    string name = string("scalar_")+*$scalarTransportName(X) ;
+    entitySet dom = entitySet(seq) ;
+    store<real> Xtmp ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem(name) ;
+    if(ptr == 0)
+      cerr << name << " not in DB!" << endl ;
+
+    Xtmp = ptr ;
+
+    store<pair<int,int> > c2pset ;
+    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
+    
+    interpolateStore($X_ic, Xtmp,c2pset,dom) ;
+
+    // Release the interpolation data
+    Xtmp.allocate(EMPTY) ;
+    Loci::DataXFER_DB.deleteItem(name) ;
+  } ;
 
 }

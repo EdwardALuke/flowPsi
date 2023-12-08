@@ -27,7 +27,10 @@
 #include <stdlib.h>
 #include <sys/types.h>
 #include <sys/stat.h>
+#include <stdlib.h>
 #include <unistd.h>
+#include "FVMAdapt/dataxferDB.h"
+
 $include "flowPsi.lh"
 #define VERBOSE
 using std::vector ;
@@ -451,6 +454,129 @@ class output_restart_grid: public pointwise_rule {
     Loci::writeUnorderedStore(file_id,$facecenter,set,"facecenter") ;
     Loci::closeUnorderedFile(file_id) ;
   } ;
+
+
+
+  class output_restart_plan: public pointwise_rule {
+    const_param<string> restart_directory ;
+    const_param<string> restart_postfix ;
+    const_param<string> modelName ;
+    const_param<int> refineLevel ;
+    param<bool> OUTPUT ;
+  public:
+    output_restart_plan() {
+      name_store("refineLevel{n}",refineLevel) ;
+      name_store("modelName{n}",modelName) ;
+      name_store("OUTPUT{n}",OUTPUT) ;
+      name_store("restart_directory{n}",restart_directory) ;
+      name_store("restart_postfix{n}",restart_postfix) ;
+      input("restart_directory{n},restart_postfix{n}") ;
+      input("refineLevel{n}") ;
+      conditional("do_restart{n}") ;
+      constraint("pos{n}") ;
+      input("modelName{n}") ;
+      output("OUTPUT{n}") ;
+    }
+    void compute(const sequence &seq) {
+
+      Loci::storeRepP plan = Loci::DataXFER_DB.getItem("currentPlan") ;
+      string filename = *restart_directory + "planRestart_" + *modelName ; 
+      if(plan != 0) {
+#ifdef VERBOSE
+	if(Loci::MPI_rank == 0)
+	  cout << "writing plan file " << filename << endl ;
+#endif
+	hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					     H5P_DEFAULT, H5P_DEFAULT) ;
+
+	hid_t group_id = 0 ;
+	int prank = Loci::MPI_rank ;
+#ifdef H5_USE_16_API
+	if(prank == 0)
+	  group_id = H5Gcreate(file_id, "cellPlan", 0) ;
+#else
+	if(prank == 0)
+	  group_id = H5Gcreate(file_id, "cellPlan", 
+			       H5P_DEFAULT,H5P_DEFAULT,H5P_DEFAULT) ;
+#endif
+
+	entitySet dom = plan->domain() ;
+	int offset = 0 ; 
+	write_store(group_id,plan,dom,offset,MPI_COMM_WORLD) ;
+	if(prank == 0) 
+	  H5Gclose(group_id) ;
+
+	Loci::writeContainer(file_id,"refineLevel",refineLevel.Rep()) ;
+
+	Loci::hdf5CloseFile(file_id) ;
+      } else {
+	if(Loci::MPI_rank == 0) {
+	  ::unlink(filename.c_str()) ;
+	}
+	
+      }
+
+    }
+  };
+  register_rule<output_restart_plan> register_output_restart_plan ;
+
+  class output_restart_weight: public pointwise_rule {
+    //write weight for partition purpose into restart files 
+    const_param<string> restart_directory ;
+    const_param<string> restart_postfix ;
+    const_param<string> modelName ;
+    param<bool> OUTPUT ;
+  public:
+    output_restart_weight() {
+      name_store("modelName{n}",modelName) ;
+      name_store("OUTPUT{n}",OUTPUT) ;
+      name_store("restart_directory{n}",restart_directory) ;
+      name_store("restart_postfix{n}",restart_postfix) ;
+      input("restart_directory{n},restart_postfix{n}") ;
+      conditional("do_restart{n}") ;
+      constraint("pos{n}") ;
+      input("modelName{n}") ;
+      output("OUTPUT{n}") ;
+    }
+    void compute(const sequence &seq) {
+
+      Loci::storeRepP cw = Loci::DataXFER_DB.getItem("cellweights") ;
+      string filename = *restart_directory + "weightRestart_" + *modelName ; 
+      if(cw != 0) {
+#ifdef VERBOSE
+	if(Loci::MPI_rank == 0)
+	  cout << "writing weight file " << filename << endl ;
+#endif
+	hid_t file_id = Loci::hdf5CreateFile(filename.c_str(),H5F_ACC_TRUNC,
+					     H5P_DEFAULT, H5P_DEFAULT) ;
+
+	hid_t group_id = 0 ;
+	int prank = Loci::MPI_rank ;
+#ifdef H5_USE_16_API
+	if(prank == 0)
+	  group_id = H5Gcreate(file_id, "cellweights", 0) ;
+#else
+	if(prank == 0)
+	  group_id = H5Gcreate(file_id, "cellweights", 
+			       H5P_DEFAULT,H5P_DEFAULT,H5P_DEFAULT) ;
+#endif
+        
+	entitySet dom = cw->domain() ;
+	int offset = 0 ; 
+	write_store(group_id,cw,dom,offset,MPI_COMM_WORLD) ;
+	if(prank == 0) 
+	  H5Gclose(group_id) ;
+	Loci::hdf5CloseFile(file_id) ;
+      } else {
+	if(Loci::MPI_rank == 0) {
+	  ::unlink(filename.c_str()) ;
+	}
+        
+      }
+      
+    }
+  };
+  register_rule<output_restart_weight> register_output_restart_weight ;
 
 }
 

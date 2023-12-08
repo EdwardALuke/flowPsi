@@ -43,11 +43,17 @@ namespace flowPsi {
     $plot_status{n=-1} = 0 ;
   }
 
-  
-  $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1},stop_time,stime{n}) {
-    $timestepFinished{n} = (($$n{n}>$stop_iter+1) ||
-			    ($plot_status{n-1}>1) ||
-			    ($stime{n} > real($stop_time))) ;
+  $type firstRun param<bool> ;
+  $type ic_stime param<real> ; //computing time ;
+  $type ic_ncycle param<int> ; //starting cycle number ;
+
+  $rule singleton(timestepFinished{n}<-$n{n},stop_iter,plot_status{n-1},stop_time,stime{n},firstRun,ncycle{n},ic_ncycle) {
+    bool first_cycle  =  $firstRun && (($ncycle{n}-1)==$ic_ncycle) ;
+    bool restart_cycle = (((max($ncycle{n}-1,1)%$stop_iter) == 0)&&
+			  !first_cycle) ;
+    $timestepFinished{n} = (restart_cycle ||
+			     ($plot_status{n-1} > 1) ||
+			     ($stime{n} > double($stop_time))) ;
 
     Loci::storeRepP ac = Loci::DataXFER_DB.getItem("adaptCycle") ;
     if(ac != 0) {
@@ -164,8 +170,6 @@ namespace flowPsi {
   }
 
 
-  $type ic_stime param<real> ; //computing time ;
-  $type ic_ncycle param<int> ; //starting cycle number ;
   
   $rule unit(ic_stime),constraint(UNIVERSE) {
     $ic_stime = 0 ;
