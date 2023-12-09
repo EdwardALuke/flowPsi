@@ -49,8 +49,8 @@ namespace flowPsi {
     // kinetic energy and viscosity
     const real beta = 1e-2 ;
     real v = norm(u) ;
-    double k = (3./2.)*(beta*v)*(beta*v) ;
-    k = max(k,1e-3) ;
+    real k = (3./2.)*(beta*v)*(beta*v) ;
+    k = max<real>(k,1e-3) ;
     
     if(finput.optionExists("k")) {
       finput.getOption("k",k) ;
@@ -62,7 +62,7 @@ namespace flowPsi {
     //      const real nu = 1e-5 ;
     //      double eps = 0.09*k*k/(nu_frac*nu) ;
     const real len_scale = 1e-3 ;
-    double eps = 0.09*pow(k,1.5)/len_scale ;
+    real eps = 0.09*pow(k,1.5)/len_scale ;
     
     if(finput.optionExists("epsilon")) {
       finput.getOption("epsilon",eps) ;

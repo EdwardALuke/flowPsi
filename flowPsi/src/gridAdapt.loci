@@ -463,8 +463,8 @@ namespace flowPsi {
   template <> struct unit_traits<double> {
     static double unit() { return 0.0; }
   } ;
-  template <> struct unit_traits<vect3d> {
-    static vect3d unit() { return vect3d(0.0,0.0,0.0) ; }
+  template <> struct unit_traits<vector3d<double> > {
+    static vector3d<double> unit() { return vector3d<double>(0.0,0.0,0.0) ; }
   } ;
   //--------------------------------------------------------------------------
   // restart after adapt
@@ -810,8 +810,17 @@ namespace flowPsi {
 
     store<pair<int,int> > c2pset ;
     c2pset = Loci::DataXFER_DB.getItem("c2p") ;
-    
+
+#ifdef USE_AUTODIFF
+    store<double> ic ;
+    ic.allocate(dom) ;
+    interpolateStore(ic, pgprev,c2pset,dom) ;
+    FORALL(dom,ii) {
+      $gagePressure_ic[ii] = ic[ii] ;
+    } ENDFORALL 
+#else
     interpolateStore($gagePressure_ic, pgprev,c2pset,dom) ;
+#endif
     Loci::DataXFER_DB.deleteItem("pgrestart") ;
   } ;
     
@@ -827,13 +836,22 @@ namespace flowPsi {
     store<pair<int,int> > c2pset ;
     c2pset = Loci::DataXFER_DB.getItem("c2p") ;
     
+#ifdef USE_AUTODIFF
+    store<double> ic ;
+    ic.allocate(dom) ;
+    interpolateStore(ic, tprev,c2pset,dom) ;
+    FORALL(dom,ii) {
+      $temperature_ic[ii] = ic[ii] ;
+    } ENDFORALL 
+#else
     interpolateStore($temperature_ic, tprev,c2pset,dom) ;
+#endif
     Loci::DataXFER_DB.deleteItem("trestart") ;
   } ;
 
   $rule pointwise(priority::u_ic<-refineRestart),option(disable_threading),prelude {
     entitySet dom = entitySet(seq) ;
-    store<vect3d> uprev ;
+    store<vector3d<double> > uprev ;
     Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("urestart") ;
     if(ptr == 0)
       cerr << "trestart not in DB!" << endl ;
@@ -843,7 +861,16 @@ namespace flowPsi {
     store<pair<int,int> > c2pset ;
     c2pset = Loci::DataXFER_DB.getItem("c2p") ;
     
+#ifdef USE_AUTODIFF
+    store<vector3d<double> > ic ;
+    ic.allocate(dom) ;
+    interpolateStore(ic, uprev,c2pset,dom) ;
+    FORALL(dom,ii) {
+      $u_ic[ii] = ic[ii] ;
+    } ENDFORALL 
+#else
     interpolateStore($u_ic, uprev,c2pset,dom) ;
+#endif
     Loci::DataXFER_DB.deleteItem("urestart") ;
   } ;
 

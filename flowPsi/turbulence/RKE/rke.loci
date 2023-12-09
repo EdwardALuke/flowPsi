@@ -201,7 +201,7 @@ namespace flowPsi {
   // realizable time scale
   $rule pointwise(rts<-rke,tts,rt) {
     const real ctau = $rke.ctau ;
-    $rts = $tts*max(1.0,ctau/pow($rt,0.5)) ;
+    $rts = $tts*max<real>(1.0,ctau/pow($rt,0.5)) ;
   }
 
 
@@ -211,7 +211,7 @@ namespace flowPsi {
     const real ctau = $rke.ctau ;
     const real amrt = amu*$rt ;
     const real rtsqt = pow($rt,0.5) ;
-    const real rf = max(1.0,ctau/rtsqt) ;
+    const real rf = max<real>(1.0,ctau/rtsqt) ;
     const real e1 = 1.-exp(-amrt) ;
     const real e2 = 1.-exp(-rtsqt) ;
     $fmu = max(e1*rf/(e2+EPSILON),amu*ctau) ;
@@ -227,7 +227,7 @@ namespace flowPsi {
   // latency parameter for hybrid RANS/LES in the RKE model
   $rule pointwise(lns::alpha<-rke,LG,strainRate,divu,k,e,cmu,u,dtmax),
     constraint(vol,MS_RKEModel) {
-    const real udt = 2.*norm($u)*$dtmax ;
+    const real udt = 2.*norm($u)*real($dtmax) ;
 //      const real udt = 0. ;
 
     const real cs = $rke.cs ;
@@ -235,7 +235,7 @@ namespace flowPsi {
     const real grid_len_scale = 2.*max($LG,udt) ;
     const real c1 = cs*pow(grid_len_scale,2)*S ;
     const real c2 = $cmu*pow($k,2)/$e ;
-    $alpha = min(c1/(c2+EPSILON),1.0) ;
+    $alpha = min<real>(c1/(c2+EPSILON),1.0) ;
   }
 
   // Definition of turbulent viscosity
@@ -265,7 +265,7 @@ namespace flowPsi {
     const real gradkk = dot($grads(k),$grads(k)) ;
     const real gradke = dot($grads(k),$grads(e)) ;
     const real gradFunc = (gradkk-$tts*gradke)/$e ;
-    $psit = max(gradFunc,0.0) ;
+    $psit = max<real>(gradFunc,0.0) ;
   }
 
 
@@ -298,7 +298,7 @@ namespace flowPsi {
     const real S = $strainRate ;
     const real Omega = $vortMag ;
 
-    $stress_scalar_rke = max($tmu*(S*Omega-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+    $stress_scalar_rke = max<real>($tmu*(S*Omega-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
                              0.0) ;
   }
 
@@ -313,16 +313,16 @@ namespace flowPsi {
     constraint(vorticity_production,k,tmu) {
     const real O2 = $vortMag*$vortMag ;
 
-    $stress_scalar_rke = max($tmu*(O2-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+    $stress_scalar_rke = max<real>($tmu*(O2-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
                              0.0) ;
   }
 
   $rule pointwise(vortex_correction::stress_scalar_rke<-tmu,rho,k,divu,
                   vortMag,strainRate,Cvor,alpha),
     constraint(vortex_preserving_production,k,tmu) {
-    const real O = max($vortMag + $Cvor*(min($strainRate-$vortMag,0.0)),0.) ;
+    const real O = max<real>($vortMag + $Cvor*(min<real>($strainRate-$vortMag,0.0)),0.) ;
     const real S = $strainRate ;
-    $stress_scalar_rke = max($tmu*(S*O-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
+    $stress_scalar_rke = max<real>($tmu*(S*O-2./3.*$divu*$divu)-2./3.*$alpha*$rho*$k*$divu,
                              0.0);
   }
 
@@ -509,7 +509,7 @@ namespace flowPsi {
     constraint(k,e,RKEModel) {
     const real ce2 = $rke.ce2 ;
     const real ctau = $rke.ctau ;
-    $e_srcJ -= ce2*$rho*$e*$vol/($k*max(1.0,ctau/pow($rt,0.5))) ;
+    $e_srcJ -= ce2*$rho*$e*$vol/($k*max<real>(1.0,ctau/pow($rt,0.5))) ;
   }
 
   $rule apply(k_srcJ<-vol,rho,k,e,rt,rts,rke,alpha,cmu,fmu,divu,strainRate,tmu)[Loci::Summation],
@@ -603,10 +603,10 @@ namespace flowPsi {
     // Turblent mach number cutoff
 //    const real mt0 = $wilcox_Mto ;
     const real mt0 = 0.2 ;
-    const real Mt2 = pow(max(Mt-mt0,0.0),2) ;
+    const real Mt2 = pow(max<real>(Mt-mt0,0.0),2) ;
     // compressibility dissipation constant used to turn
     // correction on/off
-    const real psi = min($wilcox_xi,1.0) ;
+    const real psi = min<real>($wilcox_xi,1.0) ;
 
     // destruction of k due to compressibility
   //modified sarkar with zeman turbulence mach number lag
