@@ -90,7 +90,7 @@ namespace flowPsi {
         vect3d fm = vect3d($fjm[i][mi+0],
                            $fjm[i][mi+1],
                            $fjm[i][mi+2]) ;
-        vect3d fnew = dot(frame.R,fm) ;
+        vect3d fnew = frame.rotate_vec(fm) ; //dot(frame.R,fm) ;
         $fjm[i][mi+0]= fnew.x ;
         $fjm[i][mi+1]= fnew.y ;
         $fjm[i][mi+2]= fnew.z ;
@@ -136,7 +136,7 @@ namespace flowPsi {
         vect3d fm = vect3d($fjm[i][mi+0],
                            $fjm[i][mi+1],
                            $fjm[i][mi+2]) ;
-        vect3d fnew = dot(frame.R,fm) ;
+        vect3d fnew = frame.rotate_vec(fm) ; //dot(frame.R,fm) ;
         $cl->$srcJ[i][mi+0] -= fnew.x ;
         $cl->$srcJ[i][mi+1] -= fnew.y ;
         $cl->$srcJ[i][mi+2] -= fnew.z ;
