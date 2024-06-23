@@ -40,16 +40,16 @@ namespace flowPsi {
 
   typedef vector3d<float> coord3df ;
   extern   void read_puT_file_serial(std::string filename,
-				     store<vect3d> &loc,
-				     store<real> &p,
-				     store<real> &T,
-				     store<vect3d> &vel,
-				     store<real> &k,
-				     store<real> &mu_t
+				     store<vector3d<double> > &loc,
+				     store<double> &p,
+				     store<double> &T,
+				     store<vector3d<double> > &vel,
+				     store<double> &k,
+				     store<double> &mu_t
 				     ) ;
   void read_scalar_file_serial(std::string filename,
-                               store<vect3d> &loc,
-                               store<real> &val) {
+                               store<vector3d<double> > &loc,
+                               store<double> &val) {
 
     ifstream bf(filename.c_str(),ios::in) ;
     if(bf.fail()) {
@@ -75,11 +75,11 @@ namespace flowPsi {
   }
 
   void read_massFlux_file_serial(std::string filename,
-				 store<vect3d> &loc,
-				 store<vect3d> &mf,
-				 store<real> &T0,
-				 store<real> &k,
-				 store<real> &mu_t) {
+				 store<vector3d<double> > &loc,
+				 store<vector3d<double> > &mf,
+				 store<double> &T0,
+				 store<double> &k,
+				 store<double> &mu_t) {
 
     ifstream bf(filename.c_str(),ios::in) ;
       if(bf.fail()) {
@@ -277,8 +277,8 @@ namespace flowPsi {
       bool error_found = false ;
       std::map<int,Loci::entitySet>::iterator bci ;
       for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
-        store<vect3d> loc,vel ;
-        store<real> p,T,k,mu_t ;
+        store<vector3d<double> > loc,vel ;
+        store<double> p,T,k,mu_t ;
         
         string filename = prescribed_BC[bci->first] ;
         Loci::debugout << "reading " << filename << endl ;
@@ -290,28 +290,28 @@ namespace flowPsi {
         vector<int> pnt_id (npnts) ;
 
         for(int i=0;i<npnts;++i) {
-          pnts[i][0] = realToFloat(loc[i].x) ;
-          pnts[i][1] = realToFloat(loc[i].y) ;
-          pnts[i][2] = realToFloat(loc[i].z) ;
+          pnts[i][0] = (loc[i].x) ;
+          pnts[i][1] = (loc[i].y) ;
+          pnts[i][2] = (loc[i].z) ;
           pnt_id[i] = i ;
         }
 
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         
         
-        real dist = 1e30 ;
+        double dist = 1e30 ;
         sequence sgroup = sequence(bci->second) ; 
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
-          vect3d fcenter = facecenter[*si] ;
+          vector3d<double> fcenter = realToDouble(facecenter[*si]) ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<real> w ;
+          vector<double> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
-          vect3d ur(0,0,0) ;
-          real pr = 0, Tr = 0 ;
-          real kr = 0 ;
-          real mu_tr = 0 ;
+          vector3d<double> ur(0,0,0) ;
+          double pr = 0, Tr = 0 ;
+          double kr = 0 ;
+          double mu_tr = 0 ;
           
           for(unsigned int i=0;i<neighbors.size();++i) {
             int pt = neighbors[i] ;
@@ -424,8 +424,8 @@ namespace flowPsi {
 
 
 
-        store<vect3d> loc,mf ;
-        store<real> T0,k,mu_t ;
+        store<vector3d<double> > loc,mf ;
+        store<double> T0,k,mu_t ;
         
         string filename = prescribed_BC[bci->first] ;
         Loci::debugout << "reading " << filename << endl ;
@@ -437,27 +437,27 @@ namespace flowPsi {
         vector<int> pnt_id (npnts) ;
 
         for(int i=0;i<npnts;++i) {
-          pnts[i][0] = realToFloat(loc[i].x) ;
-          pnts[i][1] = realToFloat(loc[i].y) ;
-          pnts[i][2] = realToFloat(loc[i].z) ;
+          pnts[i][0] = (loc[i].x) ;
+          pnts[i][1] = (loc[i].y) ;
+          pnts[i][2] = (loc[i].z) ;
           pnt_id[i] = i ;
         }
 
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         
-        real dist = 1e30;
+        double dist = 1e30;
         sequence sgroup = sequence(bci->second) ; 
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
-          vect3d fcenter = facecenter[*si] ;
+          vector3d<double> fcenter = realToDouble(facecenter[*si]) ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<real> w ;
+          vector<double> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
-          vect3d mfr(0,0,0) ;
-          real T0r = 0 ;
-          real kr = 0 ;
-          real mu_tr = 0 ;
+          vector3d<double>  mfr(0,0,0) ;
+          double T0r = 0 ;
+          double kr = 0 ;
+          double mu_tr = 0 ;
           
           for(unsigned int i=0;i<neighbors.size();++i) {
             int pt = neighbors[i] ;
@@ -519,8 +519,8 @@ namespace flowPsi {
       std::map<int,Loci::entitySet>::iterator bci ;
       for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
 
-        store<real> T ;
-        store<vect3d> loc ;
+        store<double> T ;
+        store<vector3d<double> > loc ;
         
         string filename = prescribed_BC[bci->first] ;
         Loci::debugout << "reading " << filename << endl ;
@@ -531,19 +531,19 @@ namespace flowPsi {
         vector<int> pnt_id (npnts) ;
 
         for(int i=0;i<npnts;++i) {
-          pnts[i][0] = realToFloat(loc[i].x) ;
-          pnts[i][1] = realToFloat(loc[i].y) ;
-          pnts[i][2] = realToFloat(loc[i].z) ;
+          pnts[i][0] = (loc[i].x) ;
+          pnts[i][1] = (loc[i].y) ;
+          pnts[i][2] = (loc[i].z) ;
           pnt_id[i] = i ;
         }
 
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         sequence sgroup = sequence(bci->second) ; 
-        real dist = 1e30 ;
+	double dist = 1e30 ;
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
-          vect3d fcenter = facecenter[*si] ;
+          vector3d<double> fcenter = realToDouble(facecenter[*si]) ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<real> w ;
+          vector<double> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values
@@ -605,8 +605,8 @@ namespace flowPsi {
       std::map<int,Loci::entitySet>::iterator bci ;
       for(bci=bcmap.begin();bci!=bcmap.end();++bci) {
 
-        store<real> qdot ;
-        store<vect3d> loc ;
+        store<double> qdot ;
+        store<vector3d<double> > loc ;
         
         string filename = prescribed_qwall_BC[bci->first] ;
         Loci::debugout << "reading " << filename << endl ;
@@ -626,11 +626,11 @@ namespace flowPsi {
         Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
         sequence sgroup = sequence(bci->second) ; 
 
-        real dist = 1e30 ;
+        double dist = 1e30 ;
         for(sequence::const_iterator si=sgroup.begin();si!=sgroup.end();++si) {
-          vect3d fcenter = facecenter[*si] ;
+          vector3d<double> fcenter = realToDouble(facecenter[*si]) ;
           vector<int> neighbors  = get_stencil(kd,fcenter,dist) ;
-          vector<real> w ;
+          vector<double> w ;
           stencil_weights(w,neighbors,loc,fcenter) ;
 
           // Compute Interpolated values

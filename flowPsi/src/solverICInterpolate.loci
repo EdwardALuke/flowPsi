@@ -43,12 +43,12 @@ namespace flowPsi {
 
   typedef vector3d<float> coord3df ;
   void read_puT_file_serial(std::string filename,
-			    store<vect3d> &loc,
-			    store<real> &p,
-			    store<real> &T,
-			    store<vect3d> &vel,
-			    store<real> &k,
-			    store<real> &mu_t
+			    store<vector3d<double> > &loc,
+			    store<double> &p,
+			    store<double> &T,
+			    store<vector3d<double> > &vel,
+			    store<double> &k,
+			    store<double> &mu_t
 			    ) {
 
     ifstream bf(filename.c_str(),ios::in) ;
@@ -88,12 +88,12 @@ namespace flowPsi {
   }
 
   void read_puT_file(std::string filename,
-                     store<vect3d> &loc,
-                     store<real> &p,
-                     store<real> &T,
-                     store<vect3d> &vel,
-                     store<real> &k,
-                     store<real> &mu_t) {
+                     store<vector3d<double> > &loc,
+                     store<double> &p,
+                     store<double> &T,
+                     store<vector3d<double> > &vel,
+                     store<double> &k,
+                     store<double> &mu_t) {
     if(Loci::MPI_rank == 0) {
       read_puT_file_serial(filename,loc,p,T,vel,k,mu_t) ;
       if(Loci::MPI_processes > 1) {
@@ -133,8 +133,8 @@ namespace flowPsi {
     option(disable_threading), prelude { 
     if(Loci::GLOBAL_AND(seq==EMPTY))
       return ;
-    store<vect3d> loc,vel ;
-    store<real> p,T,k,mu_t ;
+    store<vector3d<double> > loc,vel ;
+    store<double> p,T,k,mu_t ;
 
     string filename = *$initialConditionsFile ;
     if(Loci::MPI_rank == 0 )
@@ -147,30 +147,31 @@ namespace flowPsi {
     vector<int> pnt_id (npnts) ;
 
     for(int i=0;i<npnts;++i) {
-      pnts[i][0] = realToFloat(loc[i].x) ;
-      pnts[i][1] = realToFloat(loc[i].y) ;
-      pnts[i][2] = realToFloat(loc[i].z) ;
+      pnts[i][0] = (loc[i].x) ;
+      pnts[i][1] = (loc[i].y) ;
+      pnts[i][2] = (loc[i].z) ;
       pnt_id[i] = i ;
     }
 
     Loci::kdTree::KDTree<float> kd(pnts,pnt_id) ;
 
-    real dist = 1e30 ;
+    double dist = 1e30 ;
     for(sequence::const_iterator si=seq.begin();si!=seq.end();++si) {
-      vector<int> neighbors = get_stencil(kd,$cellcenter[*si],dist) ;
+      vector3d<double> cellloc = realToDouble($cellcenter[*si]) ;
+      vector<int> neighbors = get_stencil(kd,cellloc,dist) ;
 
-      vector<real> w  ;
-      stencil_weights(w,neighbors,loc,$cellcenter[*si]) ;
+      vector<double> w  ;
+      stencil_weights(w,neighbors,loc,cellloc) ;
 
-      vect3d ur(0,0,0) ;
-      real pr = 0, Tr = 0 ;
-      real kr = 0 ;
-      real mu_tr = 0 ;
+      vector3d<double> ur(0,0,0) ;
+      double pr = 0, Tr = 0 ;
+      double kr = 0 ;
+      double mu_tr = 0 ;
 
       for(size_t i=0;i<neighbors.size();++i) {
         int pt = neighbors[i] ;
 
-        real weight = w[i] ;
+        double weight = w[i] ;
         ur += weight*vel[pt] ;
         pr += weight*p[pt] ;
         Tr += weight*T[pt] ;

@@ -434,7 +434,7 @@ $rule default(deformFile) {
   $deformFile = "";
 } 
 
-void readLociDeformFile_rank0 (const string& filename, vector<coord3df> & coords, vector<vect3d> &disp){
+void readLociDeformFile_rank0 (const string& filename, vector<coord3df> & coords, vector<vector3d<double> > &disp){
   if(Loci::MPI_rank != 0)
     return;
   std::ifstream bf(filename.c_str(),std::ios::in) ;
@@ -449,7 +449,7 @@ void readLociDeformFile_rank0 (const string& filename, vector<coord3df> & coords
   bf >> np ; // read in number of points on the inflow boundary.
   Loci::parse::kill_white_space(bf) ;
   coords.assign(np,vector3d<double>(0.,0.,0.));
-  disp.assign(np,vect3d(0.,0.,0.));
+  disp.assign(np,vector3d<double>(0.,0.,0.));
   for(int i=0;i<np;++i) {
     bf >> coords[i] >> disp[i];
     Loci::parse::kill_white_space(bf) ;
@@ -651,7 +651,7 @@ $rule apply( nodeCollection <- pos, fileNumber(pos), lengthScaleFactor,
 
   // Copy gathered data into cosim buffer
   if(Loci::MPI_rank == 0) {
-    real_t scaleFac = 1.0 / *$lengthScaleFactor ;
+    doublet scaleFac = 1.0 / realToDouble(*$lengthScaleFactor) ;
     cout << "Scale (multiply) coordinates of wetted surface by " << scaleFac << '\n';
     cout << "Creating node map from " << nnodes << " nodes\n";
     for(int i=0;i<nnodes;++i) {
@@ -912,7 +912,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       // Retrieve CFD displacements from PETSc vector
       // Output undeformed FEM surface, deformed FEM surface, Undeformed CFD surface, Fully Deformed CFD surface.
       vector<int> file_face_ids, cfd_face_ids;
-      vector<vector<real_t> > cfd_def_coords, file_def_coords;
+      vector<vector<double> > cfd_def_coords, file_def_coords;
       file_face_ids.resize(file_data.face_conn.size());
       cfd_face_ids.resize(cfd_data.face_conn.size());
       for(size_t i=0;i<file_face_ids.size();++i){
@@ -973,7 +973,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
   option(disable_threading), prelude {
 
   if(!$deformFile->empty()){
-    vector<vect3d> cfd_coords, cfd_disp, cfd_coords_loc, cfd_disp_loc;
+    vector<vector3d<double> > cfd_coords, cfd_disp, cfd_coords_loc, cfd_disp_loc;
 
     Loci::entitySet dom = entitySet(seq) ;
     // Copy data into local buffer
@@ -981,7 +981,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
     cfd_coords_loc.resize(dom.size());
     cfd_disp_loc.resize(dom.size());
     FORALL(dom,ii) {
-      cfd_coords_loc[cnt] = $pos[ii] ;
+      cfd_coords_loc[cnt] = realToDouble($pos[ii]) ;
       cnt++ ;
     } ENDFORALL ;
 
@@ -1000,7 +1000,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
 
 		
     // Read boundary data to be mapped from file
-    vector<vect3d> file_disp;
+    vector<vector3d<double> > file_disp;
     vector<coord3df> file_coords;
     readLociDeformFile_rank0(*$deformFile,file_coords, file_disp);
     if(Loci::MPI_rank == 0) { // Do mapping on processor zero, distribute data out
@@ -1013,7 +1013,7 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
 	file_coordsID[i] = i ;
       }
 		  
-      store<vect3d> loc;
+      store<vector3d<double> > loc;
       entitySet locdom = interval(0,file_coords.size()-1) ;
       loc.allocate(locdom) ;
 			
@@ -1023,16 +1023,17 @@ $rule pointwise (nodeDisp_mapped <- pos, deformFile, numDeformNodes, lengthScale
       }
 
       Loci::kdTree::KDTree<double> kd(file_coords,file_coordsID) ;
-      cfd_disp.resize(*$numDeformNodes,vect3d(0.,0.,0.));
+      cfd_disp.resize(*$numDeformNodes,vector3d<double>(0.,0.,0.));
+      double dist = realToDouble(*$searchRadius) ;
       for(size_t i=0;i<cfd_disp.size();++i){
-	vector<int> neighbors  = get_stencil(kd,cfd_coords[i],*$searchRadius) ;
-	vector<real_t> w ;
+	vector<int> neighbors  = get_stencil(kd,cfd_coords[i],dist) ;
+	vector<double> w ;
 	stencil_weights(w,neighbors,loc,cfd_coords[i]) ;
 	//				Loci::debugout << "Node " << i << "\n";
 	//				Loci::debugout << "    Neighbors size " << neighbors.size() << "\n";
 	for(size_t j=0;j<neighbors.size();++j) {
 	  //					Loci::debugout << "    Neighbor " << j << ", file line " << neighbors[j] << ", weight " << w[j] << ", file coord, [" << file_coords[neighbors[j]] << ", file disp [" << *$lengthScaleFactor *file_disp[neighbors[j]] << "]\n";
-	  cfd_disp[i] += *$lengthScaleFactor * w[j]*file_disp[neighbors[j]];
+	  cfd_disp[i] += realToDouble(*$lengthScaleFactor) * w[j]*file_disp[neighbors[j]];
 	}
 			  
 			  

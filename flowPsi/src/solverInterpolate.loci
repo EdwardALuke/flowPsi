@@ -803,7 +803,7 @@ namespace flowPsi {
     scatterVector(vecs,procid,MPI_COMM_WORLD) ;
       
     int nlocs = vecs.size() ;
-    vector<Array<real,4> > weights(nlocs) ;
+    vector<Array<double,4> > weights(nlocs) ;
     vector<Array<int,4> > stencils(nlocs) ;
     
     Loci::kdTree::KDTree<float>::bounds bnd ;
@@ -849,7 +849,7 @@ namespace flowPsi {
 #endif
       int result_size = pcollect.size() ;
 
-      store<vect3d> loc ;
+      store<vector3d<double> > loc ;
       store<int> ids ;
       entitySet locdom = interval(0,result_size-1) ;
       loc.allocate(locdom) ;
@@ -872,7 +872,7 @@ namespace flowPsi {
         WARN(neighbors.size() == 0) ;
 
         // compute stencil weights
-        vector<real> w  ;
+        vector<double> w  ;
         stencil_weights(w,neighbors,loc,vecs[ip]) ;
 
         int nsz = neighbors.size() ;
@@ -880,7 +880,7 @@ namespace flowPsi {
         WARN(nsz == 0) ;
 
         Array<int,4> st ;
-        Array<real,4> wt ;
+        Array<double,4> wt ;
         for(int i=0;i<nsz;++i) {
           WARN((neighbors[i] < 0 || neighbors[i] >= result_size)) ;
           st[i] = ids[neighbors[i]] ;
@@ -1031,13 +1031,13 @@ namespace flowPsi {
 
 
     vector<vector3d<double> > vecs(dom.size()) ;
-    vector<vect3d> fcenter(dom.size()) ;
-    vector<vect3d> fnormal(dom.size()) ;
+    vector<vector3d<double> > fcenter(dom.size()) ;
+    vector<vector3d<double> > fnormal(dom.size()) ;
     int cnt = 0 ;
     FORALL(dom,cc) {
       vecs[cnt] = realToDouble(pnts[cc]) ;
-      fcenter[cnt] = facecenter[min_cell2noslip[cc]] ;
-      fnormal[cnt] = area[min_cell2noslip[cc]].n ;
+      fcenter[cnt] = realToDouble(facecenter[min_cell2noslip[cc]]) ;
+      fnormal[cnt] = realToDouble(area[min_cell2noslip[cc]].n) ;
       cnt++ ;
     } ENDFORALL ;
 
@@ -1048,7 +1048,7 @@ namespace flowPsi {
     scatterVector(fnormal,procid,MPI_COMM_WORLD) ;
 
     int nlocs = vecs.size() ;
-    vector<Array<real,4> > weights(nlocs) ;
+    vector<Array<double,4> > weights(nlocs) ;
     vector<Array<int,4> > stencils(nlocs) ;
 
     Loci::kdTree::KDTree<float>::bounds bnd ;
@@ -1096,7 +1096,7 @@ namespace flowPsi {
 
       int result_size = pcollect.size() ;
 
-      store<vect3d> loc ;
+      store<vector3d<double> > loc ;
       store<int> ids ;
       entitySet locdom = interval(0,result_size-1) ;
       loc.allocate(locdom) ;
@@ -1122,8 +1122,8 @@ namespace flowPsi {
           int nid = -1 ;
           for(size_t i = 0;i<neighbors.size();++i)
             if(neighbors[i] >= 0) {
-              vect3d fctr = fcenter[lid[ip]] ;
-              vect3d n = fnormal[lid[ip]] ;
+              vector3d<double> fctr = fcenter[lid[ip]] ;
+              vector3d<double> n = fnormal[lid[ip]] ;
               if(dot(n,loc[neighbors[i]]-fctr) > 0.0)
                 neighbors[i] = -1 ; // null out this neighbor
               else {
@@ -1142,11 +1142,11 @@ namespace flowPsi {
         }
 
         // compute stencil weights
-        vector<real> w  ;
+        vector<double> w  ;
         stencil_weights(w,neighbors,loc,vecs[ip]) ;
 
         Array<int,4> st ;
-        Array<real,4> wt ;
+        Array<double,4> wt ;
         int nsz = neighbors.size() ;
         
         if(nsz > 0) {

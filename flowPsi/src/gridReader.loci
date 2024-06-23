@@ -309,7 +309,8 @@ namespace flowPsi {
 
     postprocess_grid(facts) ;
 #ifdef USE_AUTODIFF
-    setupPosAutoDiff(facts) ;
+    real val = 1.0 ;
+    setupPosAutoDiff(facts,val) ;
 #endif
   }
 
@@ -351,7 +352,9 @@ namespace flowPsi {
 
     postprocess_grid(facts) ;
 #ifdef USE_AUTODIFF
-    setupPosAutoDiff(facts) ;
+    real val = 1.0 ;
+    
+    setupPosAutoDiff(facts,val) ;
 #endif
   }
 
