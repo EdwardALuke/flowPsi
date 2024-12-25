@@ -48,7 +48,7 @@ $(TARGET): $(OBJS)
 FRC : 
 
 LOCI_FILES = $(wildcard *.loci)
-LOCI_LPP_FILES = $(LOCI_FILES:.loci=.cc)
+LOCI_LPP_FILES = $(LOCI_FILES:.loci=.$(LPP_I_SUFFIX))
 
 clean:
 	rm -fr $(OBJS) $(TARGET) $(JUNK)
@@ -62,4 +62,6 @@ DEPEND_FILES=$(subst .o,.d,$(OBJS))
 
 
 #include automatically generated dependencies
+ifeq ($(filter $(MAKECMDGOALS),clean distclean ),)
 -include $(DEPEND_FILES)
+endif

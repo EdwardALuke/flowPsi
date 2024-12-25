@@ -58,7 +58,7 @@ clean:
 	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(JUNK)
 
 LOCI_FILES = $(wildcard *.loci)
-LOCI_LPP_FILES = $(LOCI_FILES:.loci=.cc)
+LOCI_LPP_FILES = $(LOCI_FILES:.loci=.$(LPP_I_SUFFIX))
 
 distclean: 
 	rm -rf $(DEPEND_FILES)
@@ -67,4 +67,6 @@ distclean:
 DEPEND_FILES=$(subst .o,.d,$(OBJS))
 
 #include automatically generated dependencies
+ifeq ($(filter $(MAKECMDGOALS),clean distclean ),)
 -include $(DEPEND_FILES)
+endif
