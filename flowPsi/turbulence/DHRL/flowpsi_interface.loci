@@ -46,9 +46,9 @@ namespace flowPsi {
 
     const int mi = 1 ;
     const int ei = 4;
-    $cl->$src[mi+0] += $vis_flux_rans[0] ;
-    $cl->$src[mi+1] += $vis_flux_rans[1] ;
-    $cl->$src[mi+2] += $vis_flux_rans[2] ;
+    $cl->$src[mi+0] += $vis_flux_rans.x ;
+    $cl->$src[mi+1] += $vis_flux_rans.y ;
+    $cl->$src[mi+2] += $vis_flux_rans.z ;
     $cl->$src[ei] += $vis_energy_flux_rans + $heat_flux_rans ;
   }
     //Add RANS flux at face fc to cr[fc] cells
@@ -57,9 +57,9 @@ namespace flowPsi {
 
     const int mi = 1 ;
     const int ei = 4;
-    $cr->$src[mi+0] -= $vis_flux_rans[0] ;
-    $cr->$src[mi+1] -= $vis_flux_rans[1] ;
-    $cr->$src[mi+2] -= $vis_flux_rans[2] ;
+    $cr->$src[mi+0] -= $vis_flux_rans.x ;
+    $cr->$src[mi+1] -= $vis_flux_rans.y ;
+    $cr->$src[mi+2] -= $vis_flux_rans.z ;
     $cr->$src[ei] -= $vis_energy_flux_rans + $heat_flux_rans ;
   }
 
@@ -100,7 +100,7 @@ namespace flowPsi {
     $fjm[ei][rw] -= $u_f.y*coef*an.y*an.z*third ;
     $fjm[ei][rw] -= $u_f.z*coef*(1.0 + an.z*an.z*third) ;
 
-    $fjm[ei][ru] -= .5*$vis_flux_rans.z ;
+    $fjm[ei][ru] -= .5*$vis_flux_rans.x ;
     $fjm[ei][rv] -= .5*$vis_flux_rans.y ;
     $fjm[ei][rw] -= .5*$vis_flux_rans.z ;
       
