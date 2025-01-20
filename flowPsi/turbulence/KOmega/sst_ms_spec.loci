@@ -43,15 +43,19 @@ namespace flowPsi {
 
   $rule constraint(MS_SPECTRUM<-multi_scale) {
     $MS_SPECTRUM = EMPTY ;
-    int len = $multi_scale.size() ;
     bool spectrum = false ;
-  //check for option LES_SPECTRUM or LES_SPECTRUM2D(X,Y, or Z)
-    if(len >= 3 && $multi_scale[len-9] == '_' &&
-       ($multi_scale[len-8] == 'S' || $multi_scale[len-8] == 's'))
-      spectrum = true ;
-    if(len >= 3 && $multi_scale[len-12] == '_' &&
-       ($multi_scale[len-11] == 'S' || $multi_scale[len-11] == 's'))
-      spectrum = true ;
+    //check for option LES_SPECTRUM or LES_SPECTRUM2D(X,Y, or Z)
+    string msub = $multi_scale.substr(0,12) ;
+    if(msub.size() == 12) {
+      bool match = true ;
+      for(int i=0;i<12;++i) {
+        if(std::tolower(msub[i]) != "les_spectrum"[i])
+          match = false ;
+      }
+      if(match)
+        spectrum = true ;
+    }
+    
     if(spectrum)
       $MS_SPECTRUM = $*multi_scale.domain() ;
   }
