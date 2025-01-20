@@ -53,7 +53,7 @@ clean:
 	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)FPSI_m.so $(JUNK)
 
 LOCI_FILES = $(wildcard *.loci)
-LOCI_LPP_FILES = $(LOCI_FILES:.loci=.cc)
+LOCI_LPP_FILES = $(LOCI_FILES:.loci=.$(LPP_I_SUFFIX))
 
 distclean: 
 	rm $(DEPEND_FILES)
@@ -63,4 +63,6 @@ DEPEND_FILES=$(subst .o,.d,$(OBJS))
 
 
 #include automatically generated dependencies
+ifeq ($(filter $(MAKECMDGOALS),clean distclean ),)
 -include $(DEPEND_FILES)
+endif
