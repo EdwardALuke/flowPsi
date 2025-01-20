@@ -98,9 +98,6 @@ namespace LGSI {
   } ;
 
   
-  $type LSGSmatrixInitialize(X) blackbox<int> ;
-  $type LSGSmatrixTopology(X) blackbox<int> ;
-  
   struct lineLayout {
     int eqnstart,eqnend,Lstart,Ustart,OuterStart,OuterEnd ;
   } ;
@@ -172,8 +169,6 @@ namespace LGSI {
     matrixStructure() { access_counter = -1 ;}
   } ;
 
-  vector<matrixStructure> matrixInfo ;
-
   struct scalarMatrixData {
     vector<real> B ;
     vector<real> D ;
@@ -182,9 +177,14 @@ namespace LGSI {
 
   $type LSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
 
+  $type LSGSmatrixInitialize(X) blackbox<matrixStructure> ;
+
+  typedef matrixStructure *matrixStructureP ;
+  $type LSGSmatrixTopology(X) blackbox<matrixStructureP> ;
+  
+
   $rule blackbox(LSGSmatrixInitialize(X)),constraint(UNIVERSE),prelude {
-    $LSGSmatrixInitialize(X) = matrixInfo.size() ;
-    matrixInfo.push_back(matrixStructure()) ;
+    *$LSGSmatrixInitialize(X) = matrixStructure() ;
   } ;
 
   $type LSGSdiagEntries(X) param<int> ;
@@ -199,8 +199,9 @@ namespace LGSI {
 		 LSGSdiagEntries(X),LSGSmatrixInitialize(X)),
       option(disable_threading),
     prelude {
-    *$LSGSmatrixTopology(X) = *$LSGSmatrixInitialize(X) ;
-    struct matrixStructure &matrix = matrixInfo[*$LSGSmatrixInitialize(X)] ;
+    $LSGSmatrixTopology(X) =
+      const_cast<matrixStructure *>(&(*$LSGSmatrixInitialize(X))) ;
+    struct matrixStructure &matrix = *(*$LSGSmatrixTopology(X)) ;
     if(matrix.access_counter < 0) { 
 	if(Loci::MPI_processes > 1) {
 	  Loci::fact_db::distribute_infoP df = 
@@ -943,7 +944,7 @@ namespace LGSI {
 
   $rule blackbox(LSGSscalarMatrix(X)<-LSGSmatrixTopology(X),
 		 X_B,X_D,upper->X_U,lower->X_L), prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     vector<real> B(matrix.eql2g.size()); 
     vector<real> D(matrix.eql2g.size()); 
     vector<real> F(matrix.outerCLR.size()); 
@@ -988,7 +989,7 @@ namespace LGSI {
   $rule pointwise(LSGSScalarSolve(X)<-LSGSMaxIter,LSGSAbsTol,LSGSRelTol,
 		  LSGSRelaxation, LSGSscalarMatrix(X),LSGSmatrixTopology(X)),
     option(disable_threading),prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     // initialize x to zero
     vector<real> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
 
@@ -1450,7 +1451,7 @@ namespace LGSI {
 
   $rule blackbox(LSGSblockedMatrix(X)<-LSGSmatrixTopology(X),
 		 X_D,upper->X_U,lower->X_L), prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     int vs = $X_D.vecSize() ;
     int vs2 = vs*vs ;
     $LSGSblockedMatrix(X)->vs = vs ;
@@ -1509,7 +1510,7 @@ namespace LGSI {
 
   $type B storeVec<real_fj> ;
   $rule blackbox(LSGSblockedRHS(X,B)<-LSGSmatrixTopology(X),B),prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     int vs = $B.vecSize() ;
     vector<real_fj> B(matrix.nmyeqn*vs); 
     
@@ -1528,7 +1529,7 @@ namespace LGSI {
 		  LSGSmatrixTopology(X)),
     option(disable_threading),
     prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     int vs = $LSGSblockedMatrix(X)->vs ;
     $LSGSBlockedSSolve(X,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
@@ -1798,7 +1799,7 @@ namespace LGSI {
 		  LSGSmatrixTopology(X)),
     option(disable_threading),
     prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$LSGSmatrixTopology(X)] ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
     int vs = $LSGSblockedMatrix(X)->vs ;
     $LSGSPreconditioner(X,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
