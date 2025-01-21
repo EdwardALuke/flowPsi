@@ -197,41 +197,41 @@ namespace flowPsi {
     join($cellMeanCount,1) ;
   }
 
-  $type X store<float> ;
-  $rule unit(cellMean(X)),constraint(X,geom_cells) {
-    $cellMean(X) = 0 ;
+  $type Xf store<float> ;
+  $rule unit(cellMean(Xf)),constraint(Xf,geom_cells) {
+    $cellMean(Xf) = 0 ;
   }
-  $rule apply(cellMean(X)<-X,cellMeanCount)[Loci::Summation] {
-    join($cellMean(X),double($X)/double($cellMeanCount)) ;
+  $rule apply(cellMean(Xf)<-Xf,cellMeanCount)[Loci::Summation] {
+    join($cellMean(Xf),double($Xf)/double($cellMeanCount)) ;
   }
 
-  $rule unit(cellSigmaSq(X)), constraint(X,geom_cells) {
-    $cellSigmaSq(X) = 0 ;
+  $rule unit(cellSigmaSq(Xf)), constraint(Xf,geom_cells) {
+    $cellSigmaSq(Xf) = 0 ;
   }
-  $rule apply(cellSigmaSq(X)<-X,cellMean(X),cellMeanCount)[Loci::Summation] {
-    double delta = $X-$cellMean(X) ;
+  $rule apply(cellSigmaSq(Xf)<-Xf,cellMean(Xf),cellMeanCount)[Loci::Summation] {
+    double delta = $Xf-$cellMean(Xf) ;
     double term = delta*delta/($cellMeanCount-1) ;
-    join($cellSigmaSq(X),term) ;
+    join($cellSigmaSq(Xf),term) ;
   }
 
-  $rule singleton(cellThreshold(X)<-cellSigmaSq(X),cellMean(X),adaptSensitivity) {
-    float sigma = sqrt($cellSigmaSq(X)) ;
-    $cellThreshold(X) = $cellMean(X)+$adaptSensitivity*sigma ;
-    //cout << "cellThreshold" << $cellThreshold(X) << endl ;
+  $rule singleton(cellThreshold(Xf)<-cellSigmaSq(Xf),cellMean(Xf),adaptSensitivity) {
+    float sigma = sqrt($cellSigmaSq(Xf)) ;
+    $cellThreshold(Xf) = $cellMean(Xf)+$adaptSensitivity*sigma ;
+    //cout << "cellThreshold" << $cellThreshold(Xf) << endl ;
   }
   
-  $rule singleton(cellThresholdLow(X)<-cellSigmaSq(X),cellMean(X),coarsenSensitivity) {
-    float sigma = sqrt($cellSigmaSq(X)) ;
-    $cellThresholdLow(X) = $cellMean(X)-$coarsenSensitivity*sigma ;
-    //cout << "cellThresholdLow=" << $cellThresholdLow(X) << endl ;
+  $rule singleton(cellThresholdLow(Xf)<-cellSigmaSq(Xf),cellMean(Xf),coarsenSensitivity) {
+    float sigma = sqrt($cellSigmaSq(Xf)) ;
+    $cellThresholdLow(Xf) = $cellMean(Xf)-$coarsenSensitivity*sigma ;
+    //cout << "cellThresholdLow=" << $cellThresholdLow(Xf) << endl ;
   }
   
-  $rule pointwise(refineCell(X)<-cellThreshold(X),cellThresholdLow(X),X) {
-    $refineCell(X) = 0 ;
-    if($X > $cellThreshold(X))
-      $refineCell(X) = 1 ;
-    if($X < $cellThresholdLow(X))
-      $refineCell(X) = -1 ;
+  $rule pointwise(refineCell(Xf)<-cellThreshold(Xf),cellThresholdLow(Xf),Xf) {
+    $refineCell(Xf) = 0 ;
+    if($Xf > $cellThreshold(Xf))
+      $refineCell(Xf) = 1 ;
+    if($Xf < $cellThresholdLow(Xf))
+      $refineCell(Xf) = -1 ;
   }
   
   // Compute refinement flag
@@ -312,32 +312,32 @@ namespace flowPsi {
   OUTPUT_SCALAR("cell2nodeMax(cellRefFlagf)",refFlag) ;
   OUTPUT_SCALAR("cell2nodeMax(cellMaxEdgeLength)",cellMaxEdgeLength) ;
 
-  $type scalarCellError(X,Y) store<float> ;
-  $type X store<real> ;
-  $type Y store<real> ;
+  $type scalarCellError(XE,YE) store<float> ;
+  $type XE store<real> ;
+  $type YE store<real> ;
 
-  $rule unit(scalarCellError(X,Y)),constraint(geom_cells) {
-    $scalarCellError(X,Y) = 0 ;
+  $rule unit(scalarCellError(XE,YE)),constraint(geom_cells) {
+    $scalarCellError(XE,YE) = 0 ;
   }
-  $rule apply((cl,cr)->scalarCellError(X,Y)<-X,Y)[Loci::Maximum],
-    constraint((cl,cr)->geom_cells,X,Y) {
-    float val = realToFloat(fabs($X-$Y)) ;
-    join($cl->$scalarCellError(X,Y),val) ;
-    join($cr->$scalarCellError(X,Y),val) ;
+  $rule apply((cl,cr)->scalarCellError(XE,YE)<-XE,YE)[Loci::Maximum],
+    constraint((cl,cr)->geom_cells,XE,YE) {
+    float val = realToFloat(fabs($XE-$YE)) ;
+    join($cl->$scalarCellError(XE,YE),val) ;
+    join($cr->$scalarCellError(XE,YE),val) ;
   }
 
-  $type vect3d_cell_error(X,Y) store<float> ;
-  $type X store<vect3d> ;
-  $type Y store<vect3d> ;
+  $type vect3d_cell_error(XV,YV) store<float> ;
+  $type XV store<vect3d> ;
+  $type YV store<vect3d> ;
 
-  $rule unit(vect3d_cell_error(X,Y)),constraint(geom_cells) {
-    $vect3d_cell_error(X,Y) = 0 ;
+  $rule unit(vect3d_cell_error(XV,YV)),constraint(geom_cells) {
+    $vect3d_cell_error(XV,YV) = 0 ;
   }
-  $rule apply((cl,cr)->vect3d_cell_error(X,Y)<-X,Y)[Loci::Maximum],
-    constraint((cl,cr)->geom_cells,X,Y) {
-    float val = realToFloat(norm($X-$Y)) ;
-    join($cl->$vect3d_cell_error(X,Y),val) ;
-    join($cr->$vect3d_cell_error(X,Y),val) ;
+  $rule apply((cl,cr)->vect3d_cell_error(XV,YV)<-XV,YV)[Loci::Maximum],
+    constraint((cl,cr)->geom_cells,XV,YV) {
+    float val = realToFloat(norm($XV-$YV)) ;
+    join($cl->$vect3d_cell_error(XV,YV),val) ;
+    join($cr->$vect3d_cell_error(XV,YV),val) ;
   }
   
 

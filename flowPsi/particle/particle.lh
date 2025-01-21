@@ -21,7 +21,6 @@
 
 #include "particle.h"
 
-$type p_dtmax param<lagrangianP::TimeValue> ;
 $type turbophoresis_model param<std::string> ;
 $type drag_model param<std::string> ;
 $type particle_bag blackbox<list<Particle> > ;

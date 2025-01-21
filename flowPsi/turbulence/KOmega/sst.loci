@@ -699,8 +699,6 @@ namespace flowPsi {
     $sigma_k = 0.6 ;
   }
 
-  $type sst store<sst_param> ;
-
   $rule pointwise(sst<-sst1m,sst2,bF1,sigma_k) {
     $sst.sigmak = $bF1*$sigma_k+(1.0-$bF1)*$sst2.sigmak ;
     $sst.sigmae = $bF1*$sst1m.sigmae+(1.0-$bF1)*$sst2.sigmae ;

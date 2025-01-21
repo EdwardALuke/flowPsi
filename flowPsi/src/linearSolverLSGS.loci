@@ -1233,18 +1233,18 @@ namespace LGSI {
     
 
   // Blocked version
-  $type X_D storeMat<real_fj> ;
-  $type X_L storeMat<real_fj> ;
-  $type X_U storeMat<real_fj> ;
-  $type LSGSBlockedSSolve(X,B) storeVec<real> ;
+  $type Y_D storeMat<real_fj> ;
+  $type Y_L storeMat<real_fj> ;
+  $type Y_U storeMat<real_fj> ;
+  $type LSGSBlockedSSolve(Y,B) storeVec<real> ;
   using flowPsi::tmp_array ;
 
-  $rule pointwise(LSGSConnectivity(X)<-X_L,X_U),parametric(LSGSblockedMatrix(X)) {
+  $rule pointwise(LSGSConnectivity(Y)<-Y_L,Y_U),parametric(LSGSblockedMatrix(Y)) {
     realF diagnorm = 0 ;
-    for(int i=0;i<$*X_L.vecSize();++i) {
-      diagnorm = max(diagnorm,max(fabs($X_L[i][i]),fabs($X_U[i][i]))) ;
+    for(int i=0;i<$*Y_L.vecSize();++i) {
+      diagnorm = max(diagnorm,max(fabs($Y_L[i][i]),fabs($Y_U[i][i]))) ;
     }
-    $LSGSConnectivity(X) = diagnorm ;
+    $LSGSConnectivity(Y) = diagnorm ;
   }
 
 
@@ -1253,14 +1253,14 @@ namespace LGSI {
     virtual void preprocessLine(real_fj *D, pivot_type *pivot,
 				const real_fj *L, const real_fj *U, 
 				int lsz, int vs) const = 0 ;
-    virtual void linerhs(real *rhs, const real *X, const real_fj *B, 
+    virtual void linerhs(real *rhs, const real *Y, const real_fj *B, 
 			const pair<int,int> *CLR, const real_fj *F, 
 			int ls, int le, int os, int oe, int vs) const = 0;
-    virtual void lineSolve(real *X, const real *rhs, 
+    virtual void lineSolve(real *Y, const real *rhs, 
 			   const real_fj *D, const pivot_type *pivot,
 			   const real_fj *L, const real_fj *U, 
 			   int lsz, int vs) const = 0 ;
-    virtual real lineVerify(const real *X, const real *rhs, 
+    virtual real lineVerify(const real *Y, const real *rhs, 
 			      const real_fj *D, const pivot_type *pivot,
 			      const real_fj *L, const real_fj *U, 
 			      int lsz, int vs) const = 0 ;
@@ -1271,14 +1271,14 @@ namespace LGSI {
     virtual void preprocessLine(real_fj *D, pivot_type *pivot,
 				const real_fj *L, const real_fj *U, 
 				int lsz, int vs) const ;
-    virtual void linerhs(real *rhs, const real *X, const real_fj *B, 
+    virtual void linerhs(real *rhs, const real *Y, const real_fj *B, 
 			const pair<int,int> *CLR, const real_fj *F, 
 			int ls, int le, int os, int oe, int vs) const ;
-    virtual void lineSolve(real *X, const real *rhs, 
+    virtual void lineSolve(real *Y, const real *rhs, 
 			   const real_fj *D, const pivot_type *pivot,
 			   const real_fj *L, const real_fj *U, 
 			   int lsz, int vs) const ;
-    virtual real lineVerify(const real *X, const real *rhs, 
+    virtual real lineVerify(const real *Y, const real *rhs, 
 			      const real_fj *D, const pivot_type *pivot,
 			      const real_fj *L, const real_fj *U, 
 			      int lsz, int vs) const ;
@@ -1320,7 +1320,7 @@ namespace LGSI {
     }      
   }
   void matrixHelpersGeneric::
-  linerhs(real *restrict rhs, const real *restrict X, const real_fj *restrict B,
+  linerhs(real *restrict rhs, const real *restrict Y, const real_fj *restrict B,
 	  const pair<int,int> *restrict CLR, const real_fj *restrict F, 
 	 int ls, int le, int os, int oe, int vs) const {
     // note, here we compute the negative of the rhs, but we compensate
@@ -1332,12 +1332,12 @@ namespace LGSI {
 
     int vs2 = vs*vs ;
     //    F += os*vs2 ;
-    //rhs[matrix.outerCLR[i].first-ls] += X[matrix.outerCLR[i].second]*F[i] ;
+    //rhs[matrix.outerCLR[i].first-ls] += Y[matrix.outerCLR[i].second]*F[i] ;
     for(int i=os;i<oe;++i) {
-      const real * Xi   = &X[CLR[i].second*vs] ;
+      const real * Yi   = &Y[CLR[i].second*vs] ;
       real *       rhsi = &rhs[CLR[i].first*vs] ;
       const_Mat<real_fj> Fi(&F[i*vs2],vs) ;
-      Fi.dotprod_accum(Xi,rhsi) ; // Add into rhs
+      Fi.dotprod_accum(Yi,rhsi) ; // Add into rhs
 			    //      F += vs2 ;
     }
 
@@ -1347,7 +1347,7 @@ namespace LGSI {
 
 
   void matrixHelpersGeneric::
-  lineSolve(real *restrict X, const real *restrict rhs, 
+  lineSolve(real *restrict Y, const real *restrict rhs, 
 	    const real_fj *restrict D, const pivot_type *restrict pivot,
 	    const real_fj *restrict L, const real_fj *restrict U, 
 	    int lsz, int vs) const {
@@ -1356,20 +1356,20 @@ namespace LGSI {
     // forward solve part
       
     for(int i=0;i<vs;++i)
-      X[i] = -rhs[i] ;
+      Y[i] = -rhs[i] ;
     int moffset = 0 ;
     int voffset = 0 ;
     for(int i=1;i<lsz;++i) {
-      //   X[i] = L[i-1]*D[i-1]*rhs[i-1]- rhs[i] ;
+      //   Y[i] = L[i-1]*D[i-1]*rhs[i-1]- rhs[i] ;
       for(int j=0;j<vs;++j)
-	X[voffset+vs+j] = -rhs[voffset+vs+j] ;
+	Y[voffset+vs+j] = -rhs[voffset+vs+j] ;
       const_Mat<real_fj> Dm(&D[moffset],vs) ;
-      Dm.solve_lu_pivot(&X[voffset],&v[0],&pivot[voffset]) ;
+      Dm.solve_lu_pivot(&Y[voffset],&v[0],&pivot[voffset]) ;
       for(int j=0;j<vs;++j)
 	v[j] = -v[j] ;
       //      Dm.solve_lu(&rhs[voffset],&v[0]) ;
       const_Mat<real_fj> Lm(&L[moffset],vs) ;
-      Lm.dotprod_accum(&v[0],&X[voffset+vs]) ;
+      Lm.dotprod_accum(&v[0],&Y[voffset+vs]) ;
       
       moffset += vs2 ;
       voffset += vs ;
@@ -1378,30 +1378,30 @@ namespace LGSI {
     voffset = (lsz-1)*vs ;
     moffset = (lsz-1)*vs2 ;
     const_Mat<real_fj> De(&D[moffset],vs) ;
-    De.solve_lu_pivot(&X[voffset],&v[0],&pivot[voffset]) ;
-    //De.solve_lu(&X[voffset],&v[0]) ;
+    De.solve_lu_pivot(&Y[voffset],&v[0],&pivot[voffset]) ;
+    //De.solve_lu(&Y[voffset],&v[0]) ;
     for(int i=0;i<vs;++i)
-      X[voffset+i] = v[i] ;
+      Y[voffset+i] = v[i] ;
     voffset -= vs ;
     moffset -= vs2 ;
     for(int i=lsz-2;i>=0;--i) {
-      // solve X[i] = D[i]*(X[i]-X[i+1]*U[i]) 
+      // solve Y[i] = D[i]*(Y[i]-Y[i+1]*U[i]) 
       for(int j=0;j<vs;++j)
-	v[j] = -X[voffset+j] ; // sign change so we can use dotprod_accum
+	v[j] = -Y[voffset+j] ; // sign change so we can use dotprod_accum
       const_Mat<real_fj> Um(&U[moffset],vs) ;
-      Um.dotprod_accum(&X[voffset+vs],&v[0]) ;
+      Um.dotprod_accum(&Y[voffset+vs],&v[0]) ;
       const_Mat<real_fj> Dm(&D[moffset],vs) ;
       for(int j=0;j<vs;++j)
 	v[j] = -v[j] ;
-      Dm.solve_lu_pivot(&v[0],&X[voffset],&pivot[voffset]) ;
-      //Dm.solve_lu(&v[0],&X[voffset]) ;
+      Dm.solve_lu_pivot(&v[0],&Y[voffset],&pivot[voffset]) ;
+      //Dm.solve_lu(&v[0],&Y[voffset]) ;
       voffset -= vs ;
       moffset -= vs2 ;
     }
   }
 
   real matrixHelpersGeneric::
-  lineVerify(const real *X, const real *rhs, 
+  lineVerify(const real *Y, const real *rhs, 
 	     const real_fj *D, const pivot_type *pivot,
 	     const real_fj *L, const real_fj *U, 
 	     int lsz, int vs) const {
@@ -1414,13 +1414,13 @@ namespace LGSI {
 	mxrhs = max(mxrhs,fabs(rhs[l*vs+i])) ;
       }
       const_Mat<real_fj> Di(&D[l*vs2],vs) ;
-      Di.dotprod_accum(&X[l*vs],&sum[l*vs]) ;
+      Di.dotprod_accum(&Y[l*vs],&sum[l*vs]) ;
     }
     for(int l=0;l<lsz-1;++l) {
       const_Mat<real_fj> Ul(&U[l*vs2],vs) ;
-      Ul.dotprod_accum(&X[(l+1)*vs],&sum[l*vs]) ;
+      Ul.dotprod_accum(&Y[(l+1)*vs],&sum[l*vs]) ;
       const_Mat<real_fj> Ll(&L[l*vs2],vs) ;
-      Ll.dotprod_accum(&X[l*vs],&sum[(l+1)*vs]) ;
+      Ll.dotprod_accum(&Y[l*vs],&sum[(l+1)*vs]) ;
     }
     real msq = 0 ;
     for(int i=0;i<vs*lsz;++i)
@@ -1445,18 +1445,18 @@ namespace LGSI {
     vector<real_fj> B ;
   } ;
 
-  $type LSGSblockedMatrix(X) blackbox<blockedMatrixData> ;
+  $type LSGSblockedMatrix(Y) blackbox<blockedMatrixData> ;
 
-  $type LSGSblockedRHS(X,B) blackbox<blockedRHSData> ;
+  $type LSGSblockedRHS(Y,B) blackbox<blockedRHSData> ;
 
-  $rule blackbox(LSGSblockedMatrix(X)<-LSGSmatrixTopology(X),
-		 X_D,upper->X_U,lower->X_L), prelude {
-    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    int vs = $X_D.vecSize() ;
+  $rule blackbox(LSGSblockedMatrix(Y)<-LSGSmatrixTopology(Y),
+		 Y_D,upper->Y_U,lower->Y_L), prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
+    int vs = $Y_D.vecSize() ;
     int vs2 = vs*vs ;
-    $LSGSblockedMatrix(X)->vs = vs ;
-    $LSGSblockedMatrix(X)->vs2 = vs2 ;
-    $LSGSblockedMatrix(X)->matrixHelp = new matrixHelpersGeneric ;
+    $LSGSblockedMatrix(Y)->vs = vs ;
+    $LSGSblockedMatrix(Y)->vs2 = vs2 ;
+    $LSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersGeneric ;
 
     vector<real_fj> B(matrix.eql2g.size()*vs); 
     vector<real_fj> D(matrix.eql2g.size()*vs2); 
@@ -1467,7 +1467,7 @@ namespace LGSI {
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
       int eqn = matrix.eql2g[i] ;
-      const real_fj *restrict Dp = &($X_D[eqn][0][0]) ;
+      const real_fj *restrict Dp = &($Y_D[eqn][0][0]) ;
       for(int j=0;j<vs2;++j) 
 	D[i*vs2+j] = Dp[j] ;
       //      for(int j=0;j<vs2;++j) 
@@ -1475,14 +1475,14 @@ namespace LGSI {
     }
     entitySet ldom  = matrix.globalL2l.domain() ;
     FORALL(ldom,ii) {
-      const real_fj *restrict Lp = &($X_L[ii][0][0]) ;
+      const real_fj *restrict Lp = &($Y_L[ii][0][0]) ;
       int Findex = matrix.globalL2l[ii]*vs2 ;
       for(int j=0;j<vs2;++j) 
 	F[Findex+j] = Lp[j] ;
     } ENDFORALL ;
     entitySet udom  = matrix.globalU2l.domain() ;
     FORALL(udom,ii) {
-      const real_fj *restrict Up = &($X_U[ii][0][0]) ;
+      const real_fj *restrict Up = &($Y_U[ii][0][0]) ;
       int Findex = matrix.globalU2l[ii]*vs2 ;
       for(int j=0;j<vs2;++j) 
 	F[Findex+j] = Up[j] ;
@@ -1497,20 +1497,20 @@ namespace LGSI {
       real_fj * Dp = &D[matrix.lineData[l].eqnstart*vs2] ;
       pivot_type * pv = &pivot[matrix.lineData[l].eqnstart*vs] ;
 
-      $LSGSblockedMatrix(X)->matrixHelp
+      $LSGSblockedMatrix(Y)->matrixHelp
 	->preprocessLine(Dp,pv,L,U,lsz,vs) ;
     }
 
-    $LSGSblockedMatrix(X)->B.swap(B) ; 
-    $LSGSblockedMatrix(X)->D.swap(D) ; 
-    $LSGSblockedMatrix(X)->pivot.swap(pivot) ;
-    $LSGSblockedMatrix(X)->F.swap(F) ; 
-    //    $LSGSblockedMatrix(X)->Dreal.swap(Dreal) ; 
+    $LSGSblockedMatrix(Y)->B.swap(B) ; 
+    $LSGSblockedMatrix(Y)->D.swap(D) ; 
+    $LSGSblockedMatrix(Y)->pivot.swap(pivot) ;
+    $LSGSblockedMatrix(Y)->F.swap(F) ; 
+    //    $LSGSblockedMatrix(Y)->Dreal.swap(Dreal) ; 
   } ;
 
   $type B storeVec<real_fj> ;
-  $rule blackbox(LSGSblockedRHS(X,B)<-LSGSmatrixTopology(X),B),prelude {
-    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
+  $rule blackbox(LSGSblockedRHS(Y,B)<-LSGSmatrixTopology(Y),B),prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
     int vs = $B.vecSize() ;
     vector<real_fj> B(matrix.nmyeqn*vs); 
     
@@ -1521,28 +1521,28 @@ namespace LGSI {
       for(int j=0;j<vs;++j) 
 	B[i*vs+j] = Bp[j] ;
     }
-    $LSGSblockedRHS(X,B)->B.swap(B) ; 
+    $LSGSblockedRHS(Y,B)->B.swap(B) ; 
   } ;
 
-  $rule pointwise(LSGSBlockedSSolve(X,B)<- LSGSMaxIter,LSGSAbsTol,LSGSRelTol,
-		  LSGSRelaxation,LSGSblockedMatrix(X),LSGSblockedRHS(X,B),
-		  LSGSmatrixTopology(X)),
+  $rule pointwise(LSGSBlockedSSolve(Y,B)<- LSGSMaxIter,LSGSAbsTol,LSGSRelTol,
+		  LSGSRelaxation,LSGSblockedMatrix(Y),LSGSblockedRHS(Y,B),
+		  LSGSmatrixTopology(Y)),
     option(disable_threading),
     prelude {
-    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    int vs = $LSGSblockedMatrix(X)->vs ;
-    $LSGSBlockedSSolve(X,B).setVecSize(vs) ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
+    int vs = $LSGSblockedMatrix(Y)->vs ;
+    $LSGSBlockedSSolve(Y,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
     int vsize = matrix.eql2g.size() ;
     vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
     
-    real *X = &x1[0] ;
+    real *Y = &x1[0] ;
     
     vector<real> rhs(matrix.mxlinelen*vs) ;
     real zero_resid =1;
     // jacobi initializes iteration
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
+      const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
       int ls = matrix.lineData[l].eqnstart ;
       int le = matrix.lineData[l].eqnend ;
 
@@ -1550,16 +1550,16 @@ namespace LGSI {
       for(int i=ls*vs;i<le*vs;++i)
 	rhsg[i] = -B[i] ;
 
-      const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-      const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-      const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-      const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+      const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+      const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+      const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+      const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
       int lsz = le-ls ;
-      $LSGSblockedMatrix(X)->matrixHelp
-	->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
-      //      const real_fj *Dr = &($LSGSblockedMatrix(X)->Dreal[ls*vs2]) ;
-      //      real err = $LSGSblockedMatrix(X)->matrixHelp
-      //      	->lineVerify(X+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
+      $LSGSblockedMatrix(Y)->matrixHelp
+	->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+      //      const real_fj *Dr = &($LSGSblockedMatrix(Y)->Dreal[ls*vs2]) ;
+      //      real err = $LSGSblockedMatrix(Y)->matrixHelp
+      //      	->lineVerify(Y+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
       //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
     }
 
@@ -1577,14 +1577,14 @@ namespace LGSI {
       if(iter == 0) {
         for(int i=0;i<psz;++i) {
           for(int j=0;j<vs;++j) {
-            X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+            Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
           }
         }
         for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
           int loc = matrix.send_entitiesl[i]*vs ;
           int ii = i*vs ;
           for(int j=0;j<vs;++j)
-            send_data[ii+j] = X[loc+j] ;
+            send_data[ii+j] = Y[loc+j] ;
         }
         for(size_t i=0;i<matrix.recv_processors.size();++i) {
           int rs = matrix.recv_offsets[i]*vs ;
@@ -1611,75 +1611,75 @@ namespace LGSI {
           int loc = matrix.recv_entitiesl[i]*vs ;
           int ii = i*vs ;
           for(int j=0;j<vs;++j)
-            X[loc+j] = recv_data[ii+j] ;
+            Y[loc+j] = recv_data[ii+j] ;
         }
       }
       for(int i=0;i<psz;++i) {
         for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+          Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
         }
       }
 
       // Forward sweep
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(X)->F[0]) ;
+	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
+	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
 	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 	int os = matrix.lineData[l].OuterStart ;
 	int oe = matrix.lineData[l].OuterEnd ;
 	real *restrict rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->linerhs(rhsg,&X[0],B,CLR,F,ls,le,os,oe,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->linerhs(rhsg,&Y[0],B,CLR,F,ls,le,os,oe,vs) ;
 
-	const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-	const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-	const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+	const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+	const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
 	int lsz = le-ls ;
 	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
+	  xt[i] = Y[i] ;
 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       }
 
       // Backward sweep
       for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(X)->F[0]) ;
+	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
+	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
 	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 	int os = matrix.lineData[l].OuterStart ;
 	int oe = matrix.lineData[l].OuterEnd ;
 	real * rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->linerhs(rhsg,Y,B,CLR,F,ls,le,os,oe,vs) ;
 
-	const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-	const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-	const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+	const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+	const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
 	int lsz = le-ls ;
 	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+	  xt[i] = Y[i] ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       }
       
       // Copy data for communication
       for(int i=0;i<psz;++i) {
         for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+          Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
         }
       }
       for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
         int loc = matrix.send_entitiesl[i]*vs ;
         int ii = i*vs ;
         for(int j=0;j<vs;++j)
-          send_data[ii+j] = X[loc+j] ;
+          send_data[ii+j] = Y[loc+j] ;
       }
       
       // Initiate interprocessor communication
@@ -1706,8 +1706,8 @@ namespace LGSI {
       // Compute residual
       double residl = 0 ;
       for(int i=0;i<matrix.nmyeqn*vs;++i) {
-	X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = realToDouble(X[i]-xt[i]) ;
+	Y[i] = w*Y[i] + (1.-w)*xt[i] ;
+	double r = realToDouble(Y[i]-xt[i]) ;
 	residl += r*r ;
       }
 
@@ -1718,16 +1718,16 @@ namespace LGSI {
       // line jacobi after relaxed GSI
       // Compute rhs for all lines (Use xt for storage)
       for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(X)->F[0]) ;
+	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
+	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
 	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 	int os = matrix.lineData[l].OuterStart ;
 	int oe = matrix.lineData[l].OuterEnd ;
 	real * rhsg = &xt[0] ;
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->linerhs(rhsg,Y,B,CLR,F,ls,le,os,oe,vs) ;
 
       }
       // update lines
@@ -1735,14 +1735,14 @@ namespace LGSI {
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 
-	const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-	const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-	const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+	const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+	const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
 	int lsz = le-ls ;
 	const real *rhsl = &xt[ls*vs] ;
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->lineSolve(X+ls*vs,rhsl,D,pivot,L,U,lsz,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->lineSolve(Y+ls*vs,rhsl,D,pivot,L,U,lsz,vs) ;
       }
 #endif
       
@@ -1753,12 +1753,12 @@ namespace LGSI {
         int loc = matrix.recv_entitiesl[i]*vs ;
         int ii = i*vs ;
         for(int j=0;j<vs;++j)
-          X[loc+j] = recv_data[ii+j] ;
+          Y[loc+j] = recv_data[ii+j] ;
       }
 
       for(int i=0;i<psz;++i) {
         for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+          Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
         }
       }
 
@@ -1781,7 +1781,7 @@ namespace LGSI {
     }
     for(int i=0;i<matrix.nmyeqn;++i) {
       for(int j=0;j<vs;++j)
-	$LSGSBlockedSSolve(X,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;
+	$LSGSBlockedSSolve(Y,B)[matrix.eql2g[i]][j] = Y[i*vs+j] ;
     }
   } ;
 
@@ -1793,25 +1793,25 @@ namespace LGSI {
   }
   
 
-  $type LSGSPreconditioner(X,B) storeVec<real> ;
-  $rule pointwise(LSGSPreconditioner(X,B)<- LSGSPreconSteps,
-		  LSGSRelaxation,LSGSblockedMatrix(X),LSGSblockedRHS(X,B),
-		  LSGSmatrixTopology(X)),
+  $type LSGSPreconditioner(Y,B) storeVec<real> ;
+  $rule pointwise(LSGSPreconditioner(Y,B)<- LSGSPreconSteps,
+		  LSGSRelaxation,LSGSblockedMatrix(Y),LSGSblockedRHS(Y,B),
+		  LSGSmatrixTopology(Y)),
     option(disable_threading),
     prelude {
-    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    int vs = $LSGSblockedMatrix(X)->vs ;
-    $LSGSPreconditioner(X,B).setVecSize(vs) ;
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
+    int vs = $LSGSblockedMatrix(Y)->vs ;
+    $LSGSPreconditioner(Y,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
     int vsize = matrix.eql2g.size() ;
     vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
     
-    real *X = &x1[0] ;
+    real *Y = &x1[0] ;
     
     vector<real> rhs(matrix.mxlinelen*vs) ;
     // jacobi initializes iteration
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
+      const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
       int ls = matrix.lineData[l].eqnstart ;
       int le = matrix.lineData[l].eqnend ;
 
@@ -1819,16 +1819,16 @@ namespace LGSI {
       for(int i=ls*vs;i<le*vs;++i)
 	rhsg[i] = -B[i] ;
 
-      const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-      const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-      const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-      const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+      const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+      const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+      const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+      const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
       int lsz = le-ls ;
-      $LSGSblockedMatrix(X)->matrixHelp
-	->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
-      //      const real_fj *Dr = &($LSGSblockedMatrix(X)->Dreal[ls*vs2]) ;
-      //      real err = $LSGSblockedMatrix(X)->matrixHelp
-      //      	->lineVerify(X+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
+      $LSGSblockedMatrix(Y)->matrixHelp
+	->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+      //      const real_fj *Dr = &($LSGSblockedMatrix(Y)->Dreal[ls*vs2]) ;
+      //      real err = $LSGSblockedMatrix(Y)->matrixHelp
+      //      	->lineVerify(Y+ls*vs,&rhs[0],Dr,pivot,L,U,lsz,vs) ;
       //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
     }
 
@@ -1841,59 +1841,59 @@ namespace LGSI {
     for(int iter = 0;iter<num_iter;++iter) {
       // Forward sweep
       for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(X)->F[0]) ;
+	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
+	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
 	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 	int os = matrix.lineData[l].OuterStart ;
 	int oe = matrix.lineData[l].OuterEnd ;
 	real *restrict rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->linerhs(rhsg,&X[0],B,CLR,F,ls,le,os,oe,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->linerhs(rhsg,&Y[0],B,CLR,F,ls,le,os,oe,vs) ;
 
-	const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-	const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-	const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+	const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+	const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
 	int lsz = le-ls ;
 	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
+	  xt[i] = Y[i] ;
 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       }
 
       // Backward sweep
       for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(X,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(X)->F[0]) ;
+	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
+	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
 	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
 	int ls = matrix.lineData[l].eqnstart ;
 	int le = matrix.lineData[l].eqnend ;
 	int os = matrix.lineData[l].OuterStart ;
 	int oe = matrix.lineData[l].OuterEnd ;
 	real * rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->linerhs(rhsg,Y,B,CLR,F,ls,le,os,oe,vs) ;
 
-	const real_fj *D = &($LSGSblockedMatrix(X)->D[ls*vs2]) ;
-	const pivot_type *pivot = &($LSGSblockedMatrix(X)->pivot[ls*vs]) ;
-	const real_fj *L = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(X)->F[matrix.lineData[l].Ustart*vs2] ;
+	const real_fj *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
+	const pivot_type *pivot = &($LSGSblockedMatrix(Y)->pivot[ls*vs]) ;
+	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
+	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
 	int lsz = le-ls ;
 	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-	$LSGSblockedMatrix(X)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
+	  xt[i] = Y[i] ;
+	$LSGSblockedMatrix(Y)->matrixHelp
+	  ->lineSolve(Y+ls*vs,&rhs[0],D,pivot,L,U,lsz,vs) ;
       }
       for(int i=0;i<matrix.nmyeqn*vs;++i) {
-	X[i] = w*X[i] + (1.-w)*xt[i] ;
+	Y[i] = w*Y[i] + (1.-w)*xt[i] ;
       }
     }
     for(int i=0;i<matrix.nmyeqn;++i) {
       for(int j=0;j<vs;++j)
-	$LSGSPreconditioner(X,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;
+	$LSGSPreconditioner(Y,B)[matrix.eql2g[i]][j] = Y[i*vs+j] ;
     }
   } ;
   

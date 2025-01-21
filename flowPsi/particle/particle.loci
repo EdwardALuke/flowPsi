@@ -1156,7 +1156,6 @@ namespace lagrangianP {
   $type plot_freq param<int> ;
   $type plot_modulo param<int> ;
   $type restart_modulo param<int> ;
-  $type modelName param<string> ;
   $type do_restart param<bool> ;
   $type restart_directory param<string> ;
 
@@ -1360,53 +1359,53 @@ namespace lagrangianP {
     $minVals(X) = mval ;
   }
   
-  $type X store<vect3d> ;
-  $type X_f store<vect3d> ;
+  $type V store<vect3d> ;
+  $type V_f store<vect3d> ;
     
-  $rule pointwise(maxValv3d(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
-    vect3d mval = $X ;
+  $rule pointwise(maxValv3d(V)<-upper->cr->V,lower->cl->V,boundary_map->V_f,V) {
+    vect3d mval = $V ;
     int usz = $upper.size() ;
     for(int i=0;i<usz;++i) {
-      mval.x = max(mval.x,$upper[i]->$cr->$X.x) ;
-      mval.y = max(mval.y,$upper[i]->$cr->$X.y) ;
-      mval.z = max(mval.z,$upper[i]->$cr->$X.z) ;
+      mval.x = max(mval.x,$upper[i]->$cr->$V.x) ;
+      mval.y = max(mval.y,$upper[i]->$cr->$V.y) ;
+      mval.z = max(mval.z,$upper[i]->$cr->$V.z) ;
     }
     int lsz = $lower.size() ;
     for(int i=0;i<lsz;++i) {
-      mval.x = max(mval.x,$lower[i]->$cl->$X.x) ;
-      mval.y = max(mval.y,$lower[i]->$cl->$X.y) ;
-      mval.z = max(mval.z,$lower[i]->$cl->$X.z) ;
+      mval.x = max(mval.x,$lower[i]->$cl->$V.x) ;
+      mval.y = max(mval.y,$lower[i]->$cl->$V.y) ;
+      mval.z = max(mval.z,$lower[i]->$cl->$V.z) ;
     }
     int bsz = $boundary_map.size() ;
     for(int i=0;i<bsz;++i) {
-      mval.x = max(mval.x,$boundary_map[i]->$X_f.x) ;
-      mval.y = max(mval.y,$boundary_map[i]->$X_f.y) ;
-      mval.z = max(mval.z,$boundary_map[i]->$X_f.z) ;
+      mval.x = max(mval.x,$boundary_map[i]->$V_f.x) ;
+      mval.y = max(mval.y,$boundary_map[i]->$V_f.y) ;
+      mval.z = max(mval.z,$boundary_map[i]->$V_f.z) ;
     }
-    $maxValv3d(X) = mval ;
+    $maxValv3d(V) = mval ;
   }
   
-  $rule pointwise(minValv3d(X)<-upper->cr->X,lower->cl->X,boundary_map->X_f,X) {
-    vect3d mval = $X ;
+  $rule pointwise(minValv3d(V)<-upper->cr->V,lower->cl->V,boundary_map->V_f,V) {
+    vect3d mval = $V ;
     int usz = $upper.size() ;
     for(int i=0;i<usz;++i) {
-      mval.x = min(mval.x,$upper[i]->$cr->$X.x) ;
-      mval.y = min(mval.y,$upper[i]->$cr->$X.y) ;
-      mval.z = min(mval.z,$upper[i]->$cr->$X.z) ;
+      mval.x = min(mval.x,$upper[i]->$cr->$V.x) ;
+      mval.y = min(mval.y,$upper[i]->$cr->$V.y) ;
+      mval.z = min(mval.z,$upper[i]->$cr->$V.z) ;
     }
     int lsz = $lower.size() ;
     for(int i=0;i<lsz;++i) {
-      mval.x = min(mval.x,$lower[i]->$cl->$X.x) ;
-      mval.y = min(mval.y,$lower[i]->$cl->$X.y) ;
-      mval.z = min(mval.z,$lower[i]->$cl->$X.z) ;
+      mval.x = min(mval.x,$lower[i]->$cl->$V.x) ;
+      mval.y = min(mval.y,$lower[i]->$cl->$V.y) ;
+      mval.z = min(mval.z,$lower[i]->$cl->$V.z) ;
     }
     int bsz = $boundary_map.size() ;
     for(int i=0;i<bsz;++i) {
-      mval.x = min(mval.x,$boundary_map[i]->$X_f.x) ;
-      mval.y = min(mval.y,$boundary_map[i]->$X_f.y) ;
-      mval.z = min(mval.z,$boundary_map[i]->$X_f.z) ;
+      mval.x = min(mval.x,$boundary_map[i]->$V_f.x) ;
+      mval.y = min(mval.y,$boundary_map[i]->$V_f.y) ;
+      mval.z = min(mval.z,$boundary_map[i]->$V_f.z) ;
     }
-    $minValv3d(X) = mval ;
+    $minValv3d(V) = mval ;
   }
   
   // Compute the fluid cell volume per particle.

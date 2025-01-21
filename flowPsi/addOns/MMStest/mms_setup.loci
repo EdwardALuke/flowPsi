@@ -286,20 +286,20 @@ namespace flowPsi {
     $ToFloat(X) = $X ;
   }
 
-  $type X store<vector3d<double> > ;
-  $type ToFloatV(X) store<vector3d<float> > ;
-  $rule pointwise(ToFloatV(X)<-X) {
-    $ToFloatV(X) = vector3d<float>($X.x,$X.y,$X.z) ;
+  $type V store<vector3d<double> > ;
+  $type ToFloatV(V) store<vector3d<float> > ;
+  $rule pointwise(ToFloatV(V)<-V) {
+    $ToFloatV(V) = vector3d<float>($V.x,$V.y,$V.z) ;
   }
 
-  $type X storeVec<double> ;
-  $type ToFloatVec(X) store<float> ;
-  $rule pointwise(ToFloatVec(X)<-X) {
-    int vs = $*X.vecSize() ;
+  $type M storeVec<double> ;
+  $type ToFloatVec(M) store<float> ;
+  $rule pointwise(ToFloatVec(M)<-M) {
+    int vs = $*M.vecSize() ;
     double sum = 0 ;
     for(int i=0;i<vs;++i)
-      sum += $X[i] ;
-    $ToFloatVec(X) = sum ;
+      sum += $M[i] ;
+    $ToFloatVec(M) = sum ;
   }
   
   OUTPUT_SCALAR("cell2nodeMaxMag(mmsMassResidual)",mmsMassError) ;

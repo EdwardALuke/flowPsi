@@ -2267,14 +2267,14 @@ namespace flowPsi {
 
   };
 
-  $type interpolateTurboV3d(X) store<vec3d>;
-  $type X store<vec3d>;
-  $rule pointwise(interpolateTurboV3d(X){n,it} <-
+  $type interpolateTurboV3d(V) store<vec3d>;
+  $type V store<vec3d>;
+  $rule pointwise(interpolateTurboV3d(V){n,it} <-
                   turboInterpWeights{n,it},facecenter{n,it},
                   ci{n,it}->cellcenter{n,it},
                   ci{n,it}->lower{n,it}->cl{n,it}->cellcenter{n,it},
                   ci{n,it}->upper{n,it}->cr{n,it}->cellcenter{n,it},
-                  ci{n,it}->X{n,it}, turboPt1_located{n,it}),
+                  ci{n,it}->V{n,it}, turboPt1_located{n,it}),
     constraint(turboInterface_BC),option(disable_threading), prelude
   {
 
@@ -2292,17 +2292,17 @@ namespace flowPsi {
 
     entitySet dom = entitySet(seq);
 
-    store<vect3d> Xsend ;
-    Xsend.allocate(dom) ;
+    store<vect3d> Vsend ;
+    Vsend.allocate(dom) ;
     FORALL(dom,ii) {
-      Xsend[ii] = $X{n,it}[$ci{n,it}[ii]] ;
+      Vsend[ii] = $V{n,it}[$ci{n,it}[ii]] ;
     } ENDFORALL ;
     
     vector<Loci::storeRepP> in(1), out(1);
-    in[0] = Xsend.Rep();
+    in[0] = Vsend.Rep();
     get_remote_stores(in,out,p1_pull_comm) ;
-    store<vect3d> Xrecv ;
-    Xrecv.setRep(out[0]) ;
+    store<vect3d> Vrecv ;
+    Vrecv.setRep(out[0]) ;
     
     store<vector<vect3d> > wgts ;
     wgts.setRep($turboInterpWeights{n,it}->first) ;
@@ -2317,29 +2317,29 @@ namespace flowPsi {
       int lsz = $lower{n,it}[cc].size() ;
 
       for(int v=0;v<3;++v) {
-	real Xc = $X{n,it}[cc][v] ;
-	real maxX = max(Xc,Xrecv[id][v]) ;
-	real minX = min(Xc,Xrecv[id][v]) ;
-	vect3d gradX  = wgts[id][0]*(Xrecv[id][v]-Xc) ;
+	real Vc = $V{n,it}[cc][v] ;
+	real maxV = max(Vc,Vrecv[id][v]) ;
+	real minV = min(Vc,Vrecv[id][v]) ;
+	vect3d gradV  = wgts[id][0]*(Vrecv[id][v]-Vc) ;
 	int cnt = 1 ;
 
 	for(int i=0;i<usz;++i) {
-	  real Xu = $X{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]][v] ;
-	  gradX += wgts[id][cnt]*(Xu-Xc) ;
-	  maxX = max(maxX,Xu) ;
-	  minX = min(minX,Xu) ;
+	  real Vu = $V{n,it}[$cr{n,it}[$upper{n,it}[cc][i]]][v] ;
+	  gradV += wgts[id][cnt]*(Vu-Vc) ;
+	  maxV = max(maxV,Vu) ;
+	  minV = min(minV,Vu) ;
 	  cnt++ ;
 	}
 	for(int i=0;i<lsz;++i) {
-	  real Xl = $X{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]][v] ;
-	  gradX += wgts[id][cnt]*(Xl-Xc) ;
-	  maxX = max(maxX,Xl) ;
-	  minX = min(minX,Xl) ;
+	  real Vl = $V{n,it}[$cl{n,it}[$lower{n,it}[cc][i]]][v] ;
+	  gradV += wgts[id][cnt]*(Vl-Vc) ;
+	  maxV = max(maxV,Vl) ;
+	  minV = min(minV,Vl) ;
 	  cnt++ ;
 	}
 	vect3d ccenter = $cellcenter{n,it}[cc] ;
-	real Xi = $X{n,it}[cc][v] + dot(gradX,fcenter[id]-ccenter) ;
-	s1[id][v] = max(minX,min(maxX,Xi)) ;
+	real Vi = $V{n,it}[cc][v] + dot(gradV,fcenter[id]-ccenter) ;
+	s1[id][v] = max(minV,min(maxV,Vi)) ;
       }
     }
 
@@ -2353,7 +2353,7 @@ namespace flowPsi {
 
     // copy to local store 
     for(entitySet::const_iterator ei=dom.begin();ei!=dom.end();++ei) {
-      $interpolateTurboV3d(X){n,it}[*ei] = s1f[*ei] ;
+      $interpolateTurboV3d(V){n,it}[*ei] = s1f[*ei] ;
     }
   } ;
 

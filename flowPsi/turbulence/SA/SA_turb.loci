@@ -90,13 +90,10 @@ namespace flowPsi {
     $sa_dist_noslip = $dist_noslip ;
   }
 
-  $type xcoeff store<real> ;
   $rule pointwise(xcoeff<-mu,nuTilde,rho) {
     $xcoeff=$rho*$nuTilde/$mu ;
   }
 
-  $type fv1 store<real> ;
-  $type fv2 store<real> ;
   $rule pointwise(fv1<-xcoeff,spalart) {
     real cv1=$spalart.cv1 ;
     $fv1=pow($xcoeff,3)/(pow($xcoeff,3)+pow(cv1,3)) ;
@@ -109,7 +106,6 @@ namespace flowPsi {
     $tmu=$nuTilde*$fv1*$rho ;
   }
 
-  $type S_tilda store<real> ;
   $rule unit(S_tilda<-SP_info) {
     $S_tilda = 0.0 ;
   }
@@ -127,7 +123,6 @@ namespace flowPsi {
     $S_tilda_lim = max($S_tilda,0.3*$vortMag) ;
   }
 
-  $type rcoeff store<real> ;
   $rule pointwise(rcoeff<-nuTilde,S_tilda_lim,sa_dist_noslip,spalart) {
     real k_coeff=$spalart.k_coeff ;
     real S_t=$S_tilda_lim ;
@@ -139,8 +134,6 @@ namespace flowPsi {
       $rcoeff=$nuTilde/(S_t*denom) ;
   }
 
-  $type gcoeff store<real> ;
-
   $rule pointwise(gcoeff<-rcoeff,spalart) {
     const real cw2=$spalart.cw2 ;
     const real r = $rcoeff ;
@@ -148,8 +141,6 @@ namespace flowPsi {
     const real r6 = r2*r2*r2 ;
     $gcoeff = r+cw2*(r6-r) ;
   }
-
-  $type fw store<real> ;
 
   $type cw36 param<real> ;
   $rule singleton(cw36<-spalart) {
@@ -163,7 +154,6 @@ namespace flowPsi {
     $fw=g*pow(parameter, 1.0/6.0) ;
   }
 
-  $type cw1 param<real> ;
   $rule singleton(cw1<-spalart) {
     real cb1=$spalart.cb1 ;
     real cb2=$spalart.cb2 ;
@@ -282,7 +272,6 @@ namespace flowPsi {
   }
 
   // Destruction Jacobian
-  $type rpcoeff store<real> ;
   $rule pointwise(rpcoeff<-nuTilde,S_tilda_lim,xcoeff,mu,rho,fv2,sa_dist_noslip,spalart) {
     real rclip = 9e6 ;
     real S_t=$S_tilda_lim ;
@@ -305,7 +294,6 @@ namespace flowPsi {
       $rpcoeff=1./($rho*denom*S_t)-$nuTilde*Stp/(denom*S_t*S_t) ;
     }
   }
-  $type gpcoeff store<real> ;
 
   $rule pointwise(gpcoeff<-rcoeff,rpcoeff,spalart) {
     real cw2=$spalart.cw2 ;
@@ -313,7 +301,7 @@ namespace flowPsi {
     const real rp = $rpcoeff ;
     $gpcoeff = rp+cw2*(6.*pow(r,5)*rp - rp) ;
   }
-  $type fwp store<real> ;
+
   $rule pointwise(fwp<-gcoeff,gpcoeff,cw36) {
     const real g2 = $gcoeff*$gcoeff ;
     const real g6 = g2*g2*g2 ;
@@ -351,7 +339,6 @@ $rule default(Cvor),comments("Vorticity correction coefficient used when SA_prod
   }
   
 
-  $type S_tilda store<real> ;
   $rule apply(S_tilda<-vortMag,strainRate,S_tilda,Cvor)[Loci::Summation],
     constraint(vortMag,SP_rotat) {
     $S_tilda += $Cvor*min<real>(0.0, ($strainRate-$vortMag)) ;

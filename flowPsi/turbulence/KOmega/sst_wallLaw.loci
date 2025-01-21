@@ -445,7 +445,6 @@ namespace flowPsi {
     $press_wlaw = $ci->$pressure ;
   } 
 
-  $type  Twall_prescribed store<real> ;
   $rule pointwise(Twall<-Twall_prescribed),
     constraint(wallLaw_BC,Twall_prescribed) {
     $Twall = $Twall_prescribed ;

@@ -112,7 +112,6 @@ namespace flowPsi {
        $u_f.z*$vflux[mi+2]) ;
   }
 
-  $type  Twall_prescribed store<real> ;
   $rule pointwise(Twall<-Twall_prescribed),
     constraint(wallLaw_BC,Twall_prescribed) {
     $Twall = $Twall_prescribed ;
@@ -468,8 +467,6 @@ namespace flowPsi {
     $wall_law_nut = nutf ;
   } 
 
-  $type wall_law_nut store<real> ;
-  $type nuTilde_next store<real> ;
   $type nuTilde_f store<real> ;
 
   $rule pointwise(wallLaw::prescribe::nuTilde_f<-wall_law_nut),constraint(TurbulentSimulation,wallLaw_BC) {
@@ -480,6 +477,7 @@ namespace flowPsi {
   $rule pointwise(wallLaw::nuTilde_rhs), constraint(wall_cells,TurbulentSimulation) {
     $nuTilde_rhs = 0.0 ;
   }
+  $type nuTilde_next store<real> ;
   $rule pointwise(wl::nuTilde_next<-min_cell2noslip->wall_law_nut),
     constraint(wall_cells,TurbulentSimulation) {
     $nuTilde_next = $min_cell2noslip->$wall_law_nut ;

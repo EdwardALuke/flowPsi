@@ -349,29 +349,29 @@ namespace lagrangianP {
     $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n+1} = $timeHistoryScalar(COLLECT,IC,CONSTRAINT){n,it} ;
   }
   
-  $type IC store<vector3d<float> > ;
-  $type COLLECT store<vector3d<double> > ;
-  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n=0}<-IC),
+  $type ICV store<vector3d<float> > ;
+  $type COLLECTV store<vector3d<double> > ;
+  $rule pointwise(timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n=0}<-ICV),
     constraint(CONSTRAINT) {
-    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n=0} = $IC ;
+    $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n=0} = $ICV ;
   }
 
-  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it=0}<-
-                  timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n}),
+  $rule pointwise(timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it=0}<-
+                  timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n}),
     constraint(CONSTRAINT) {
-    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it=0} =
-      $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n} ;
+    $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it=0} =
+      $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n} ;
   }
   
-  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1}<-
-                  timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it},COLLECT{n,it}),
-    inplace(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1}|timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it}),constraint(CONSTRAINT) {
-        $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it+1} = $COLLECT{n,it} ;
+  $rule pointwise(timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it+1}<-
+                  timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it},COLLECTV{n,it}),
+    inplace(timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it+1}|timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it}),constraint(CONSTRAINT) {
+        $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it+1} = $COLLECTV{n,it} ;
   }
 
-  $rule pointwise(timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n+1}<-timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it}),
+  $rule pointwise(timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n+1}<-timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it}),
     conditional(newtonFinished{n,it}) {
-    $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n+1} = $timeHistoryVect3d(COLLECT,IC,CONSTRAINT){n,it} ;
+    $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n+1} = $timeHistoryVect3d(COLLECTV,ICV,CONSTRAINT){n,it} ;
   }
 
   // copy iblanking information from newton iteration

@@ -118,33 +118,28 @@ namespace flowPsi {
     $w_tsm_BC = w_tsm ;
   }
 //xw+++++++++
-  $type cbpcr store<real> ;
-  $rule pointwise(cbpcr<-BC_options,walters) {
-    vect3d M = vect3d(0,0,0) ;
-    const Loci::options_list &finput = $BC_options ;
-    if(finput.optionExists("M"))
-      $BC_options.getOptionUnits("M","",M) ;
-    $cbpcr = $walters.cbpcr + norm(M) - 1.0 ;
-    cout << "test----M cbpcr " << $cbpcr << endl;
-  }
+
+  // $rule pointwise(cbpcr<-BC_options,walters) {
+  //   vect3d M = vect3d(0,0,0) ;
+  //   const Loci::options_list &finput = $BC_options ;
+  //   if(finput.optionExists("M"))
+  //     $BC_options.getOptionUnits("M","",M) ;
+  //   $cbpcr = $walters.cbpcr + norm(M) - 1.0 ;
+  //   cout << "test----M cbpcr " << $cbpcr << endl;
+  // }
 //xw----------
 
   // -------------------------------------------------------------------------
   // Boundary Conditions for inflow/outflow faces
   
-  $type kT_bc store<real> ;
-
   $rule pointwise(kT_bc<-ref->kT_BC),constraint(ci->kT) {
       $kT_bc = $ref->$kT_BC ; 
   }
   
-  $type kL_bc store<real> ;
-
   $rule pointwise(kL_bc<-ci->kL,ref->kL_BC),constraint(ci->kL) {
     $kL_bc = $ref->$kL_BC ; //inflow, get scalar from BC
   }
 
-  $type w_tsm_bc store<real> ;
   $rule pointwise(w_tsm_bc<-ref->w_tsm_BC),constraint(ci->w_tsm) {
     $w_tsm_bc = $ref->$w_tsm_BC ; //inflow, get scalar from BC
   }

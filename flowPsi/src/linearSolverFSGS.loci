@@ -792,15 +792,15 @@ namespace FGSI {
     
 
   // Blocked version
-  $type X_B storeVec<real_fj> ;
-  $type X_D storeMat<real_fj> ;
-  $type X_L storeMat<real_fj> ;
-  $type X_U storeMat<real_fj> ;
-  $type FSGSBlockedSSolve(X) storeVec<real> ;
-  $type FSGSBlockedSSolve_next(X) storeVec<real> ;
-  $type FSGSBlockedSSolve_forward(X) storeVec<real> ;
-  $type FSGSBlockedSSolve_backward(X) storeVec<real> ;
-  $type FSGSgseidel_finished(X) param<bool> ;
+  $type Y_B storeVec<real_fj> ;
+  $type Y_D storeMat<real_fj> ;
+  $type Y_L storeMat<real_fj> ;
+  $type Y_U storeMat<real_fj> ;
+  $type FSGSBlockedSSolve(Y) storeVec<real> ;
+  $type FSGSBlockedSSolve_next(Y) storeVec<real> ;
+  $type FSGSBlockedSSolve_forward(Y) storeVec<real> ;
+  $type FSGSBlockedSSolve_backward(Y) storeVec<real> ;
+  $type FSGSgseidel_finished(Y) param<bool> ;
 
   using flowPsi::tmp_array ;
 
@@ -811,7 +811,7 @@ namespace FGSI {
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const = 0 ;
 
-    virtual void sweep(real *X, const real_fj *B, 
+    virtual void sweep(real *Y, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const = 0 ;
@@ -822,7 +822,7 @@ namespace FGSI {
   public:
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const ;
-    virtual void sweep(real *X, const real_fj *B, 
+    virtual void sweep(real *Y, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const ;
@@ -841,7 +841,7 @@ namespace FGSI {
   }
 
   void matrixHelpersGeneric::
-  sweep(real *restrict X, const real_fj *restrict B, 
+  sweep(real *restrict Y, const real_fj *restrict B, 
 	const real_fj *restrict D, const pivot_type *restrict pivot,
 	const pair<int,int> *restrict CLR, const real_fj *restrict F,
 	const int *restrict foffsets, int neq, bool forward, int vs) const {
@@ -860,14 +860,14 @@ namespace FGSI {
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
 	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
 	Ft += vs2 ;
       }
       for(int i=0;i<vs;++i)
 	t[i] = -t[i] ;
       const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu_pivot(&t[0],&X[voffset],&pivot[voffset]) ;
-      //De.solve_lu(&X[voffset],&v[0]) ;
+      De.solve_lu_pivot(&t[0],&Y[voffset],&pivot[voffset]) ;
+      //De.solve_lu(&Y[voffset],&v[0]) ;
       e += dir ;
       voffset += vstep ;
       moffset += mstep ;
@@ -878,7 +878,7 @@ namespace FGSI {
   public:
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const ;
-    virtual void sweep(real *X, const real_fj *B, 
+    virtual void sweep(real *Y, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const ;
@@ -897,7 +897,7 @@ namespace FGSI {
   }
 
   void matrixHelpersNoPivot::
-  sweep(real *restrict X, const real_fj *restrict B, 
+  sweep(real *restrict Y, const real_fj *restrict B, 
 	const real_fj *restrict D, const pivot_type *restrict pivot,
 	const pair<int,int> *restrict CLR, const real_fj *restrict F,
 	const int *restrict foffsets, int neq, bool forward, int vs) const {
@@ -916,14 +916,14 @@ namespace FGSI {
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
 	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
 	Ft += vs2 ;
       }
       for(int i=0;i<vs;++i)
 	t[i] = -t[i] ;
       const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu(&t[0],&X[voffset]) ;
-      //De.solve_lu(&X[voffset],&v[0]) ;
+      De.solve_lu(&t[0],&Y[voffset]) ;
+      //De.solve_lu(&Y[voffset],&v[0]) ;
       e += dir ;
       voffset += vstep ;
       moffset += mstep ;
@@ -934,7 +934,7 @@ namespace FGSI {
   public:
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const ;
-    virtual void sweep(real *X, const real_fj *B, 
+    virtual void sweep(real *Y, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const ;
@@ -953,7 +953,7 @@ namespace FGSI {
   }
 
   void matrixHelpers5x5::
-  sweep(real *restrict X, const real_fj *restrict B, 
+  sweep(real *restrict Y, const real_fj *restrict B, 
 	const real_fj *restrict D, const pivot_type *restrict pivot,
 	const pair<int,int> *restrict CLR, const real_fj *restrict F,
 	const int *restrict foffsets, int neq, bool forward, int vsi) const {
@@ -975,14 +975,14 @@ namespace FGSI {
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
 	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
+	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
 	Ft += vs2 ;
       }
       for(int i=0;i<vs;++i)
 	t[i] = -t[i] ;
       const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu(&t[0],&X[voffset]) ;
-      //De.solve_lu(&X[voffset],&v[0]) ;
+      De.solve_lu(&t[0],&Y[voffset]) ;
+      //De.solve_lu(&Y[voffset],&v[0]) ;
       e += dir ;
       voffset += vstep ;
       moffset += mstep ;
@@ -996,15 +996,15 @@ namespace FGSI {
       real t4 = B[voffset+4] ;
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
-	const real restrict *Xt = &X[CLR[i].second*vs] ;
-	t0 -= Ft[0]*Xt[0]+Ft[5]*Xt[1]+Ft[10]*Xt[2]+Ft[15]*Xt[3]+Ft[20]*Xt[4] ;
-	t1 -= Ft[1]*Xt[0]+Ft[6]*Xt[1]+Ft[11]*Xt[2]+Ft[16]*Xt[3]+Ft[21]*Xt[4] ;
-	t2 -= Ft[2]*Xt[0]+Ft[7]*Xt[1]+Ft[12]*Xt[2]+Ft[17]*Xt[3]+Ft[22]*Xt[4] ;
-	t3 -= Ft[3]*Xt[0]+Ft[8]*Xt[1]+Ft[13]*Xt[2]+Ft[18]*Xt[3]+Ft[23]*Xt[4] ;
-	t4 -= Ft[4]*Xt[0]+Ft[9]*Xt[1]+Ft[14]*Xt[2]+Ft[19]*Xt[3]+Ft[24]*Xt[4] ;
+	const real restrict *Yt = &Y[CLR[i].second*vs] ;
+	t0 -= Ft[0]*Yt[0]+Ft[5]*Yt[1]+Ft[10]*Yt[2]+Ft[15]*Yt[3]+Ft[20]*Yt[4] ;
+	t1 -= Ft[1]*Yt[0]+Ft[6]*Yt[1]+Ft[11]*Yt[2]+Ft[16]*Yt[3]+Ft[21]*Yt[4] ;
+	t2 -= Ft[2]*Yt[0]+Ft[7]*Yt[1]+Ft[12]*Yt[2]+Ft[17]*Yt[3]+Ft[22]*Yt[4] ;
+	t3 -= Ft[3]*Yt[0]+Ft[8]*Yt[1]+Ft[13]*Yt[2]+Ft[18]*Yt[3]+Ft[23]*Yt[4] ;
+	t4 -= Ft[4]*Yt[0]+Ft[9]*Yt[1]+Ft[14]*Yt[2]+Ft[19]*Yt[3]+Ft[24]*Yt[4] ;
 	Ft += 25 ;
       }
-      real *x = &X[voffset] ;
+      real *x = &Y[voffset] ;
       const real_fj *A = &D[moffset] ;
       
       real x0 = t0 ;
@@ -1043,21 +1043,21 @@ namespace FGSI {
     vector<real_fj> F ;
   } ;
 
-  $type FSGSblockedMatrix(X) blackbox<blockedMatrixData> ;
+  $type FSGSblockedMatrix(Y) blackbox<blockedMatrixData> ;
 
-  $rule blackbox(FSGSblockedMatrix(X)<-FSGSmatrixTopology,
-		 X_B,X_D,upper->X_U,lower->X_L), prelude {
+  $rule blackbox(FSGSblockedMatrix(Y)<-FSGSmatrixTopology,
+		 Y_B,Y_D,upper->Y_U,lower->Y_L), prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
-    int vs = $X_B.vecSize() ;
+    int vs = $Y_B.vecSize() ;
     int vs2 = vs*vs ;
-    $FSGSblockedMatrix(X)->vs = vs ;
-    $FSGSblockedMatrix(X)->vs2 = vs2 ;
+    $FSGSblockedMatrix(Y)->vs = vs ;
+    $FSGSblockedMatrix(Y)->vs2 = vs2 ;
     if(vs == 5) 
-      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpers5x5 ;
+      $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpers5x5 ;
     else if(vs < 8) 
-      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpersNoPivot ;
+      $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivot ;
     else
-      $FSGSblockedMatrix(X)->matrixHelp = new matrixHelpersGeneric ;
+      $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersGeneric ;
 
     vector<real_fj> B(matrix.eql2g.size()*vs); 
     vector<real_fj> D(matrix.eql2g.size()*vs2); 
@@ -1069,8 +1069,8 @@ namespace FGSI {
 
     for(int i=0;i<matrix.nmyeqn;++i) {
       int eqn = matrix.eql2g[i] ;
-      const real_fj *restrict Dp = &($X_D[eqn][0][0]) ;
-      const real_fj *restrict Bp = &($X_B[eqn][0]) ;
+      const real_fj *restrict Dp = &($Y_D[eqn][0][0]) ;
+      const real_fj *restrict Bp = &($Y_B[eqn][0]) ;
       for(int j=0;j<vs2;++j) 
 	D[i*vs2+j] = Dp[j] ;
       //      for(int j=0;j<vs2;++j) 
@@ -1080,14 +1080,14 @@ namespace FGSI {
     }
     entitySet ldom  = matrix.globalL2l.domain() ;
     FORALL(ldom,ii) {
-      const real_fj *restrict Lp = &($X_L[ii][0][0]) ;
+      const real_fj *restrict Lp = &($Y_L[ii][0][0]) ;
       int Findex = matrix.globalL2l[ii]*vs2 ;
       for(int j=0;j<vs2;++j) 
 	F[Findex+j] = Lp[j] ;
     } ENDFORALL ;
     entitySet udom  = matrix.globalU2l.domain() ;
     FORALL(udom,ii) {
-      const real_fj *restrict Up = &($X_U[ii][0][0]) ;
+      const real_fj *restrict Up = &($Y_U[ii][0][0]) ;
       int Findex = matrix.globalU2l[ii]*vs2 ;
       for(int j=0;j<vs2;++j) 
 	F[Findex+j] = Up[j] ;
@@ -1095,31 +1095,31 @@ namespace FGSI {
 
 
     int nlines = matrix.lineData.size() ;
-    $FSGSblockedMatrix(X)->matrixHelp
+    $FSGSblockedMatrix(Y)->matrixHelp
       ->factorDiagonal(&D[0],&pivot[0],nlines,vs) ;
 
-    $FSGSblockedMatrix(X)->B.swap(B) ; 
-    $FSGSblockedMatrix(X)->D.swap(D) ; 
-    $FSGSblockedMatrix(X)->pivot.swap(pivot) ;
-    $FSGSblockedMatrix(X)->F.swap(F) ; 
-    //    $FSGSblockedMatrix(X)->Dreal.swap(Dreal) ; 
+    $FSGSblockedMatrix(Y)->B.swap(B) ; 
+    $FSGSblockedMatrix(Y)->D.swap(D) ; 
+    $FSGSblockedMatrix(Y)->pivot.swap(pivot) ;
+    $FSGSblockedMatrix(Y)->F.swap(F) ; 
+    //    $FSGSblockedMatrix(Y)->Dreal.swap(Dreal) ; 
   } ;
 
-  $rule pointwise(FSGSBlockedSSolve(X)<- gauss_seidel_iter,
-		  FSGSblockedMatrix(X),FSGSmatrixTopology),
+  $rule pointwise(FSGSBlockedSSolve(Y)<- gauss_seidel_iter,
+		  FSGSblockedMatrix(Y),FSGSmatrixTopology),
     option(disable_threading),
     prelude {
     struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
-    int vs = $FSGSblockedMatrix(X)->vs ;
-    $FSGSBlockedSSolve(X).setVecSize(vs) ;
+    int vs = $FSGSblockedMatrix(Y)->vs ;
+    $FSGSBlockedSSolve(Y).setVecSize(vs) ;
     vector<real> x1(matrix.eql2g.size()*vs,0.0) ;
-    real *X = &x1[0] ;
+    real *Y = &x1[0] ;
 
-    const real_fj *B = &($FSGSblockedMatrix(X)->B[0]) ;
-    const real_fj *F = &($FSGSblockedMatrix(X)->F[0]) ;
+    const real_fj *B = &($FSGSblockedMatrix(Y)->B[0]) ;
+    const real_fj *F = &($FSGSblockedMatrix(Y)->F[0]) ;
     const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-    const real_fj *D = &($FSGSblockedMatrix(X)->D[0]) ;
-    const pivot_type *pivot = &($FSGSblockedMatrix(X)->pivot[0]) ;
+    const real_fj *D = &($FSGSblockedMatrix(Y)->D[0]) ;
+    const pivot_type *pivot = &($FSGSblockedMatrix(Y)->pivot[0]) ;
     int neq = matrix.lineData.size() ;
 
     vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
@@ -1132,14 +1132,14 @@ namespace FGSI {
       int psz = matrix.periodicCopy.size() ;
       for(int i=0;i<psz;++i) {
 	for(int j=0;j<vs;++j) {
-	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+	  Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
 	}
       }
       for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
 	int loc = matrix.send_entitiesl[i]*vs ;
 	int ii = i*vs ;
 	for(int j=0;j<vs;++j)
-	  send_data[ii+j] = X[loc+j] ;
+	  send_data[ii+j] = Y[loc+j] ;
       }
       for(size_t i=0;i<matrix.recv_processors.size();++i) {
 	int rs = matrix.recv_offsets[i]*vs ;
@@ -1163,25 +1163,25 @@ namespace FGSI {
 	int loc = matrix.recv_entitiesl[i]*vs ;
 	int ii = i*vs ;
 	for(int j=0;j<vs;++j)
-	  X[loc+j] = recv_data[ii+j] ;
+	  Y[loc+j] = recv_data[ii+j] ;
       }
       for(int i=0;i<psz;++i) {
 	for(int j=0;j<vs;++j) {
-	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
+	  Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
 	}
       }
 
       // Forward sweep
-      $FSGSblockedMatrix(X)->matrixHelp->
-	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,true,vs) ;
+      $FSGSblockedMatrix(Y)->matrixHelp->
+	sweep(Y,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,true,vs) ;
       // Backward sweep
-      $FSGSblockedMatrix(X)->matrixHelp->
-	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,false,vs) ;
+      $FSGSblockedMatrix(Y)->matrixHelp->
+	sweep(Y,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,false,vs) ;
     }
 
     for(int i=0;i<matrix.nmyeqn;++i)
       for(int j=0;j<vs;++j)
-	$FSGSBlockedSSolve(X)[matrix.eql2g[i]][j] = X[i*vs+j] ;
+	$FSGSBlockedSSolve(Y)[matrix.eql2g[i]][j] = Y[i*vs+j] ;
   } ;
 
 }

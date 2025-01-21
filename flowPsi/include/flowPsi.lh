@@ -257,7 +257,6 @@ $type meanCount_ic param<pair<int,flowPsi::real> > ;
 $type scalarMean(X) store<flowPsi::real> ;
 $type scalarMean_f(X) store<flowPsi::real> ;
 $type scalarMeanAll_f(X) store<flowPsi::real> ;
-$type scalarMeanFaceAll_X_ic store<flowPsi::real> ;
 $type scalarM2(X) store<flowPsi::real> ;
 $type scalarVariance(X) store<flowPsi::real> ;
 $type scalarM2_f(X) store<flowPsi::real> ;

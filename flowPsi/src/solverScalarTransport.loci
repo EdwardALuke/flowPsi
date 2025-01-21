@@ -721,8 +721,6 @@ namespace flowPsi {
     $X_residual = 0 ;
   } 
 
-  $type grid_vol_iblank param<real> ;
-  
   $type X_resid store<real> ;
 
   $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C,timeStepSteadyState),
@@ -1348,8 +1346,6 @@ namespace flowPsi {
     $X_residual = 0 ;
   } 
 
-  $type grid_vol_iblank param<real> ;
-  
   $type X_resid store<real> ;
 
   $rule pointwise(X_resid<-X_src,iblank),constraint(geom_cells,C,timeStepSteadyState),

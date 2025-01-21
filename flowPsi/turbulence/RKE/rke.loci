@@ -239,7 +239,6 @@ namespace flowPsi {
   }
 
   // Definition of turbulent viscosity
-  $type tmu_clip param<real> ;
 
   $rule default(tmu_clip),
     comments("Maximum turbulent viscosity limit for two equation turbulence models.") {

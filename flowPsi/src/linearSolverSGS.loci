@@ -331,172 +331,172 @@ namespace flowPsi {
   register_rule<gseidel_forward>     register_gseidel_forward ;
 
   // Scalar solve
-  $type X_B store<real> ;
-  $type X_D store<real> ;
-  $type X_L store<real> ;
-  $type X_U store<real> ;
-  $type SGSScalarDinv(X)  store<real> ;
-  $type SGSScalarSolve(X)           store<real> ;
-  $type SGSScalarSolve_forward(X)   store<real> ;
-  $type SGSScalarSolve_backward(X)  store<real> ;
+  $type Y_B store<real> ;
+  $type Y_D store<real> ;
+  $type Y_L store<real> ;
+  $type Y_U store<real> ;
+  $type SGSScalarDinv(Y)  store<real> ;
+  $type SGSScalarSolve(Y)           store<real> ;
+  $type SGSScalarSolve_forward(Y)   store<real> ;
+  $type SGSScalarSolve_backward(Y)  store<real> ;
 
-  $rule pointwise(SGSScalarDinv(X)<-X_D),
+  $rule pointwise(SGSScalarDinv(Y)<-Y_D),
     constraint(geom_cells,fluidLinearSolverSGS) {
-    $SGSScalarDinv(X)=1./$X_D ;
+    $SGSScalarDinv(Y)=1./$Y_D ;
   }
 
-  $rule pointwise(SGSScalarSolve(X){igs=0}<-SGSScalarDinv(X),X_B),
+  $rule pointwise(SGSScalarSolve(Y){igs=0}<-SGSScalarDinv(Y),Y_B),
     constraint(geom_cells) {
-    $SGSScalarSolve(X){igs=0}=$SGSScalarDinv(X) * $X_B ;
+    $SGSScalarSolve(Y){igs=0}=$SGSScalarDinv(Y) * $Y_B ;
   }
 
-  $rule pointwise(cr->SGSScalarSolve(X)<-pmap->cl->SGSScalarSolve(X)),
+  $rule pointwise(cr->SGSScalarSolve(Y)<-pmap->cl->SGSScalarSolve(Y)),
     constraint(periodicFaces) {
-    $cr->$SGSScalarSolve(X) = $pmap->$cl->$SGSScalarSolve(X) ;
+    $cr->$SGSScalarSolve(Y) = $pmap->$cl->$SGSScalarSolve(Y) ;
   }
 
-  $rule pointwise(cr->SGSScalarSolve_backward(X)<-pmap->cl->SGSScalarSolve_forward(X)),
+  $rule pointwise(cr->SGSScalarSolve_backward(Y)<-pmap->cl->SGSScalarSolve_forward(Y)),
     constraint(periodicFaces),
-    inplace(SGSScalarSolve_backward(X)|SGSScalarSolve_forward(X)) {
-    $cr->$SGSScalarSolve_backward(X) = $pmap->$cl->$SGSScalarSolve_forward(X) ;
+    inplace(SGSScalarSolve_backward(Y)|SGSScalarSolve_forward(Y)) {
+    $cr->$SGSScalarSolve_backward(Y) = $pmap->$cl->$SGSScalarSolve_forward(Y) ;
   }
 
 
-    class gsi_scalar_backward_X : public Loci::pointwise_rule {
+    class gsi_scalar_backward_Y : public Loci::pointwise_rule {
     const_Map cl ; 
     const_Map cr ; 
     const_multiMap upper ; 
     const_multiMap lower ; 
-    const_store<real>  X_B ; 
-    const_store<real>  X_L ; 
-    const_store<real>  X_U ; 
-    const_store<real>  SGSScalarDinvX ; 
-    const_store<real>  SGSScalarSolveXf ; 
-    store<real>  SGSScalarSolveX ; 
+    const_store<real>  Y_B ; 
+    const_store<real>  Y_L ; 
+    const_store<real>  Y_U ; 
+    const_store<real>  SGSScalarDinvY ; 
+    const_store<real>  SGSScalarSolveYf ; 
+    store<real>  SGSScalarSolveY ; 
 public:
-    gsi_scalar_backward_X() {
+    gsi_scalar_backward_Y() {
        name_store("cl",cl) ;
        name_store("cr",cr) ;
        name_store("upper",upper) ;
        name_store("lower",lower) ;
-       name_store("X_B",X_B) ;
-       name_store("X_L",X_L) ;
-       name_store("X_U",X_U) ;
-       name_store("SGSScalarDinv(X)",SGSScalarDinvX) ;
-       name_store("SGSScalarSolve(X)",SGSScalarSolveX) ;
-       name_store("SGSScalarSolve_forward(X)",SGSScalarSolveXf) ;
-       input("SGSScalarDinv(X),X_B,upper->X_U,lower->X_L,                  upper->cr->SGSScalarSolve(X),lower->cl->SGSScalarSolve_forward(X)") ;
-       output("SGSScalarSolve_forward(X)=SGSScalarSolve(X)") ;
+       name_store("Y_B",Y_B) ;
+       name_store("Y_L",Y_L) ;
+       name_store("Y_U",Y_U) ;
+       name_store("SGSScalarDinv(Y)",SGSScalarDinvY) ;
+       name_store("SGSScalarSolve(Y)",SGSScalarSolveY) ;
+       name_store("SGSScalarSolve_forward(Y)",SGSScalarSolveYf) ;
+       input("SGSScalarDinv(Y),Y_B,upper->Y_U,lower->Y_L,                  upper->cr->SGSScalarSolve(Y),lower->cl->SGSScalarSolve_forward(Y)") ;
+       output("SGSScalarSolve_forward(Y)=SGSScalarSolve(Y)") ;
        set_relaxed_recursion() ;
     }
     void calculate(Entity e) { 
     real t ,v ;
-    t = -X_B[e];
-    //sum_{k:U}(U_{ik}X_{k})--->t
+    t = -Y_B[e];
+    //sum_{k:U}(U_{ik}Y_{k})--->t
     for (const Entity *ui = upper[e].begin ();ui !=upper[e].end ();++ui )
-      t +=SGSScalarSolveX[cr[*ui]]* X_U[*ui];
-    //sum_{k:L}(L_{ik}Xf_{k})--->v
+      t +=SGSScalarSolveY[cr[*ui]]* Y_U[*ui];
+    //sum_{k:L}(L_{ik}Yf_{k})--->v
     for (const Entity *li = lower[e].begin ();li !=lower[e].end ();++li )
-      t +=SGSScalarSolveX[cl[*li]]* X_L[*li];
+      t +=SGSScalarSolveY[cl[*li]]* Y_L[*li];
     v = -t ;
-    SGSScalarSolveX[e]= SGSScalarDinvX[e]* v ;
+    SGSScalarSolveY[e]= SGSScalarDinvY[e]* v ;
   }    void compute(const Loci::sequence &seq) { 
       do_loop(seq,this) ;
     }
 } ;
-  register_rule<gsi_scalar_backward_X> register_gsi_scalar_backward_X ;
+  register_rule<gsi_scalar_backward_Y> register_gsi_scalar_backward_Y ;
 
 
   //The following is the backward sweep of gauss seidel
-  class gsi_scalar_forward_X_ : public Loci::pointwise_rule {
+  class gsi_scalar_forward_Y_ : public Loci::pointwise_rule {
     const_Map cl ; 
     const_Map cr ; 
     const_multiMap upper ; 
     const_multiMap lower ; 
-    const_store<real>  X_B ; 
-    const_store<real>  X_L ; 
-    const_store<real>  X_U ; 
-    const_store<real>  SGSScalarDinvX ; 
-    const_store<real>  SGSScalarSolve_forwardXb ; 
-    store<real>  SGSScalarSolve_forwardX ; 
+    const_store<real>  Y_B ; 
+    const_store<real>  Y_L ; 
+    const_store<real>  Y_U ; 
+    const_store<real>  SGSScalarDinvY ; 
+    const_store<real>  SGSScalarSolve_forwardYb ; 
+    store<real>  SGSScalarSolve_forwardY ; 
 public:
-    gsi_scalar_forward_X_() {
+    gsi_scalar_forward_Y_() {
        name_store("cl",cl) ;
        name_store("cr",cr) ;
        name_store("upper",upper) ;
        name_store("lower",lower) ;
-       name_store("X_B",X_B) ;
-       name_store("X_L",X_L) ;
-       name_store("X_U",X_U) ;
-       name_store("SGSScalarDinv(X)",SGSScalarDinvX) ;
-       name_store("SGSScalarSolve_forward(X)",SGSScalarSolve_forwardX) ;
-       name_store("SGSScalarSolve_backward(X)",SGSScalarSolve_forwardXb) ;
-       input("SGSScalarDinv(X),X_B,upper->X_U,lower->X_L,                  upper->cr->SGSScalarSolve_backward(X),lower->cl->SGSScalarSolve_forward(X)") ;
-       output("SGSScalarSolve_backward(X)=SGSScalarSolve_forward(X)") ;
+       name_store("Y_B",Y_B) ;
+       name_store("Y_L",Y_L) ;
+       name_store("Y_U",Y_U) ;
+       name_store("SGSScalarDinv(Y)",SGSScalarDinvY) ;
+       name_store("SGSScalarSolve_forward(Y)",SGSScalarSolve_forwardY) ;
+       name_store("SGSScalarSolve_backward(Y)",SGSScalarSolve_forwardYb) ;
+       input("SGSScalarDinv(Y),Y_B,upper->Y_U,lower->Y_L,                  upper->cr->SGSScalarSolve_backward(Y),lower->cl->SGSScalarSolve_forward(Y)") ;
+       output("SGSScalarSolve_backward(Y)=SGSScalarSolve_forward(Y)") ;
        set_relaxed_recursion() ;
     }
     void calculate(Entity e) { 
       real t ,v ;
-    t = -X_B[e];
-    //sum_{k:U}(U_{ik}X_{k})--->t
+    t = -Y_B[e];
+    //sum_{k:U}(U_{ik}Y_{k})--->t
     for (const Entity *ui = upper[e].begin ();ui !=upper[e].end ();++ui )
-      t +=SGSScalarSolve_forwardX[cr[*ui]]* X_U[*ui];
-    //sum_{k:L}(L_{ik}Xf_{k})--->v
+      t +=SGSScalarSolve_forwardY[cr[*ui]]* Y_U[*ui];
+    //sum_{k:L}(L_{ik}Yf_{k})--->v
     for (const Entity *li = lower[e].begin ();li !=lower[e].end ();++li )
-      t +=SGSScalarSolve_forwardX[cl[*li]]* X_L[*li];
+      t +=SGSScalarSolve_forwardY[cl[*li]]* Y_L[*li];
     v = -t ;
-    SGSScalarSolve_forwardX[e]= SGSScalarDinvX[e]* v ;
+    SGSScalarSolve_forwardY[e]= SGSScalarDinvY[e]* v ;
   }    void compute(const Loci::sequence &seq) { 
       do_loop(seq,this) ;
     }
 } ;
-  register_rule<gsi_scalar_forward_X_> register_gsi_scalar_forward_X_ ;
+  register_rule<gsi_scalar_forward_Y_> register_gsi_scalar_forward_Y_ ;
 
 
 
 #ifdef HASBUG
   //The following is the forward sweep of gauss seidel
-  $rule pointwise(SGSScalarSolve_forward(X)<-SGSScalarDinv(X),X_B,upper->X_U,lower->X_L,
-                  upper->cr->SGSScalarSolve(X),lower->cl->SGSScalarSolve_forward(X)), option(set_relaxed_recursion),
-    inplace(SGSScalarSolve_forward(X)|SGSScalarSolve(X)) {
+  $rule pointwise(SGSScalarSolve_forward(Y)<-SGSScalarDinv(Y),Y_B,upper->Y_U,lower->Y_L,
+                  upper->cr->SGSScalarSolve(Y),lower->cl->SGSScalarSolve_forward(Y)), option(set_relaxed_recursion),
+    inplace(SGSScalarSolve_forward(Y)|SGSScalarSolve(Y)) {
     real t,v ;
-    t = -$X_B ;
-    //sum_{k:U}(U_{ik}X_{k})--->t
+    t = -$Y_B ;
+    //sum_{k:U}(U_{ik}Y_{k})--->t
     for(const Entity *ui = $upper.begin();ui!=$upper.end();++ui)
-      t+=ui->$cr->$SGSScalarSolve(X) * ui->$X_U ;
-    //sum_{k:L}(L_{ik}Xf_{k})--->v
+      t+=ui->$cr->$SGSScalarSolve(Y) * ui->$Y_U ;
+    //sum_{k:L}(L_{ik}Yf_{k})--->v
     for(const Entity *li = $lower.begin();li!=$lower.end();++li)
-      t+=li->$cl->$SGSScalarSolve_forward(X) * li->$X_L ;
+      t+=li->$cl->$SGSScalarSolve_forward(Y) * li->$Y_L ;
     v = -t ;
-    $SGSScalarSolve_forward(X) = $SGSScalarDinv(X) * v ;
+    $SGSScalarSolve_forward(Y) = $SGSScalarDinv(Y) * v ;
   }
 
   //The following is the backward sweep of gauss seidel
-  $rule pointwise(SGSScalarSolve_backward(X)<-SGSScalarDinv(X),X_B,upper->X_U,lower->X_L,
-                  upper->cr->SGSScalarSolve_backward(X),lower->cl->SGSScalarSolve_forward(X)), option(set_relaxed_recursion),
-    inplace(SGSScalarSolve_backward(X)|SGSScalarSolve_forward(X)) {a
+  $rule pointwise(SGSScalarSolve_backward(Y)<-SGSScalarDinv(Y),Y_B,upper->Y_U,lower->Y_L,
+                  upper->cr->SGSScalarSolve_backward(Y),lower->cl->SGSScalarSolve_forward(Y)), option(set_relaxed_recursion),
+    inplace(SGSScalarSolve_backward(Y)|SGSScalarSolve_forward(Y)) {a
     real t,v ;
-    t = -$X_B ;
-    //sum_{k:U}(U_{ik}X_{k})--->t
+    t = -$Y_B ;
+    //sum_{k:U}(U_{ik}Y_{k})--->t
     for(const Entity *ui = $upper.begin();ui!=$upper.end();++ui)
-      t+=ui->$cr->$SGSScalarSolve_backward(X) * ui->$X_U ;
-    //sum_{k:L}(L_{ik}Xf_{k})--->v
+      t+=ui->$cr->$SGSScalarSolve_backward(Y) * ui->$Y_U ;
+    //sum_{k:L}(L_{ik}Yf_{k})--->v
     for(const Entity *li = $lower.begin();li!=$lower.end();++li)
-      t+=li->$cl->$SGSScalarSolve_forward(X) * li->$X_L ;
+      t+=li->$cl->$SGSScalarSolve_forward(Y) * li->$Y_L ;
     v = -t ;
-    $SGSScalarSolve_backward(X) = $SGSScalarDinv(X) * v ;
+    $SGSScalarSolve_backward(Y) = $SGSScalarDinv(Y) * v ;
   }
 #endif
 
   //advance rule in gauss seidel iteration
-  $rule pointwise(SGSScalarSolve(X){igs+1}<-SGSScalarSolve_backward(X){igs}),
+  $rule pointwise(SGSScalarSolve(Y){igs+1}<-SGSScalarSolve_backward(Y){igs}),
     constraint(geom_cells),
-    inplace(SGSScalarSolve(X){igs+1}|SGSScalarSolve_backward(X){igs}){}
+    inplace(SGSScalarSolve(Y){igs+1}|SGSScalarSolve_backward(Y){igs}){}
 
   //collapse rule for gauss seidel iteration
-  $rule pointwise(SGSScalarSolve(X)<-SGSScalarSolve(X){igs}),
+  $rule pointwise(SGSScalarSolve(Y)<-SGSScalarSolve(Y){igs}),
     constraint(geom_cells{igs}),
-    conditional(gseidel_finished(X){igs}),
-  inplace(SGSScalarSolve(X)|SGSScalarSolve(X){igs}), prelude {} ;
+    conditional(gseidel_finished(Y){igs}),
+  inplace(SGSScalarSolve(Y)|SGSScalarSolve(Y){igs}), prelude {} ;
 
 }

@@ -68,9 +68,6 @@ namespace flowPsi {
 //      cout<<"cbpcr is redefined as: cbpcr = " << $cbpcr <<endl ;
 //    }
 
-   $rule default(cbpcr)        
-       {
-          $cbpcr = 5 ;
-       }
+  $rule default(cbpcr) { $cbpcr = 5 ;  }
 
 }
