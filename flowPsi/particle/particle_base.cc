@@ -1880,10 +1880,15 @@ namespace lagrangianP {
         // we need to remap the images when necessary, using the
         // special pack function in the map class that also does remap
         if(img_pack) {
+#ifdef DYNAMICSCHEDULING
           for(size_t k=0;k<in.size();++k) {
             in[k]->pack(pack_buffer, position,
                         pack_size[i], send[i].entities_l, *img_pack) ;
           }
+#else
+          cerr << "img_pack not supported" << endl ;
+          Loci::Abort() ;
+#endif
         } else {
           for(size_t k=0;k<in.size();++k) {
             in[k]->pack(pack_buffer, position,
@@ -1898,11 +1903,16 @@ namespace lagrangianP {
         int position = 0 ;
         // remapping the images when necessary
         if(img_pack) {
+#ifdef DYNAMICSCHEDULING
           for(size_t k=0;k<in.size();++k) {
             // pack the contents
             in[k]->pack(pack_buffer, position,
                         pack_size[i], send[i].entities_l, *img_pack) ;
           }
+#else
+          cerr << "img_pack not supported" << endl ;
+          Loci::Abort() ;
+#endif
         } else {
           for(size_t k=0;k<in.size();++k) {
             in[k]->pack(pack_buffer, position,
@@ -1942,11 +1952,16 @@ namespace lagrangianP {
       int position = 0 ;
       int unpack_buffer_size = recv_msg_size[2*i] ;
       if(img_unpack) {
+#ifdef DYNAMICSCHEDULING
         for(size_t k=0;k<out.size();++k) {
           // unpack the contents
           out[k]->unpack(unpack_buffer_ptr[i], position,
                          unpack_buffer_size, unpack_seq[i], *img_unpack) ;
         }
+#else
+        cerr << "img_unpack not supported" << endl ;
+        Loci::Abort() ;
+#endif
       } else {
         for(size_t k=0;k<out.size();++k) {
           out[k]->unpack(unpack_buffer_ptr[i], position,
