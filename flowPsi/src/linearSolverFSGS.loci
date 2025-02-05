@@ -48,15 +48,399 @@ namespace FGSI {
   using std::set ;
   using std::endl ;
   using std::cerr ;
+  using std::cout ;
+
+  template < int N, class T1, class T2, class T3 > 
+  inline void dotprod_accum_N(const T1* const restrict A,
+			      const T2* const restrict vin,
+			      T3 *restrict vo) {
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+    for(int j=0;j<N;++j) {
+      const T2 in = vin[j] ;
+      const T1 * restrict Aj = A+N*j ;
+#ifdef HAVE_IVDEP
+#pragma ivdep
+#pragma vector unaligned
+#endif
+      for(int i=0;i<N;++i)
+	vo[i] += (Aj[i])*in ;
+    }
+  }  
+
+
+  template<int N,class T1, class T2, class T3>
+  inline void solve_lu_N(const T1 * restrict A,
+                       const T2 *restrict b,
+                       T3 *restrict x) {
+    // Perform forward solve Ly = b, note b becomes y after this step           
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+    for(int i=0;i<N;++i) {
+      T3 tmp = b[i] ;
+      const T1 * restrict Aij = A+i ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int j=0;j<i;++j,Aij+=N)
+        tmp -= *Aij*x[j] ;
+      x[i] = tmp ;
+    }
+    // Do back solve Ux = y
+    const T1 *restrict Ai = A + N*(N-1) ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+    for(int i=N-1;i>=0;--i,Ai-=N) {
+      const T1 *restrict Aj = Ai + N ;
+      T3 tmp = x[i] ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int j=i+1;j<N;++j,Aj+=N)
+	tmp -= Aj[i]*x[j] ;
+      x[i] = tmp/Ai[i] ;
+    }
+  }
+
+  template<>
+#if defined (__INTEL_COMPILER)
+  __forceinline
+#else
+  __attribute__ ((always_inline))
+#endif
+  inline void solve_lu_N<9,float,double,double>(const float * restrict A,
+                       const double *restrict b,
+                       double *restrict x) {
+    // Perform forward solve Ly = b, note b becomes y after this step           
+#if 0 && defined (__INTEL_COMPILER) && defined (__SSE4_1__)
+    __m128  a0,a1,a2,a3,a4;
+    __m128d b0,b1,Ax0,Ax1,Ax2,Ax3,Ax4,Ax5,Ax6,Ax7;
+    __m128d x0,x1,x2,x3,x4,x5,x6,x7,x8;
+    __m128d s0,s1,s2,s3;
+    x[0] = -b[0];
+
+    b0  = _mm_sub_pd(_mm_setzero_pd(), _mm_loadu_pd(b+1));
+    a0  = _mm_loadu_ps(A+1); Ax0 = _mm_cvtps_pd(a0);
+    x0  = _mm_set1_pd(x[0]);
+    Ax0 = _mm_mul_pd(Ax0,x0);
+          _mm_storeu_pd(&x[1], _mm_sub_pd(b0,Ax0));
+    x[2]= x[2] - A[11]*x[1];
+
+    b1  = _mm_sub_pd(_mm_setzero_pd(), _mm_loadu_pd(b+3));
+    Ax0 = _mm_cvtps_pd(_mm_shuffle_ps(a0,a0,0xEE));
+    a1  = _mm_loadu_ps(A+12); Ax1 = _mm_cvtps_pd(a1);
+    a2  = _mm_loadu_ps(A+21); Ax2 = _mm_cvtps_pd(a2);
+    x1  = _mm_set1_pd(x[1]);
+    x2  = _mm_set1_pd(x[2]);
+    Ax0 = _mm_mul_pd(Ax0,x0);
+    Ax1 = _mm_mul_pd(Ax1,x1);
+    Ax2 = _mm_mul_pd(Ax2,x2);
+          _mm_storeu_pd(&x[3], _mm_sub_pd(b1,_mm_add_pd(_mm_add_pd(Ax0,Ax1),Ax2)));
+    x[4]= x[4] - A[31]*x[3];
+
+    b0  = _mm_sub_pd(_mm_setzero_pd(), _mm_loadu_pd(b+5));
+    a0  = _mm_loadu_ps(A+5); Ax0 = _mm_cvtps_pd(a0);
+    Ax1 = _mm_cvtps_pd(_mm_shuffle_ps(a1,a1,0xEE));
+    Ax2 = _mm_cvtps_pd(_mm_shuffle_ps(a2,a2,0xEE));
+    a3  = _mm_loadu_ps(A+32); Ax3 = _mm_cvtps_pd(a3);
+    a4  = _mm_loadu_ps(A+41); Ax4 = _mm_cvtps_pd(a4);
+
+    x3  = _mm_set1_pd(x[3]);
+    x4  = _mm_set1_pd(x[4]);
+    Ax0 = _mm_mul_pd(Ax0,x0);
+    Ax1 = _mm_mul_pd(Ax1,x1);
+    s0  = _mm_add_pd(Ax0,Ax1);
+
+    Ax2 = _mm_mul_pd(Ax2,x2);
+    Ax3 = _mm_mul_pd(Ax3,x3);
+    s1  = _mm_add_pd(Ax2,Ax3);
+    Ax4 = _mm_mul_pd(Ax4,x4);
+          _mm_storeu_pd(&x[5], _mm_sub_pd(b0,_mm_add_pd(_mm_add_pd(s0,s1),Ax4)));
+    x[6]= x[6] - A[51]*x[5];
+
+    b1  = _mm_sub_pd(_mm_setzero_pd(), _mm_loadu_pd(b+7));
+    Ax0 = _mm_cvtps_pd(_mm_shuffle_ps(a0,a0,0xEE));
+    Ax1 = _mm_cvtps_pd(_mm_loadu_ps(A+16));
+    Ax2 = _mm_cvtps_pd(_mm_loadu_ps(A+25));
+    Ax3 = _mm_cvtps_pd(_mm_shuffle_ps(a3,a3,0xEE));
+    Ax4 = _mm_cvtps_pd(_mm_shuffle_ps(a4,a4,0xEE));
+    Ax5 = _mm_cvtps_pd(_mm_loadu_ps(A+52));
+    Ax6 = _mm_cvtps_pd(_mm_loadu_ps(A+61));
+    x5  = _mm_set1_pd(x[5]);
+    x6  = _mm_set1_pd(x[6]);
+
+    Ax0 = _mm_mul_pd(Ax0,x0);
+    Ax1 = _mm_mul_pd(Ax1,x1);
+    s0  = _mm_add_pd(Ax0,Ax1);
+
+    Ax2 = _mm_mul_pd(Ax2,x2);
+    Ax3 = _mm_mul_pd(Ax3,x3);
+    s1  = _mm_add_pd(Ax2,Ax3);
+
+    Ax4 = _mm_mul_pd(Ax4,x4);
+    Ax5 = _mm_mul_pd(Ax5,x5);
+    s2  = _mm_add_pd(Ax4,Ax5);
+    s3  = _mm_add_pd(s0,s1);
+    Ax6 = _mm_mul_pd(Ax6,x6);
+          _mm_storeu_pd(&x[7], _mm_sub_pd(b1,_mm_add_pd(_mm_add_pd(s2,s3),Ax6)));
+    x[8]= x[8] - A[71]*x[7];
+#else
+#if 0
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+    for(int i=0;i<9;++i) {
+      double tmp = -b[i] ;
+      const float * restrict Aij = A+i ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int j=0;j<i;++j,Aij+=9) {
+        tmp -= *Aij*x[j] ;
+      }
+      x[i] = tmp ;
+    }
+#else
+    x[0] = -b[0];
+
+    x[1] = -b[1] - A[1]*x[0];
+    x[2] = -b[2] - A[2]*x[0] - A[11]*x[1];
+
+    x[3] = -b[3] - A[3]*x[0] - A[12]*x[1] - A[21]*x[2];
+    x[4] = -b[4] - A[4]*x[0] - A[13]*x[1] - A[22]*x[2] - A[31]*x[3];
+
+    x[5] = -b[5] - A[5]*x[0] - A[14]*x[1] - A[23]*x[2] - A[32]*x[3] - A[41]*x[4];
+    x[6] = -b[6] - A[6]*x[0] - A[15]*x[1] - A[24]*x[2] - A[33]*x[3] - A[42]*x[4] - A[51]*x[5];
+
+    x[7] = -b[7] - A[7]*x[0] - A[16]*x[1] - A[25]*x[2] - A[34]*x[3] - A[43]*x[4] - A[52]*x[5] - A[61]*x[6];
+    x[8] = -b[8] - A[8]*x[0] - A[17]*x[1] - A[26]*x[2] - A[35]*x[3] - A[44]*x[4] - A[53]*x[5] - A[62]*x[6] - A[71]*x[7];
+#endif
+#endif
+
+    // Do back solve Ux = y
+#if 0 && defined (__INTEL_COMPILER) && defined (__SSE4_1__)
+    __m128 div;
+    __m128d Ax67,Ax45,Ax23,Ax01,one=_mm_set_pd(1.,1.);
+    double d[2], sum[2];
+    x[8] = (x[8]) / A[80];
+    x8   = _mm_set1_pd(x[8]);
+
+    div  = _mm_set_ps(A[70], A[60], A[50], A[40]) ;
+    a0   = _mm_loadu_ps(A+76);
+    Ax67 = _mm_cvtps_pd(_mm_shuffle_ps(a0,a0,0xEE));
+    Ax67 = _mm_mul_pd(Ax67,x8);
+           _mm_store_pd(&sum[0], Ax67);
+           _mm_store_pd(&d[0], _mm_div_pd(one,_mm_cvtps_pd(_mm_shuffle_ps(div,div,0xEE))));
+    x[7] = (x[7]              - sum[1])*d[1];
+    x[6] = (x[6] - A[69]*x[7] - sum[0])*d[0];
+    x7   = _mm_set1_pd(x[7]);
+    x6   = _mm_set1_pd(x[6]);
+
+    a1   = _mm_loadu_ps(A+72);
+    Ax45 = _mm_mul_pd(_mm_cvtps_pd(a0),x8);
+    Ax23 = _mm_mul_pd(_mm_cvtps_pd(_mm_shuffle_ps(a1,a1,0xEE)),x8);
+    Ax01 = _mm_mul_pd(_mm_cvtps_pd(a1),x8);
+
+    a2   = _mm_loadu_ps(A+63);
+    a0   = _mm_loadu_ps(A+67);
+    Ax45 = _mm_add_pd(Ax45, _mm_mul_pd(_mm_cvtps_pd(a0),x7));
+    Ax23 = _mm_add_pd(Ax23, _mm_mul_pd(_mm_cvtps_pd(_mm_shuffle_ps(a2,a2,0xEE)),x7));
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a2),x7));
+
+    a1   = _mm_loadu_ps(A+54);
+    a2   = _mm_loadu_ps(A+58);
+    Ax45 = _mm_add_pd(Ax45, _mm_mul_pd(_mm_cvtps_pd(a2),x6));
+    Ax23 = _mm_add_pd(Ax23, _mm_mul_pd(_mm_cvtps_pd(_mm_shuffle_ps(a1,a1,0xEE)),x6));
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a1),x6));
+           _mm_store_pd(&sum[0], Ax45);
+           _mm_store_pd(&d[0], _mm_div_pd(one,_mm_cvtps_pd(div)));
+    x[5] = (x[5]              - sum[1])*d[1];
+    x[4] = (x[4] - A[49]*x[5] - sum[0])*d[0];
+    x5   = _mm_set1_pd(x[5]);
+    x4   = _mm_set1_pd(x[4]);
+
+    div  = _mm_set_ps(A[30], A[20], A[10], A[ 0]) ;
+    a0   = _mm_loadu_ps(A+45);
+    a1   = _mm_loadu_ps(A+36);
+    Ax23 = _mm_add_pd(Ax23, _mm_mul_pd(_mm_cvtps_pd(_mm_shuffle_ps(a0,a0,0xEE)),x5));
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a0),x5));
+    Ax23 = _mm_add_pd(Ax23, _mm_mul_pd(_mm_cvtps_pd(_mm_shuffle_ps(a1,a1,0xEE)),x4));
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a1),x4));
+           _mm_store_pd(&sum[0], Ax23);
+           _mm_store_pd(&d[0], _mm_div_pd(one,_mm_cvtps_pd(_mm_shuffle_ps(div,div,0xEE))));
+    x[3] = (x[3]              - sum[1])*d[1];
+    x[2] = (x[2] - A[29]*x[3] - sum[0])*d[0];
+    x3   = _mm_set1_pd(x[3]);
+    x2   = _mm_set1_pd(x[2]);
+
+    a0   = _mm_loadu_ps(A+27);
+    a1   = _mm_loadu_ps(A+18);
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a0),x3));
+    Ax01 = _mm_add_pd(Ax01, _mm_mul_pd(_mm_cvtps_pd(a1),x2));
+           _mm_store_pd(&sum[0], Ax01);
+           _mm_store_pd(&d[0], _mm_div_pd(one,_mm_cvtps_pd(div)));
+    x[1] = (x[1]              - sum[1])*d[1];
+    x[0] = (x[0] - A[ 9]*x[1] - sum[0])*d[0];
+#else
+#if 0
+    const float *restrict Ai = A + 9*(9-1) ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+    for(int i=9-1;i>=0;--i,Ai-=9) {
+      const float *restrict Aj = Ai + 9 ;
+      double tmp = x[i] ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int j=i+1;j<9;++j,Aj+=9) {
+	    tmp -= Aj[i]*x[j] ;
+      }
+      x[i] = tmp/Ai[i] ;
+    }
+#else
+        x[8] = (                                                                                        x[8]) / A[80];
+
+        x[7] = (                                                                             x[7]-A[79]*x[8]) / A[70];
+        x[6] = (                                                                  x[6]-A[69]*x[7]-A[78]*x[8]) / A[60];
+
+        x[5] = (                                                       x[5]-A[59]*x[6]-A[68]*x[7]-A[77]*x[8]) / A[50];
+        x[4] = (                                            x[4]-A[49]*x[5]-A[58]*x[6]-A[67]*x[7]-A[76]*x[8]) / A[40];
+
+        x[3] = (                                 x[3]-A[39]*x[4]-A[48]*x[5]-A[57]*x[6]-A[66]*x[7]-A[75]*x[8]) / A[30];
+        x[2] = (                      x[2]-A[29]*x[3]-A[38]*x[4]-A[47]*x[5]-A[56]*x[6]-A[65]*x[7]-A[74]*x[8]) / A[20];
+
+        x[1] = (           x[1]-A[19]*x[2]-A[28]*x[3]-A[37]*x[4]-A[46]*x[5]-A[55]*x[6]-A[64]*x[7]-A[73]*x[8]) / A[10];
+        x[0] = (x[0]-A[ 9]*x[1]-A[18]*x[2]-A[27]*x[3]-A[36]*x[4]-A[45]*x[5]-A[54]*x[6]-A[63]*x[7]-A[72]*x[8]) / A[ 0];
+#endif
+#endif
+  }
+
+  using std::vector ;
+  using std::sort ;
+  using std::swap ;
+  using std::set ;
+  using Loci::realToDouble ;
+  using Loci::realToFloat ;
   
+#ifdef USE_AUTODIFF
+  typedef Loci::real_t real ;
+  typedef Loci::real_t realF ;
+#ifdef AUTODIFF2ND
+#define FSGS_TYPE Loci::MPI_FADD2
+#else
+#ifdef MULTIFAD
+#define FSGS_TYPE Loci::MPI_MFADD  
+#else  
+#define FSGS_TYPE Loci::MPI_FADD
+#endif
+#endif
+#else	
+  typedef double real ;
+  typedef float realF ;
+#define FSGS_TYPE MPI_DOUBLE
+#endif
+
+
   // Scalar solve
   $type X_B store<real> ;
   $type X_D store<real> ;
   $type X_L store<real> ;
   $type X_U store<real> ;
 
+  $type FSGSMatrixName(X) param<std::string> ;
+  $rule singleton(FSGSMatrixName(X)),constraint(UNIVERSE),
+    	option(disable_threading) {
+    const Loci::rule_impl::info &info = get_info() ;
+    Loci::variableSet outset = info.output_vars() ;
+    Loci::variable out=*outset.begin() ;
+    string name = "X" ;
+    // Scan forward for first underscore
+    if(out.get_arg_list().size() != 1) {
+      cerr << "unexpected fault"<< endl 
+	   << "variable " << out 
+	   << " should be FSGSMatrixName(X)!" << endl ;
+      Loci::Abort() ;
+    }
+    Loci::variable varg = Loci::variable(out.get_arg_list()[0]) ;
+    const Loci::variable::info vinfo = varg.get_info() ;
+    name = vinfo.name ;
+    $FSGSMatrixName(X) = name ;
+  }
+
+  $type FSGSDiagnosticLevel param<int> ;
+
+  $type FSGSSolverControls param<Loci::options_list> ;
+  $rule default(FSGSSolverControls) {
+  }
+  
+  $rule default(FSGSDiagnosticLevel) {
+    $FSGSDiagnosticLevel = 0 ;
+  }
+
+  $type FSGSDiagnosticLevel(X) param<int> ;
+  $rule singleton(FSGSDiagnosticLevel(X)<-FSGSMatrixName(X),FSGSDiagnosticLevel,
+                  FSGSSolverControls) {
+    using namespace Loci ;
+    $FSGSDiagnosticLevel(X) = $FSGSDiagnosticLevel ;
+    string name = $FSGSMatrixName(X) ;
+    if($FSGSSolverControls.optionExists(name)) {
+      option_value_type vt = $FSGSSolverControls.getOptionValueType(name) ;
+      option_values ov = $FSGSSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "DiagnosticLevel" ;
+          if(ol.optionExists(setting)) {
+            real val = $FSGSDiagnosticLevel(X) ;
+            ol.getOption(setting,val) ;
+            $FSGSDiagnosticLevel(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  $type gauss_seidel_iter param<int> ;
+  $type FSGSMaxIter(X) param<int> ;
+  $rule singleton(FSGSMaxIter(X)<-FSGSMatrixName(X),gauss_seidel_iter,
+                  FSGSSolverControls) {
+    using namespace Loci ;
+    $FSGSMaxIter(X) = $gauss_seidel_iter ;
+    string name = $FSGSMatrixName(X) ;
+    if($FSGSSolverControls.optionExists(name)) {
+      option_value_type vt = $FSGSSolverControls.getOptionValueType(name) ;
+      option_values ov = $FSGSSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "MaxIter" ;
+          if(ol.optionExists(setting)) {
+            real val = $FSGSMaxIter(X) ;
+            ol.getOption(setting,val) ;
+            $FSGSMaxIter(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
   $type FSGSmatrixInitialize blackbox<int> ;
-  $type FSGSmatrixTopology blackbox<int> ;
 
   $type FSGSmatrixPeriodic blackbox<std::vector<pair<int,int> > > ;
 
@@ -150,9 +534,11 @@ namespace FGSI {
       return *this ;
     }
     matrixStructure() { access_counter = -1 ;}
+    ~matrixStructure() {}
   } ;
 
-  vector<matrixStructure> matrixInfo ;
+  $type FSGSmatrixTopology blackbox<matrixStructure> ;
+
 
   struct scalarMatrixData {
     vector<real> B ;
@@ -161,10 +547,9 @@ namespace FGSI {
   } ;
 
   $type FSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
-
+  $type fluidLinearSolverFSGS Constraint ;
   $rule blackbox(FSGSmatrixInitialize),constraint(fluidLinearSolverFSGS),prelude {
-    $FSGSmatrixInitialize = matrixInfo.size() ;
-    matrixInfo.push_back(matrixStructure()) ;
+    $FSGSmatrixInitialize = 1 ; 
   } ;
 
   
@@ -172,8 +557,7 @@ namespace FGSI {
 		 lower->cl->cellcenter,upper->cr->cellcenter,
 		 (lower,upper)->area, FSGSmatrixInitialize),
     option(disable_threading), prelude {
-    *$FSGSmatrixTopology = *$FSGSmatrixInitialize ;
-    struct matrixStructure &matrix = matrixInfo[*$FSGSmatrixInitialize] ;
+    struct matrixStructure &matrix = *$FSGSmatrixTopology ;
     if(matrix.access_counter < 0) { 
 	if(Loci::MPI_processes > 1) {
 	  Loci::fact_db::distribute_infoP df = 
@@ -350,8 +734,7 @@ namespace FGSI {
 	dom += pdom ;
       }
 
-      const int dsz = dom.size() ;
-      vector<int> index(dsz) ;
+      vector<int> index(dom.size()) ;
       Map toeqn ;
       toeqn.allocate(dom) ;
       int cnt = 0 ;
@@ -398,13 +781,13 @@ namespace FGSI {
         cnt++ ;
       } ENDFORALL ;
 
-      vector<pair<int,int> > connections(nmyeqn) ;
+      vector<pair<int,int> > connections(mydom.size()) ;
       
       for(int i=0;i<nmyeqn;++i) {
         connections[i].first = -1 ;
         connections[i].second = -1 ;
       }
-      vector<int> lineNo(dsz,-2) ;
+      vector<int> lineNo(dom.size(),-2) ;
       FORALL(mydom,ii) {
         lineNo[toeqn[ii]] = -1 ;
       } ENDFORALL ;
@@ -463,8 +846,8 @@ namespace FGSI {
       // Now lines are sorted for SGS sweeps in line_order, now reorder eqns and
       // collect data structure for high performance implementation.
     
-      vector<int> eqnorder(dsz) ;
-      vector<int> eqnvisit(dsz,0) ;
+      vector<int> eqnorder(dom.size()) ;
+      vector<int> eqnvisit(dom.size(),0) ;
       vector<int> line_offsets(line_order.size()+1) ;
 
       line_offsets[0] = 0 ;
@@ -482,29 +865,29 @@ namespace FGSI {
         }
         line_offsets[i+1] = cnt ;
       }
-      if(cnt != dsz) { // Number the remaining equations
+      if(cnt != (int)dom.size()) { // Number the remaining equations
         // Sort in order of first visited while scanning lines
         for(int i = nmyeqn-1;i>=0;--i) {
           for(int k=offsets[eqnorder[i]];k<offsets[eqnorder[i]+1];++k)
             if(neighbors[k] >= nmyeqn)
               eqnorder[neighbors[k]] = eqnorder[i] ;
         }
-        vector<pair<int,int> > vpairs(dsz-nmyeqn) ;
-        for(int i=nmyeqn;i<dsz;++i) {
+        vector<pair<int,int> > vpairs(dom.size()-nmyeqn) ;
+        for(int i=nmyeqn;i<(int)dom.size();++i) {
           vpairs[i-nmyeqn].first = eqnorder[i] ;
           vpairs[i-nmyeqn].second = i ;
         }
         sort(vpairs.begin(),vpairs.end()) ;
-        for(int i=nmyeqn;i<dsz;++i) {
+        for(int i=nmyeqn;i<(int)dom.size();++i) {
           eqnorder[i] = vpairs[i-nmyeqn].second ;
         }
       }
       
       // build equation local 2 entity number map
-      vector<int> eql2l(dsz) ; // map from old local number 2 new one
-      { vector<int> eql2g(dsz) ;
+      vector<int> eql2l(dom.size()) ; // map from old local number 2 new one
+      { vector<int> eql2g(dom.size()) ;
 	std::map<int,int> g2eql ;
-        for(int i=0;i<dsz;++i) {
+        for(int i=0;i<(int)dom.size();++i) {
           eql2g[i] = index[eqnorder[i]] ;
 	  g2eql[eql2g[i]] = i ;
           eql2l[eqnorder[i]] = i ;
@@ -614,7 +997,7 @@ namespace FGSI {
 
   $rule blackbox(FSGSscalarMatrix(X)<-FSGSmatrixTopology,
 		 X_B,X_D,upper->X_U,lower->X_L), prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    const struct matrixStructure & restrict matrix = *$FSGSmatrixTopology ;
     vector<real> B(matrix.eql2g.size()); 
     vector<real> D(matrix.eql2g.size()); 
     vector<real> F(matrix.outerCLR.size()); 
@@ -640,7 +1023,7 @@ namespace FGSI {
       real *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
       int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
-      //      D[0] = 1./(D[0]<0.0?min(D[0],-1e-30):max(D[0],1e-30)) ;
+      //      D[0] = 1./(D[0]<0.0?min<real>(D[0],-1e-30):max<real>(D[0],1e-30)) ;
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
         real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
@@ -656,14 +1039,21 @@ namespace FGSI {
   $type FSGSScalarSolve(X)           store<real> ;
 
 
-  $rule pointwise(FSGSScalarSolve(X)<-gauss_seidel_iter,
+  $rule pointwise(FSGSScalarSolve(X)<-FSGSMaxIter(X),FSGSMatrixName(X),
+                  FSGSDiagnosticLevel(X),
 		  FSGSscalarMatrix(X),FSGSmatrixTopology),
                  option(disable_threading),
                  prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    const struct matrixStructure & restrict matrix = *$FSGSmatrixTopology ;
     // Copy in x to our cache optimal ordering
+    bool printResidual = *$FSGSDiagnosticLevel(X) > 0 ;
+    
     vector<real> x1(matrix.eql2g.size(),0.0);
-
+    vector<real> x2 ;
+    if(printResidual) {
+      vector<real> tmp(matrix.eql2g.size(),0.0);
+      x2.swap(tmp) ;
+    }
     real * X = &x1[0] ;
     vector<real> rhs(matrix.mxlinelen) ;
     vector<real> send_data(matrix.send_entitiesl.size()) ;
@@ -671,8 +1061,9 @@ namespace FGSI {
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
     
-    int num_iter = *$gauss_seidel_iter ;
+    int num_iter = *$FSGSMaxIter(X) ;
     // do num_iter steps
+    double zero_resid = 0 ;
     for(int iter = 0;iter < num_iter;++iter) {
       if(iter != 0) { // On first step, the values are just zero, no need to
 	// send anything
@@ -781,6 +1172,28 @@ namespace FGSI {
 	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
 	}
       }
+
+      if(printResidual) {
+        double residl = 0 ;
+        for(int i=0;i<matrix.nmyeqn;++i) {
+          double r = realToDouble((X[i]-x2[i])) ;
+          x2[i] = X[i] ;
+          residl += r*r ;
+        }
+        double resid = 0 ;
+        MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
+        resid = sqrt(resid) ;
+        if(0 == iter)
+          zero_resid = max(resid,1e-16) ;
+
+        double rel_resid = resid/zero_resid ;
+        if(Loci::MPI_rank == 0) {
+          cout << "FSGS Matrix " << *$FSGSMatrixName(X) 
+               << ", iter=" << iter+1 
+               << ", resid=" << resid << ", rel_resid=" << rel_resid << endl ;
+        }
+      }
+
     }    
     
     // copy data out
@@ -791,7 +1204,13 @@ namespace FGSI {
   } ;
     
 
-  // Blocked version
+#ifdef DOUBLE_FJMAT
+  typedef real real_fj ;
+#else
+  typedef realF real_fj ;
+#endif
+
+// Blocked version
   $type Y_B storeVec<real_fj> ;
   $type Y_D storeMat<real_fj> ;
   $type Y_L storeMat<real_fj> ;
@@ -811,7 +1230,7 @@ namespace FGSI {
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const = 0 ;
 
-    virtual void sweep(real *Y, const real_fj *B, 
+    virtual void sweep(real *X, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const = 0 ;
@@ -822,7 +1241,7 @@ namespace FGSI {
   public:
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
 				int neq, int vs) const ;
-    virtual void sweep(real *Y, const real_fj *B, 
+    virtual void sweep(real *X, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
 		       const int *foffsets, int neq, bool forward, int vs) const ;
@@ -841,7 +1260,7 @@ namespace FGSI {
   }
 
   void matrixHelpersGeneric::
-  sweep(real *restrict Y, const real_fj *restrict B, 
+  sweep(real *restrict X, const real_fj *restrict B, 
 	const real_fj *restrict D, const pivot_type *restrict pivot,
 	const pair<int,int> *restrict CLR, const real_fj *restrict F,
 	const int *restrict foffsets, int neq, bool forward, int vs) const {
@@ -860,31 +1279,155 @@ namespace FGSI {
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
 	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
+	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
 	Ft += vs2 ;
       }
       for(int i=0;i<vs;++i)
 	t[i] = -t[i] ;
       const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu_pivot(&t[0],&Y[voffset],&pivot[voffset]) ;
-      //De.solve_lu(&Y[voffset],&v[0]) ;
+      De.solve_lu_pivot(&t[0],&X[voffset],&pivot[voffset]) ;
+      //De.solve_lu(&X[voffset],&v[0]) ;
       e += dir ;
       voffset += vstep ;
       moffset += mstep ;
     }
   }
+
+  template <int N>
+  class matrixHelpersNoPivotN: public matrixHelpers {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vsin) const {
+      const int vs = N ;
+      const int vs2 = N*N ;
+      for(int i=0;i<neq;++i) {
+	Mat<real_fj> Di(D,vs) ;
+	Di.decompose_lu() ;
+	D += vs2 ;
+	pivot += vs ;
+      }
+    }
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vsin) const {
+      const int vs = N ;
+      const int vs2 = N*N ;
+      int dir = forward?1:-1 ;
+      int vstep = dir*vs ;
+      int mstep = dir*vs2 ;
+      int e = forward?0:neq-1 ;
+      int voffset = e*vs ;
+      int moffset = e*vs2 ;
+      vector<real> t(vs) ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int eq=0;eq<neq;++eq) {
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#pragma ivdep
+#endif
+	for(int i=0;i<vs;++i)
+	  t[i] = -B[voffset+i] ;
+	const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+	for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	  //	const_Mat<real_fj> Fi(Ft,vs) ;
+	  dotprod_accum_N<N,real_fj,real,real>(Ft,&X[CLR[i].second*vs],&t[0]) ;
+	  Ft += vs2 ;
+	}
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#pragma ivdep
+#endif
+	for(int i=0;i<vs;++i)
+	  t[i] = -t[i] ;
+	//      const_Mat<real_fj> De(&D[moffset],vs) ;
+	solve_lu_N<N,real_fj,real,real> (&D[moffset],&t[0],&X[voffset]) ;
+	//      De.solve_lu(&t[0],&X[voffset]) ;
+	//De.solve_lu(&X[voffset],&v[0]) ;
+	e += dir ;
+	voffset += vstep ;
+	moffset += mstep ;
+      }
+    }
+  } ;
+
+  // specialized for the 9x9 matrix size
+  template <>
+  class matrixHelpersNoPivotN<9>: public matrixHelpers {
+  public:
+    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
+				int neq, int vsin) const {
+      const int vs = 9 ;
+      const int vs2 = 81 ;
+      for(int i=0;i<neq;++i) {
+	Mat<real_fj> Di(D,vs) ;
+	Di.decompose_lu() ;
+	D += vs2 ;
+	pivot += vs ;
+      }
+    }
+    virtual void sweep(real *X, const real_fj *B, 
+		       const real_fj *D, const pivot_type *pivot,
+		       const pair<int,int> *CLR, const real_fj *F,
+		       const int *foffsets, int neq, bool forward, int vsin) const {
+      const int vs = 9 ;
+      const int vs2 = 81 ;
+      int dir = forward?1:-1 ;
+      int vstep = dir*vs ;
+      int mstep = dir*vs2 ;
+      int e = forward?0:neq-1 ;
+      int voffset = e*vs ;
+      int moffset = e*vs2 ;
+      vector<real> t(vs) ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+      for(int eq=0;eq<neq;++eq) {
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#pragma ivdep
+#endif
+	for(int i=0;i<vs;++i)
+	  t[i] = -B[voffset+i] ;
+	const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#endif
+	for(int i=foffsets[e];i<foffsets[e+1];++i)  {
+	  //	const_Mat<real_fj> Fi(Ft,vs) ;
+	  dotprod_accum_N<9,real_fj,real,real>(Ft,&X[CLR[i].second*vs],&t[0]) ;
+	  Ft += vs2 ;
+	}
+#ifdef HAVE_IVDEP
+#pragma vector unaligned
+#pragma ivdep
+#endif
+	for(int i=0;i<vs;++i)
+	  t[i] = -t[i] ;
+	solve_lu_N<9,real_fj,real,real> (&D[moffset],&t[0],&X[voffset]) ;
+	e += dir ;
+	voffset += vstep ;
+	moffset += mstep ;
+      }
+    }
+  } ;
 
   class matrixHelpersNoPivot: public matrixHelpers {
   public:
     virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
-				int neq, int vs) const ;
-    virtual void sweep(real *Y, const real_fj *B, 
+				int neq, int vsin) const ;
+    virtual void sweep(real *X, const real_fj *B, 
 		       const real_fj *D, const pivot_type *pivot,
 		       const pair<int,int> *CLR, const real_fj *F,
-		       const int *foffsets, int neq, bool forward, int vs) const ;
+		       const int *foffsets, int neq, bool forward, int vsin) const ;
   } ;
 
-  void matrixHelpersNoPivot::
+    void matrixHelpersNoPivot::
   factorDiagonal(real_fj *restrict D, pivot_type *restrict pivot,
 		 int neq, int vs) const {
     int vs2 = vs*vs ;
@@ -897,7 +1440,7 @@ namespace FGSI {
   }
 
   void matrixHelpersNoPivot::
-  sweep(real *restrict Y, const real_fj *restrict B, 
+  sweep(real *restrict X, const real_fj *restrict B, 
 	const real_fj *restrict D, const pivot_type *restrict pivot,
 	const pair<int,int> *restrict CLR, const real_fj *restrict F,
 	const int *restrict foffsets, int neq, bool forward, int vs) const {
@@ -916,120 +1459,18 @@ namespace FGSI {
       const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
       for(int i=foffsets[e];i<foffsets[e+1];++i)  {
 	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
+	Fi.dotprod_accum(&X[CLR[i].second*vs],&t[0]) ;
 	Ft += vs2 ;
       }
       for(int i=0;i<vs;++i)
 	t[i] = -t[i] ;
       const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu(&t[0],&Y[voffset]) ;
-      //De.solve_lu(&Y[voffset],&v[0]) ;
+      De.solve_lu(&t[0],&X[voffset]) ;
+      //De.solve_lu(&X[voffset],&v[0]) ;
       e += dir ;
       voffset += vstep ;
       moffset += mstep ;
     }
-  }
-
-  class matrixHelpers5x5: public matrixHelpers {
-  public:
-    virtual void factorDiagonal(real_fj *D, pivot_type *pivot,
-				int neq, int vs) const ;
-    virtual void sweep(real *Y, const real_fj *B, 
-		       const real_fj *D, const pivot_type *pivot,
-		       const pair<int,int> *CLR, const real_fj *F,
-		       const int *foffsets, int neq, bool forward, int vs) const ;
-  } ;
-
-  void matrixHelpers5x5::
-  factorDiagonal(real_fj *restrict D, pivot_type *restrict pivot,
-		 int neq, int vs) const {
-    int vs2 = vs*vs ;
-    for(int i=0;i<neq;++i) {
-      Mat<real_fj> Di(D,vs) ;
-      Di.decompose_lu() ;
-      D += vs2 ;
-      pivot += vs ;
-    }
-  }
-
-  void matrixHelpers5x5::
-  sweep(real *restrict Y, const real_fj *restrict B, 
-	const real_fj *restrict D, const pivot_type *restrict pivot,
-	const pair<int,int> *restrict CLR, const real_fj *restrict F,
-	const int *restrict foffsets, int neq, bool forward, int vsi) const {
-    const int vs = 5 ;
-    const int vs2 = 25 ;
-
-    int dir = forward?1:-1 ;
-    const int vstep = dir*vs ;
-    const int mstep = dir*vs2 ;
-    int e = forward?0:neq-1 ;
-    int voffset = e*vs ;
-    int moffset = e*vs2 ;
-    //#define INLINED
-#ifndef INLINED
-    vector<real> t(vs) ;
-    for(int eq=0;eq<neq;++eq) {
-      for(int i=0;i<vs;++i)
-	t[i] = -B[voffset+i] ;
-      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
-      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
-	const_Mat<real_fj> Fi(Ft,vs) ;
-	Fi.dotprod_accum(&Y[CLR[i].second*vs],&t[0]) ;
-	Ft += vs2 ;
-      }
-      for(int i=0;i<vs;++i)
-	t[i] = -t[i] ;
-      const_Mat<real_fj> De(&D[moffset],vs) ;
-      De.solve_lu(&t[0],&Y[voffset]) ;
-      //De.solve_lu(&Y[voffset],&v[0]) ;
-      e += dir ;
-      voffset += vstep ;
-      moffset += mstep ;
-    }
-#else
-    for(int eq=0;eq<neq;++eq) {
-      real t0 = B[voffset] ;
-      real t1 = B[voffset+1] ;
-      real t2 = B[voffset+2] ;
-      real t3 = B[voffset+3] ;
-      real t4 = B[voffset+4] ;
-      const real_fj *restrict Ft = &F[foffsets[e]*vs2] ;
-      for(int i=foffsets[e];i<foffsets[e+1];++i)  {
-	const real restrict *Yt = &Y[CLR[i].second*vs] ;
-	t0 -= Ft[0]*Yt[0]+Ft[5]*Yt[1]+Ft[10]*Yt[2]+Ft[15]*Yt[3]+Ft[20]*Yt[4] ;
-	t1 -= Ft[1]*Yt[0]+Ft[6]*Yt[1]+Ft[11]*Yt[2]+Ft[16]*Yt[3]+Ft[21]*Yt[4] ;
-	t2 -= Ft[2]*Yt[0]+Ft[7]*Yt[1]+Ft[12]*Yt[2]+Ft[17]*Yt[3]+Ft[22]*Yt[4] ;
-	t3 -= Ft[3]*Yt[0]+Ft[8]*Yt[1]+Ft[13]*Yt[2]+Ft[18]*Yt[3]+Ft[23]*Yt[4] ;
-	t4 -= Ft[4]*Yt[0]+Ft[9]*Yt[1]+Ft[14]*Yt[2]+Ft[19]*Yt[3]+Ft[24]*Yt[4] ;
-	Ft += 25 ;
-      }
-      real *x = &Y[voffset] ;
-      const real_fj *A = &D[moffset] ;
-      
-      real x0 = t0 ;
-      real x1 = t1-A[1]*x0 ;
-      real x2 = t2-A[2]*x0-A[7]*x1 ;
-      real x3 = t3-A[3]*x0-A[8]*x1-A[13]*x2 ;
-      real x4 = t4-A[4]*x0-A[9]*x1-A[14]*x2-A[19]*x3 ;
-
-      x4 = x4/A[24] ;
-      x3 = (x3-A[23]*x4)/A[18] ;
-      x2 = (x2-A[22]*x4-A[17]*x3)/A[12] ;
-      x1 = (x1-A[21]*x4-A[16]*x3-A[11]*x2)/A[6] ;
-      x0 = (x0-A[20]*x4-A[15]*x3-A[10]*x2-A[5]*x1)/A[0] ;
-      
-      x[0] = x0 ;
-      x[1] = x1 ;
-      x[2] = x2 ;
-      x[3] = x3 ;
-      x[4] = x4 ;
-
-      e += dir ;
-      voffset += vstep ;
-      moffset += mstep ;
-    }
-#endif
   }
 
 
@@ -1045,18 +1486,70 @@ namespace FGSI {
 
   $type FSGSblockedMatrix(Y) blackbox<blockedMatrixData> ;
 
-  $rule blackbox(FSGSblockedMatrix(Y)<-FSGSmatrixTopology,
+  $type FSGSUsePivots param<string> ;
+  $rule default(FSGSUsePivots) { $FSGSUsePivots = "no" ; }
+  $type FSGSPivotSelector param<bool> ;
+  $rule singleton(FSGSPivotSelector<-FSGSUsePivots) {
+    $FSGSPivotSelector = false ;
+    if($FSGSUsePivots == "yes" || $FSGSUsePivots == "on" || $FSGSUsePivots == "true") {
+      $FSGSPivotSelector = true ;
+    } else if($FSGSUsePivots == "no" || $FSGSUsePivots == "off" || $FSGSUsePivots == "false") {
+      $FSGSPivotSelector = false ;
+    } else {
+      cerr << "unable to interpret setting for 'FSGSUsePivots' in vars file"
+	   << endl ;
+    }
+  }
+  $rule blackbox(FSGSblockedMatrix(Y)<-FSGSmatrixTopology,FSGSPivotSelector,
 		 Y_B,Y_D,upper->Y_U,lower->Y_L), prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    const struct matrixStructure & restrict matrix = *$FSGSmatrixTopology ;
     int vs = $Y_B.vecSize() ;
     int vs2 = vs*vs ;
     $FSGSblockedMatrix(Y)->vs = vs ;
     $FSGSblockedMatrix(Y)->vs2 = vs2 ;
-    if(vs == 5) 
-      $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpers5x5 ;
-    else if(vs < 8) 
-      $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivot ;
-    else
+    if(vs < 40 && !*$FSGSPivotSelector) {
+      switch(vs) {
+      case 5:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<5> ;
+	break ;
+      case 6:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<6> ;
+	break ;
+      case 7:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<7> ;
+	break ;
+      case 8:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<8> ;
+	break ;
+      case 9:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<9> ;
+	break ;
+      case 10:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<10> ;
+	break ;
+      case 11:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<11> ;
+	break ;
+      case 12:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<12> ;
+	break ;
+      case 13:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<13> ;
+	break ;
+      case 14:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<14> ;
+	break ;
+      case 15:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<15> ;
+	break ;
+      case 16:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivotN<16> ;
+	break ;
+      default:
+	$FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersNoPivot ;
+	break ;
+      }
+    } else 
       $FSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersGeneric ;
 
     vector<real_fj> B(matrix.eql2g.size()*vs); 
@@ -1105,15 +1598,23 @@ namespace FGSI {
     //    $FSGSblockedMatrix(Y)->Dreal.swap(Dreal) ; 
   } ;
 
-  $rule pointwise(FSGSBlockedSSolve(Y)<- gauss_seidel_iter,
+  $rule pointwise(FSGSBlockedSSolve(Y)<- FSGSMaxIter(Y),FSGSMatrixName(Y),
+                  FSGSDiagnosticLevel(Y),
 		  FSGSblockedMatrix(Y),FSGSmatrixTopology),
     option(disable_threading),
     prelude {
-    struct matrixStructure & restrict matrix = matrixInfo[*$FSGSmatrixTopology] ;
+    bool printResidual = *$FSGSDiagnosticLevel(Y) > 0 ;
+    
+    const struct matrixStructure & restrict matrix = *$FSGSmatrixTopology ;
     int vs = $FSGSblockedMatrix(Y)->vs ;
     $FSGSBlockedSSolve(Y).setVecSize(vs) ;
     vector<real> x1(matrix.eql2g.size()*vs,0.0) ;
-    real *Y = &x1[0] ;
+    real *X = &x1[0] ;
+    vector<real> x2 ;
+    if(printResidual) {
+      vector<real> tmp(matrix.eql2g.size()*vs,0.0);
+      x2.swap(tmp) ;
+    }
 
     const real_fj *B = &($FSGSblockedMatrix(Y)->B[0]) ;
     const real_fj *F = &($FSGSblockedMatrix(Y)->F[0]) ;
@@ -1126,20 +1627,21 @@ namespace FGSI {
     vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
     vector<MPI_Request> requests(matrix.recv_processors.size()) ;
     vector<MPI_Status> status(matrix.recv_processors.size()) ;
-    int num_iter = *$gauss_seidel_iter ;
+    int num_iter = *$FSGSMaxIter(Y) ;
+    double zero_resid = 0 ;
     for(int iter = 0;iter<num_iter;++iter) {
       // copy send data 
       int psz = matrix.periodicCopy.size() ;
       for(int i=0;i<psz;++i) {
 	for(int j=0;j<vs;++j) {
-	  Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
+	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
 	}
       }
       for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
 	int loc = matrix.send_entitiesl[i]*vs ;
 	int ii = i*vs ;
 	for(int j=0;j<vs;++j)
-	  send_data[ii+j] = Y[loc+j] ;
+	  send_data[ii+j] = X[loc+j] ;
       }
       for(size_t i=0;i<matrix.recv_processors.size();++i) {
 	int rs = matrix.recv_offsets[i]*vs ;
@@ -1163,25 +1665,46 @@ namespace FGSI {
 	int loc = matrix.recv_entitiesl[i]*vs ;
 	int ii = i*vs ;
 	for(int j=0;j<vs;++j)
-	  Y[loc+j] = recv_data[ii+j] ;
+	  X[loc+j] = recv_data[ii+j] ;
       }
       for(int i=0;i<psz;++i) {
 	for(int j=0;j<vs;++j) {
-	  Y[matrix.periodicCopy[i].first*vs+j] = Y[matrix.periodicCopy[i].second*vs+j] ;
+	  X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
 	}
       }
 
       // Forward sweep
       $FSGSblockedMatrix(Y)->matrixHelp->
-	sweep(Y,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,true,vs) ;
+	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,true,vs) ;
       // Backward sweep
       $FSGSblockedMatrix(Y)->matrixHelp->
-	sweep(Y,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,false,vs) ;
+	sweep(X,B,D,pivot,CLR,F,&matrix.foffsets[0],neq,false,vs) ;
+      
+      if(printResidual) {
+        double residl = 0 ;
+        for(int i=0;i<matrix.nmyeqn*vs;++i) {
+          double r = realToDouble(X[i]-x2[i]) ;
+          x2[i] = X[i] ;
+          residl += r*r ;
+        }
+        double resid = 0 ;
+        MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
+        resid = sqrt(resid) ;
+        if(0 == iter)
+          zero_resid = max(resid,1e-16) ;
+
+        double rel_resid = resid/zero_resid ;
+        if(Loci::MPI_rank == 0) {
+          cout << "FSGS Matrix " << *$FSGSMatrixName(Y) 
+               << ", iter=" << iter+1 
+               << ", resid=" << resid << ", rel_resid=" << rel_resid << endl ;
+        }
+      }
     }
 
     for(int i=0;i<matrix.nmyeqn;++i)
       for(int j=0;j<vs;++j)
-	$FSGSBlockedSSolve(Y)[matrix.eql2g[i]][j] = Y[i*vs+j] ;
+	$FSGSBlockedSSolve(Y)[matrix.eql2g[i]][j] = X[i*vs+j] ;
   } ;
 
 }
