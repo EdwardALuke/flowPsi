@@ -119,8 +119,6 @@ esac
 # Check if source directory is a git repo
 if [ -e .git ]; then
     cat revision.conf |sed "s:unknown-version:\$(shell cd $(pwd); git describe --abbrev=6 --always --dirty --tags):g" | sed  "s:unknown-branch:\$(shell cd $(pwd); git rev-parse --abbrev-ref HEAD):g" >version.conf
-else
-    cat revision.conf > version.conf
 fi
 
 echo "LOCI_BASE = " ${LOCI_BASE} > flowpsi.conf

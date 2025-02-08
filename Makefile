@@ -62,3 +62,12 @@ distclean: FRC
 	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	rm -fr lib bin output debug *~ include/*~ version.conf
+
+
+tarball:
+	version_string=$$(sed -e "s:^FLOWPSI_GIT_INFO.*:FLOWPSI_GIT_INFO = $(FLOWPSI_GIT_INFO):g" \
+	                      -e "s:^FLOWPSI_GIT_BRANCH.*:FLOWPSI_GIT_BRANCH = $(FLOWPSI_GIT_BRANCH):g" \
+	                      revision.conf); \
+	git archive --format=tgz --prefix=flowPsi-$(FLOWPSI_VERSION_NAME)/ \
+	            --add-virtual-file=flowPsi-$(FLOWPSI_VERSION_NAME)/version.conf:"$$version_string" \
+	            -o flowPsi-$(FLOWPSI_VERSION_NAME).tgz HEAD
