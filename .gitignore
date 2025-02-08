@@ -1,0 +1,15 @@
+*.toc
+*.aux
+*.pdf
+*.log
+*~
+*.o
+*.so
+*.d
+*.code-workspace
+/lib
+/bin
+/Makefile
+Tutorial/docs/Makefile_ex.tex
+Tutorial/docs/entities_cc.tex
+Tutorial/docs/helpers_cc.tex

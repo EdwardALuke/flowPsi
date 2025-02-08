@@ -270,24 +270,12 @@ $rule pointwise( priority::moving::us_n ),
 
 }
 namespace {
-  const char *revision_name = "$Name$" ;
-
   std::string version() {
-    const char *p = revision_name;
-    while(*p!=':' && *p!='\0')
-      ++p ;
-    if(*p!= '\0')
-      ++p ;
-    while(*p!=' ' && *p!='\0')
-      ++p ;
-    if(*p!= '\0')
-      ++p ;
-    std::string rn ;
-    while(*p!='$' &&  *p!=' ' && *p!='\0') 
-      rn += *p++ ;
-    return rn ;
+    string version = (string(FLOWPSI_BRANCH)
+                      + "-" +string(FLOWPSI_VERSION)) ;
+    return version ;
   }
-
+  
   std::string date() {
     std::string rn ;
     rn += __DATE__ ;

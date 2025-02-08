@@ -1,6 +1,6 @@
 include flowpsi.conf
 include test.conf
-include revision.conf
+include version.conf
 
 FLOWPSI_BASE = $(shell pwd)
 
@@ -61,4 +61,4 @@ distclean: FRC
 	$(MAKE) -C addOns -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
-	rm -fr lib bin output debug *~ include/*~
+	rm -fr lib bin output debug *~ include/*~ version.conf

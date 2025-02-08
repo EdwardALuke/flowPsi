@@ -10,11 +10,9 @@
 # multiple modules can be loaded with multiple -load_module options
 include $(FLOWPSI_BASE)/flowpsi.conf
 include $(LOCI_BASE)/Loci.conf
+include $(FLOWPSI_BASE)/version.conf
 
-#COPT= -g -O0
-#COPTLESS= -g -O0 
-
-INCLUDES = -DUSE_LOCI_TYPES -I$(FLOWPSI_BASE)/include -I./include
+INCLUDES = -DUSE_LOCI_TYPES -I$(FLOWPSI_BASE)/include -I./include $(FLOWPSI_VERSION_FLAGS)
 
 # Put objects in the module here
 OBJS =	approx.o \

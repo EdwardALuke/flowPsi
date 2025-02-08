@@ -1,14 +1,10 @@
 include ../flowpsi.conf
-include ../revision.conf
+include ../version.conf
 include $(LOCI_BASE)/Loci.conf
 
 FVMADAPT_LIB = -lfvmadaptfunc
 
-#COPTLESS = -O0 -g
-#COPT=$(COPTLESS)
-
-
-INCLUDES = -I../include
+INCLUDES = -I../include $(FLOWPSI_VERSION_FLAGS)
 
 
 TARGET = flowpsi

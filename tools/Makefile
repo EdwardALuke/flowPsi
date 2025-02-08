@@ -1,11 +1,11 @@
 FLOWPSI_BASE ?= ..
 include $(FLOWPSI_BASE)/flowpsi.conf
-include $(FLOWPSI_BASE)/revision.conf
+include $(FLOWPSI_BASE)/version.conf
 include $(LOCI_BASE)/Loci.conf
 
 COPT = $(COPTLESS)
 
-INCLUDES = -I$(FLOWPSI_BASE)/include 
+INCLUDES = -I$(FLOWPSI_BASE)/include $(FLOWPSI_VERSION_FLAGS)
 
 OTHER_APPS = ndiff adpt
 
