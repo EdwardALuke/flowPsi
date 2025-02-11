@@ -7,6 +7,8 @@
 *.so
 *.d
 *.code-workspace
+/flowpsi.conf
+/version.conf
 /lib
 /bin
 /Makefile

@@ -4,18 +4,21 @@ default: inviscid viscous restart
 
 all: default
 
+.phony: FRC
+
 inviscid: FRC
-	cd inviscid && $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" ; cd ..
+	$(MAKE) -C inviscid LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" 
 
 viscous: FRC
-	cd viscous && $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" ; cd ..; 
+	$(MAKE) -C viscous LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" 
 
 restart: FRC
-	cd restart && $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" ; cd ..; 
+	$(MAKE) -C restart  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" 
 
 clean: FRC
-	cd inviscid && $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean ; cd ..
-	cd viscous && $(MAKE) LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean ; cd ..
+	$(MAKE) -C inviscid LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean 
+	$(MAKE) -C viscous LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean ; cd ..
+	$(MAKE) -C restart LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean ; cd ..
 	rm -f TestResults *~
 
 FRC :
