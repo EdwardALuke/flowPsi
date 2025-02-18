@@ -4,14 +4,14 @@ include version.conf
 
 FLOWPSI_BASE = $(shell pwd)
 
-default: flowpsi tools turbulence guide addOns particle 
+default: flowpsi tools turbulence guide addOns
 
 all: default
 
 install: all
 	FLOWPSI_INSTALL_DIR=$(FLOWPSI_INSTALL_DIR) FLOWPSI_INSTALL_PATH=$(FLOWPSI_INSTALL_PATH) bash Install.bash
 
-.PHONEY: FRC flowpsi tools test turbulence guide addOns install particle 
+.PHONEY: FRC flowpsi tools test turbulence guide addOns install 
 
 setup: FRC
 	mkdir -p lib; true
@@ -26,8 +26,6 @@ turbulence: setup
 addOns: setup
 	$(MAKE) -C addOns FLOWPSI_BASE="$(FLOWPSI_BASE)" all
 
-particle: setup
-	$(MAKE) -C particle FLOWPSI_BASE="$(FLOWPSI_BASE)" install
 
 tools: setup
 	$(MAKE) -C tools FLOWPSI_BASE="$(FLOWPSI_BASE)"  all
@@ -50,7 +48,6 @@ clean: FRC
 	$(MAKE) -C tools -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C turbulence -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C addOns -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
-	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" clean
 
 distclean: FRC
@@ -59,7 +56,6 @@ distclean: FRC
 	$(MAKE) -C tools -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C turbulence -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C addOns -k  LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
-	$(MAKE) -C particle -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	$(MAKE) -C guide -k LOCI_BASE="$(LOCI_BASE)" FLOWPSI_BASE="$(FLOWPSI_BASE)" distclean
 	rm -fr lib bin output debug *~ include/*~ version.conf flowpsi.conf
 

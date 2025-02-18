@@ -1,69 +1,63 @@
-# Set FLOWPSI_BASE to point to the FLOWPSI installation directory to compile
-# this module
-#
-# To use a module, compile the module and then put the resulting shared object
-# file either in the installed lib directory with flowpsi or some other place that
-# is contained in the LD_LIBRARY_PATH.  Once this is done, the module can be 
-# accessed by placing 'loadModule: MODULE_NAME' into the top of the vars file
-#
 # Makefile SETUP:
-# Set FLOWPSI_BASE to the directory where FLOWPSI is installed
+# Set FLOWPSI_BASE to the directory where flowPsi is installed
 # Set MODULE_NAME to the name of your module
 # Set FILES to list '.loci' files that will be compiled into your module, or
-# use $(AUTOMATIC_FILES) to compile all '.loci' files in the present directory
-
-#Points to FLOWPSI installation directory
-FLOWPSI_BASE ?= ../../
+# use $(AUTOMATIC_FILES)
 
 # What is the name of the module given to loadModule
-MODULE_NAME = onlineStats
+MODULE_NAME = onlineStatsFPSI
 # This will by default include all '.loci' files in the current directory
 FILES = $(AUTOMATIC_FILES)
-
 
 ###########################################################################
 # No changes required below this line
 ###########################################################################
 
-AUTOMATIC_FILES = $(wildcard *.loci)
-AUTOMATIC_OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .loci,.o,$(FILES))))
+AUTOMATIC_FILES = $(wildcard *.c *.cc *.cpp *.loci)
+AUTOMATIC_OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .cpp,.o, $(subst .loci,.o,$(FILES)))))
 
 OBJS := $(AUTOMATIC_OBJS)
 
 include $(FLOWPSI_BASE)/flowpsi.conf
 include $(LOCI_BASE)/Loci.conf
 
-INCLUDES = -I$(FLOWPSI_BASE)/include 
-#uncomment this for a debugging compile
-#COPT=-O0 -g 
-
+INCLUDES = -I$(FLOWPSI_BASE)/include -I./include
 
 LOCAL_LIBS = 
 
-JUNK = *~  core ti_files ii_files rii_files
+MAKEFILE_DIRECTORY = $(shell pwd | sed -e s?/.*/??)
+
+JUNK = *~  core 
 
 LIB_OBJS=$(OBJS:.o=_lo.o)
 
-all: $(MODULE_NAME)FPSI_m.so 
+all: $(MODULE_NAME)_m.so 
 
-$(MODULE_NAME)FPSI_m.so: $(LIB_OBJS)
-	$(SHARED_LD) $(SHARED_LD_FLAGS) $(MODULE_NAME)FPSI_m.so $(LIB_FLAGS) $(LIB_OBJS)
-	mv $(MODULE_NAME)FPSI_m.so ../../lib/$(MODULE_NAME)FPSI_m.so
+$(MODULE_NAME)_m.so: $(LIB_OBJS)
+	$(SHARED_LD) $(SHARED_LD_FLAGS) $(MODULE_NAME)_m.so $(LIB_FLAGS) $(LIB_OBJS)
 
-FRC : 
+install_local: ../../lib/$(MODULE_NAME)_m.so
 
-install: all
-	cp $(MODULE_NAME)FPSI_m.so $(FLOWPSI_BASE)/lib/$(MODULE_NAME)FPSI_m.so
+../../lib/$(MODULE_NAME)_m.so: $(MODULE_NAME)_m.so 
+	cp $(MODULE_NAME)_m.so ../../lib/$(MODULE_NAME)_m.so
+
+install: $(MODULE_NAME)_m.so 
+	cp $(MODULE_NAME)_m.so $(INSTALL_PATH)/lib/$(MODULE_NAME)_m.so
+ifeq ($(shell test -d include),0)
+	@echo Installing Include Files
+	mkdir -p $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)
+	cp $(wildcard include/*.h include/*.lh include/*.hpp) $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)
+endif
+
 
 clean:
-	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)FPSI_m.so $(JUNK)
+	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(JUNK)
 
 LOCI_FILES = $(wildcard *.loci)
 LOCI_LPP_FILES = $(LOCI_FILES:.loci=.$(LPP_I_SUFFIX))
 
-distclean: 
-	rm -fr $(DEPEND_FILES)
-	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)FPSI_m.so $(JUNK) $(LOCI_LPP_FILES)
+distclean: clean
+	rm -f $(DEPEND_FILES) $(LOCI_LPP_FILES)
 
 DEPEND_FILES=$(subst .o,.d,$(OBJS))
 
