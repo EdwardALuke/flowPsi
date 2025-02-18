@@ -6,6 +6,10 @@ flowPsiGuide.pdf: guide.tex  axi_source_terms.tex generalized_grid.tex govern.te
 	pdflatex guide
 	mv guide.pdf flowPsiGuide.pdf
 
+install: flowPsiGuide.pdf
+	mkdir -p $(INSTALL_PATH)/docs
+	cp flowPsiGuide.pdf $(INSTALL_PATH)/docs/flowPsiGuide.pdf
+
 clean:
 	rm -f *.aux *.ps *.bbl *.blg *.log *.toc *.dvi *.ps *~
 distclean:

@@ -1,45 +1,52 @@
-include ../flowpsi.conf
-include ../version.conf
+# Makefile SETUP:
+# Set FLOWPSI_BASE to the directory where flowPsi is installed
+# Set MODULE_NAME to the name of your module
+# Set FILES to list '.loci' files that will be compiled into your module, or
+# use $(AUTOMATIC_FILES) to compile all '.loci' files in the present directory
+
+# Name of application
+TARGET = flowpsi
+# This will by default inclue all ',loci' and other c++ and C files in the linking step
+FILES = $(AUTOMATIC_FILES)
+LOCAL_LIBS = 
+LOCAL_INCLUDES = 
+
+
+###########################################################################
+# No changes required below this line
+###########################################################################
+
+AUTOMATIC_FILES = $(wildcard *.c *.cc *.cpp *.loci)
+AUTOMATIC_OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .cpp,.o, $(subst .loci,.o,$(FILES)))))
+
+OBJS := $(AUTOMATIC_OBJS)
+
+include $(FLOWPSI_BASE)/flowpsi.conf
+include $(FLOWPSI_BASE)/version.conf
 include $(LOCI_BASE)/Loci.conf
 
-FVMADAPT_LIB = -lfvmadaptfunc
 
-INCLUDES = -I../include $(FLOWPSI_VERSION_FLAGS)
-
-
-TARGET = flowpsi
-
-OBJS =  \
-	main.o gridTools.o gridSetup.o gridReader.o gridDynamic.o gridAdapt.o\
-	gridAxisymmetry.o gridCoriolis.o gridComponents.o gridMRF.o\
-	bcInputs.o bcTurboInterface.o bcTools.o bcInterface.o \
-	bcPrescribed.o bcImpermeable.o bcInflow.o bcOutflow.o \
-	bcIsentropic.o bcFixedMass.o bcFixedMassOutflow.o bcViscousWall.o \
-	solverTimestep.o solverRungeKutta.o solverNewton.o solverEoS.o solverIC.o \
-	solverLinearSystem.o solverResidual.o solverRestart.o\
-	solverTurbulence.o solverScalarTransport.o solverPeriodic.o \
-	solverSetup.o solverGravity.o solverAveraging.o solverInterpolate.o \
-	solverICInterpolate.o \
-	IOplot.o IOintegrated.o IOgrid.o IOprobe.o IOClipSurfaces.o \
-	linearSolverSGS.o linearSolverFSGS.o linearSolverLSGS.o \
-	fluxInviscid.o fluxLowDiss.o fluxViscous.o
+INCLUDES = -I$(FLOWPSI_BASE)/include $(FLOWPSI_VERSION_FLAGS) $(LOCAL_INCLUDES)
 
 
-
-LOCAL_LIBS = $(LIBXML2_LIBS) -L$(LOCI_BASE)/lib $(FVMADAPT_LIB)
-
-JUNK = *~  core debug .schedule .schedule-*
+JUNK = *~  core 
 
 default:
 	$(MAKE) $(TARGET)
 
-all:
-	$(MAKE) $(TARGET)
+
+install_local: $(TARGET)
+	cp $(TARGET) $(FLOWPSI_BASE)/bin
+
+install: $(TARGET)
+	cp $(TARGET) $(INSTALL_PATH)/bin/$(TARGET)
+	@echo Installing Include Files
+	mkdir -p $(INSTALL_PATH)/include
+	cp $(wildcard ../include/*.h ../include/*.lh) $(INSTALL_PATH)/include
 
 
 $(TARGET): $(OBJS) 
-	$(LD) -o  $(TARGET)  $(RPATH)$(FLOWPSI_RPATH) $(OBJS) $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
-	mv flowpsi ../bin/flowpsi
+	$(LD) -o  $(TARGET)  $(RPATH)$(FLOWPSI_RPATH) $(OBJS) -L$(LOCI_BASE)/lib -lfvmadaptfunc $(LOCAL_LIBS) $(LIBS) $(LDFLAGS)
 
 FRC : 
 

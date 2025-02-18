@@ -9,13 +9,12 @@ MODULE_NAME = KOmegaModelFPSI
 # This will by default include all '.loci' files in the current directory
 FILES = $(AUTOMATIC_FILES)
 
-
 ###########################################################################
 # No changes required below this line
 ###########################################################################
 
-AUTOMATIC_FILES = $(wildcard *.loci)
-AUTOMATIC_OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .loci,.o,$(FILES))))
+AUTOMATIC_FILES = $(wildcard *.c *.cc *.cpp *.loci)
+AUTOMATIC_OBJS = $(subst .c,.o,$(subst .cc,.o,$(subst .cpp,.o, $(subst .loci,.o,$(FILES)))))
 
 OBJS := $(AUTOMATIC_OBJS)
 

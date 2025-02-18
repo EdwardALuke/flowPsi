@@ -61,10 +61,10 @@ install_local: ../../lib/$(MODULE_NAME)_m.so ../../bin/vogdeform
 
 all: $(MODULE_NAME)_m.so vogdeform
 
-install: $(MODULE_NAME)_m.so 
+install: $(MODULE_NAME)_m.so vogdeform
 	cp $(MODULE_NAME)_m.so $(INSTALL_PATH)/lib/$(MODULE_NAME)_m.so
 	cp vogdeform $(INSTALL_PATH)/bin/vogdeform
-ifeq ($(shell test -d include),0)
+ifneq ($(wildcard include/.),)
 	@echo Installing Include Files
 	mkdir -p $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)
 	cp $(wildcard include/*.h include/*.lh include/*.hpp) $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)
@@ -83,7 +83,7 @@ LOCI_LPP_FILES = $(LOCI_FILES:.loci=.$(LPP_I_SUFFIX))
 
 distclean: 
 	rm -fr $(DEPEND_FILES)
-	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(VOGDEFOBJS) $(JUNK) $(LOCI_LPP_FILES)
+	rm -fr $(OBJS) $(LIB_OBJS) $(MODULE_NAME)_m.so $(VOGDEFOBJS) vogdeform $(JUNK) $(LOCI_LPP_FILES)
 
 DEPEND_FILES=$(subst .o,.d,$(OBJS)) 
 

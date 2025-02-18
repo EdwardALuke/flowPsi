@@ -25,6 +25,7 @@ INCLUDES = -I$(FLOWPSI_BASE)/include -I./include
 
 LOCAL_LIBS = 
 
+SOURCE_DIRECTORY = $(shell pwd)
 MAKEFILE_DIRECTORY = $(shell pwd | sed -e s?/.*/??)
 
 JUNK = *~  core 
@@ -41,9 +42,10 @@ install_local: ../../lib/$(MODULE_NAME)_m.so
 ../../lib/$(MODULE_NAME)_m.so: $(MODULE_NAME)_m.so 
 	cp $(MODULE_NAME)_m.so ../../lib/$(MODULE_NAME)_m.so
 
+
 install: $(MODULE_NAME)_m.so 
 	cp $(MODULE_NAME)_m.so $(INSTALL_PATH)/lib/$(MODULE_NAME)_m.so
-ifeq ($(shell test -d include),0)
+ifneq ($(wildcard include/.),)
 	@echo Installing Include Files
 	mkdir -p $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)
 	cp $(wildcard include/*.h include/*.lh include/*.hpp) $(INSTALL_PATH)/include/$(MAKEFILE_DIRECTORY)

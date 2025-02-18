@@ -8,8 +8,25 @@ default: flowpsi tools turbulence guide addOns
 
 all: default
 
-install: all
-	FLOWPSI_INSTALL_DIR=$(FLOWPSI_INSTALL_DIR) FLOWPSI_INSTALL_PATH=$(FLOWPSI_INSTALL_PATH) bash Install.bash
+INSTALL_PATH = $(FLOWPSI_INSTALL_PATH)/$(FLOWPSI_INSTALL_DIR)
+
+install: FRC
+	mkdir -p $(INSTALL_PATH)
+	mkdir -p $(INSTALL_PATH)/lib
+	mkdir -p $(INSTALL_PATH)/bin
+	cp flowpsi.conf $(INSTALL_PATH)/flowpsi.conf
+	@sed -e "s:^FLOWPSI_GIT_INFO.*:FLOWPSI_GIT_INFO = $(FLOWPSI_GIT_INFO):g" \
+	    -e "s:^FLOWPSI_GIT_BRANCH.*:FLOWPSI_GIT_BRANCH = $(FLOWPSI_GIT_BRANCH):g" \
+	                      revision.conf > \
+	         $(INSTALL_PATH)/version.conf
+	$(MAKE) -C src INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C tools INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C turbulence INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C addOns INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C guide INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	$(MAKE) -C examples INSTALL_PATH="$(INSTALL_PATH)" FLOWPSI_BASE="$(FLOWPSI_BASE)" install
+	chmod -R a+rX $(INSTALL_PATH)
+
 
 .PHONEY: FRC flowpsi tools test turbulence guide addOns install 
 
@@ -18,17 +35,16 @@ setup: FRC
 	mkdir -p bin; true
 
 flowpsi: setup
-	$(MAKE) -C src LOCI_BASE="$(LOCI_BASE)" all
+	$(MAKE) -C src FLOWPSI_BASE="$(FLOWPSI_BASE)" install_local
 
 turbulence: setup
-	$(MAKE) -C turbulence FLOWPSI_BASE="$(FLOWPSI_BASE)" all
+	$(MAKE) -C turbulence FLOWPSI_BASE="$(FLOWPSI_BASE)" install_local
 
 addOns: setup
-	$(MAKE) -C addOns FLOWPSI_BASE="$(FLOWPSI_BASE)" all
-
+	$(MAKE) -C addOns FLOWPSI_BASE="$(FLOWPSI_BASE)" install_local
 
 tools: setup
-	$(MAKE) -C tools FLOWPSI_BASE="$(FLOWPSI_BASE)"  all
+	$(MAKE) -C tools FLOWPSI_BASE="$(FLOWPSI_BASE)"  install_local
 
 docs: FRC
 	$(MAKE) -C guide FLOWPSI_BASE="$(FLOWPSI_BASE)" flowPsiGuide.pdf

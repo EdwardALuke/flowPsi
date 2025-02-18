@@ -1,4 +1,4 @@
-all: SA KOmega RKE DHRL TSM
+install_local: SA KOmega RKE DHRL TSM
 
 
 SA: FRC
