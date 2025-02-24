@@ -1178,18 +1178,18 @@ namespace LGSI {
       for(int i=0;i<lsz;++i)
         rhs[i] = B[i] ;
 
-	real *restrict x = &X[eqb] ;
-	// now solve line
-	// forward solve 
-	x[0] = rhs[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
+      real *restrict x = &X[eqb] ;
+      // now solve line
+      // forward solve 
+      x[0] = rhs[0] ;
+      for(int i=1;i<lsz;++i) {
+        x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
+      }
+      // backward solve
+      x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+      for(int i=lsz-2;i>=0;--i) {
+        x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+      }
     }
     vector<real> send_data(matrix.send_entitiesl.size()) ;
     vector<real> recv_data(matrix.recv_entitiesl.size()) ;
