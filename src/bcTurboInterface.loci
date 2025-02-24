@@ -379,11 +379,11 @@ namespace flowPsi {
     // the input angles are assumed to be within the range [-PI, PI],
     // the normal range returned by the "atan2" function.
     // the output angle is normalized to be within [-PI, PI] as well.
-    inline real theta_diff(real t1, real t2) // t1-t2
-    {
-      real t = t1-t2;
-      return norm_theta(t);
-    }
+    //inline real theta_diff(real t1, real t2) // t1-t2
+    //    {
+    //      real t = t1-t2;
+    //      return norm_theta(t);
+    //    }
 
     // the cylindrical coordinate has 3 components (X,R,Theta),
     // the X component corresponds to the X component in the Cartesian
@@ -669,7 +669,7 @@ namespace flowPsi {
     int psz = plist.size() ;
     int error = 0 ;
     vector<pair<int,int> > connect ;
-    for(int i=0;i<psz;++i) {
+    for(int i=0;i<psz;i+=2) {
       if(i+1==psz || plist[i].first != plist[i+1].first) { 
 	// error in matching bc's, find bc name
 	map<string,int>::const_iterator mi ;
@@ -686,7 +686,6 @@ namespace flowPsi {
 	connect.push_back(pair<int,int>(plist[i].second,plist[i+1].second)) ;
 	connect.push_back(pair<int,int>(plist[i+1].second,plist[i].second)) ;
       }
-      i++ ;
     }
     if(error > 0) {
       Loci::Abort() ;
@@ -1938,7 +1937,6 @@ namespace flowPsi {
 	vec3d edge = (cpos[i]-cpos[i+1]);
 	real len = sqrt(dot(edge,edge));
 	nodesum += len*mid;
-	nodesum = nodesum;
 	lensum += len;
       }
       // last edge
@@ -1946,7 +1944,6 @@ namespace flowPsi {
       vec3d edge = cpos[0]-cpos[nn-1];
       real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
-      nodesum = nodesum;
       lensum += len;
 
       fc = cylind_to_cart(nodesum/lensum + orig) ;
@@ -1962,7 +1959,6 @@ namespace flowPsi {
 	vec3d edge = (cpos[i]-cpos[i+1]);
 	real len = sqrt(dot(edge,edge));
 	nodesum += len*mid;
-	nodesum = nodesum;
 	lensum += len;
       }
       // last edge
@@ -1970,7 +1966,6 @@ namespace flowPsi {
       vec3d edge = cpos[0]-cpos[nn-1];
       real len = sqrt(dot(edge,edge));
       nodesum += len*mid;
-      nodesum = nodesum;
       lensum += len;
 
       fc = nodesum/lensum ;
