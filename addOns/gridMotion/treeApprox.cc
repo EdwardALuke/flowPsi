@@ -890,7 +890,7 @@ inline real frsum_basic(real x[3],real beta[9],real xc[3], int a) {
 
     const vector3d<real> zero(0.0,0.0,0.0) ;
     realF droterr = 0 ; 
-    int nrsample = 4 ;
+    const int nrsample = 4 ;
     real W[nrsample][4] ;
     real A00=0,A11=0,A22=0,A01=0,A02=0,A12= 0 ;
     for(int s=0;s<nrsample;++s) {
@@ -1458,7 +1458,7 @@ inline real frsum_basic(real x[3],real beta[9],real xc[3], int a) {
       vector3d<realF> xc = approxTree.centroid[node] ;
       const vector3d<real> zero(0.0,0.0,0.0) ;
       realF droterr = 0 ; 
-      int nrsample = 4 ;
+      const int nrsample = 4 ;
       real W[nrsample][4] ;
       real A00=0,A11=0,A22=0,A01=0,A02=0,A12= 0 ;
       for(int s=0;s<nrsample;++s) {
