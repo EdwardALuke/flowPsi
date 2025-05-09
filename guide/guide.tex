@@ -492,6 +492,30 @@ maximumRunTime: 23.5 hour
   value may allow convergence.  However, setting this value too small
   may prevent convergence in any reasonable number of iterations.
 
+\item {\tt LSGSDiagnosticLevel}
+
+  When this is set to a value greater than 0 then the line solver will
+  output linear solver residuals  to stdout when solving linear
+  systems.
+
+
+\item {\tt LSGSSolverControls}
+
+  This allows an equation by equation level control of the LSGS
+  solvers.  For example, to control the linear system solvers for a
+  KOmega model we can use the setting:
+
+\begin{verbatim}
+LSGSSolverControls: <
+fluid=options(MaxIter=10,RelTol=0.1,AbsTol=1e-5,Relaxation=0.33),
+k=options(MaxIter=10,RelTol=0.05,DiagnosticLevel=1),
+w=options(MaxIter=100,RelTol=0.01,DiagnosticLevel=1)
+>
+\end{verbatim}
+
+Note that for the Spalart Allmaras turbulence model, the equation solver is {\tt nuTilde}.
+
+  
 \item {\tt limiter }
 
   This variable describes the limiter that will be used to limit the
