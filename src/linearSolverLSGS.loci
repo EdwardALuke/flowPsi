@@ -18,7 +18,6 @@
 //# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
 //#
 //#############################################################################
-
 #include <Loci.h>
 #include "periodic.h"
 #include <vector> 
@@ -27,31 +26,35 @@
 #include "flowTypes.h"
 $include "flowPsi.lh"
 
-//#define JACOBI
 // Scalar solver using modified line gauss seidel method
 namespace LGSI {
-#ifdef USE_AUTODIFF
-#ifdef AUTODIFF2ND
-#define LSGS_TYPE Loci::MPI_FADD2
-#else
-#define LSGS_TYPE Loci::MPI_FADD 
-#endif
-#else	
-#define LSGS_TYPE MPI_DOUBLE
-#endif
-  using flowPsi::real ;
-  using flowPsi::real_fj ;
-  using flowPsi::realF ;
-  using Loci::realToDouble ;
   using std::vector ;
   using std::sort ;
   using std::swap ;
   using std::set ;
+  using Loci::realToDouble ;
+  using Loci::realToFloat ;
+#ifdef USE_AUTODIFF
+  typedef Loci::real_t real ;
+  typedef Loci::real_t realF ;
+#ifdef AUTODIFF2ND
+#define LSGS_TYPE Loci::MPI_FADD2
+#else
+#ifdef MULTIFAD
+#define LSGS_TYPE Loci::MPI_MFADD  
+#else  
+#define LSGS_TYPE Loci::MPI_FADD
+#endif
+#endif
+#else	
+  typedef double real ;
+  typedef float realF ;
+#define LSGS_TYPE MPI_DOUBLE
+#endif
   using std::cerr ;
+  using std::endl ;
   using std::cout ;
-  using std::endl ;  
-  typedef real real ;
-
+  
   $type LSGSMatrixName(X) param<std::string> ;
   $rule singleton(LSGSMatrixName(X)),constraint(UNIVERSE),
     	option(disable_threading) {
@@ -73,7 +76,7 @@ namespace LGSI {
   }
 
   // Scalar solve
-  $type X_B store<real> ;
+  $type B store<real> ;
   $type X_D store<real> ;
   $type X_L store<real> ;
   $type X_U store<real> ;
@@ -242,7 +245,7 @@ namespace LGSI {
     }
   }
 
-  $rule pointwise(LSGSConnectivity(X)<-X_L,X_U),parametric(LSGSScalarSolve(X)) {
+  $rule pointwise(LSGSConnectivity(X)<-X_L,X_U),parametric(LSGSScalarSolve(X,B)) {
     $LSGSConnectivity(X) = max(fabs($X_L),fabs($X_U)) ;
   }
 
@@ -342,12 +345,16 @@ namespace LGSI {
   $type LSGSmatrixTopology(X) blackbox<matrixStructureP> ;
 
   struct scalarMatrixData {
-    vector<real> B ;
     vector<real> D ;
     vector<real> F ;
   } ;
 
+  struct scalarRHSData {
+    vector<real> B ;
+  } ;
+  
   $type LSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
+  $type LSGSscalarRHS(X,B) blackbox<scalarRHSData> ;
 
   $rule blackbox(LSGSmatrixInitialize(X)),constraint(UNIVERSE),prelude {
     *$LSGSmatrixInitialize(X) = matrixStructure() ;
@@ -1110,16 +1117,14 @@ namespace LGSI {
   } ;
 
   $rule blackbox(LSGSscalarMatrix(X)<-LSGSmatrixTopology(X),
-		 X_B,X_D,upper->X_U,lower->X_L), prelude {
+		 X_D,upper->X_U,lower->X_L), prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    vector<real> B(matrix.eql2g.size()); 
     vector<real> D(matrix.eql2g.size()); 
     vector<real> F(matrix.outerCLR.size()); 
     
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
       D[i] = $X_D[matrix.eql2g[i]] ;
-      B[i] = $X_B[matrix.eql2g[i]] ;
     }
     entitySet ldom  = matrix.globalL2l.domain() ;
     FORALL(ldom,ii) {
@@ -1144,17 +1149,28 @@ namespace LGSI {
         Dp[i] = 1./(Dt<0.0?min<real>(Dt,-1e-30):max<real>(Dt,1e-30)) ;
       }
     }
-    $LSGSscalarMatrix(X)->B.swap(B) ; 
     $LSGSscalarMatrix(X)->D.swap(D) ; 
     $LSGSscalarMatrix(X)->F.swap(F) ; 
     
   } ;
 
-  $type LSGSScalarSolve(X)           store<real> ;
+  $rule blackbox(LSGSscalarRHS(X,B)<-LSGSmatrixTopology(X),
+		 B), prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
+    vector<real> B(matrix.eql2g.size()); 
+    
+    // Copy matrix into data structure
+    for(int i=0;i<matrix.nmyeqn;++i) {
+      B[i] = $B[matrix.eql2g[i]] ;
+    }
+    $LSGSscalarRHS(X,B)->B.swap(B) ; 
+    
+  } ;
 
+  $type LSGSScalarSolve(X,B)           store<real> ;
 
-  $rule pointwise(LSGSScalarSolve(X)<-LSGSMaxIter(X),LSGSAbsTol(X),LSGSRelTol(X),
-		  LSGSRelaxation(X), LSGSscalarMatrix(X),LSGSmatrixTopology(X),
+  $rule pointwise(LSGSScalarSolve(X,B)<-LSGSMaxIter(X),LSGSAbsTol(X),LSGSRelTol(X),
+		  LSGSRelaxation(X), LSGSscalarMatrix(X),LSGSscalarRHS(X,B),LSGSmatrixTopology(X),
                   LSGSMatrixName(X),LSGSDiagnosticLevel(X)),
     option(disable_threading),prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
@@ -1168,7 +1184,7 @@ namespace LGSI {
       const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
       const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
       const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-      const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+      const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
       
       const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
@@ -1241,7 +1257,7 @@ namespace LGSI {
 	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
 	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
 	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
 	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
 
         const int ls = matrix.lineData[l].eqnstart ;
@@ -1283,7 +1299,7 @@ namespace LGSI {
 	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
 	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
 	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
 	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
 
 	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
@@ -1346,61 +1362,11 @@ namespace LGSI {
       if(rel_resid < realToDouble(*$LSGSRelTol(X)))
 	break ;
 
-      // Jacobi found to be not productive if unrelaxed values are communicated
-#ifdef JACOBI
-      // jacobi solve
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real *B = &$LSGSscalarMatrix(X)->B[matrix.lineData[l].eqnstart] ;
-	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
-
-        const int ls = matrix.lineData[l].eqnstart ;
-        const int le = matrix.lineData[l].eqnend ;
-
-	const int lsz = le-ls ;
-	
-	real *restrict rhsl = &xt[ls] ;
-
-	for(int i=0;i<lsz;++i) 
-	  rhsl[i] = B[i] ;
-
-
-	const int   os = matrix.lineData[l].OuterStart ;
-	const int   oe = matrix.lineData[l].OuterEnd ;
-	for(int i=os;i<oe;++i) {
-	  rhsl[matrix.outerCLR[i].first-ls] 
-	    -= X[matrix.outerCLR[i].second]*F[i] ;
-	}
-      }
-
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-        const int ls = matrix.lineData[l].eqnstart ;
-        const int le = matrix.lineData[l].eqnend ;
-
-	const int lsz = le-ls ;
-	real *restrict rhsl = &xt[matrix.lineData[l].eqnstart] ;
-	real *restrict x = &X[ls] ;
-	
-	// now solve line
-	// forward solve 
-	x[0] = rhsl[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhsl[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
-      }
-#endif
     }
     
     // copy data out
     for(int i=0;i<matrix.nmyeqn;++i) {
-      $LSGSScalarSolve(X)[matrix.eql2g[i]] = x1[i] ; 
+      $LSGSScalarSolve(X,B)[matrix.eql2g[i]] = x1[i] ; 
     }
 
   } ;
@@ -1415,7 +1381,6 @@ namespace LGSI {
   $type Y_L storeMat<real_fj> ;
   $type Y_U storeMat<real_fj> ;
   $type LSGSBlockedSSolve(Y,B) storeVec<real> ;
-  using flowPsi::tmp_array ;
 
   $rule pointwise(LSGSConnectivity(Y)<-Y_L,Y_U),parametric(LSGSblockedMatrix(Y)) {
     real_fj diagnorm = 0 ;
@@ -1606,7 +1571,7 @@ namespace LGSI {
   struct blockedMatrixData {
     Loci::CPTR<matrixHelpers> matrixHelp ;
     int vs,vs2  ;
-    vector<real_fj> B ;
+    //    vector<real_fj> B ;
     vector<real> D ;
     //    vector<real_fj> Dreal ;
     vector<real_fj> F ;
@@ -1628,7 +1593,7 @@ namespace LGSI {
     $LSGSblockedMatrix(Y)->vs2 = vs2 ;
     $LSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersGeneric ;
 
-    vector<real_fj> B(matrix.eql2g.size()*vs); 
+    //    vector<real_fj> B(matrix.eql2g.size()*vs); 
     vector<real> D(matrix.eql2g.size()*vs2); 
     vector<real_fj> F(matrix.outerCLR.size()*vs2); 
     
@@ -1668,11 +1633,12 @@ namespace LGSI {
 	->preprocessLine(Dp,L,U,lsz,vs) ;
     }
 
-    $LSGSblockedMatrix(Y)->B.swap(B) ; 
+    //    $LSGSblockedMatrix(Y)->B.swap(B) ; 
     $LSGSblockedMatrix(Y)->D.swap(D) ; 
     $LSGSblockedMatrix(Y)->F.swap(F) ; 
   } ;
 
+  $untype B ;
   $type B storeVec<real_fj> ;
   $rule blackbox(LSGSblockedRHS(Y,B)<-LSGSmatrixTopology(Y),B),prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
@@ -1873,39 +1839,6 @@ namespace LGSI {
 	residl += r*r ;
       }
 
-      // Doing a jacobi here seems like a good idea, but in practice it
-      // doesn't seem to help enough to justify its cost.
-      //#define JACOBI
-#ifdef JACOBI
-      // line jacobi after relaxed GSI
-      // Compute rhs for all lines (Use xt for storage)
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
-	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-	int os = matrix.lineData[l].OuterStart ;
-	int oe = matrix.lineData[l].OuterEnd ;
-	real * rhsg = &xt[0] ;
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
-
-      }
-      // update lines
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-
-	const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-	int lsz = le-ls ;
-	const real *rhsl = &xt[ls*vs] ;
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->lineSolve(X+ls*vs,rhsl,D,L,U,lsz,vs) ;
-      }
-#endif
       
       // Finish communication after local line solve
       MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
@@ -1961,15 +1894,209 @@ namespace LGSI {
   }
   
 
-  $type LSGSPreconditioner(Y,B) storeVec<real> ;
-  $rule pointwise(LSGSPreconditioner(Y,B)<- LSGSPreconSteps,
+  $type LSGSPreconditionerScalar(X,B)           store<real> ;
+
+  $rule pointwise(LSGSPreconditionerScalar(X,B)<-LSGSPreconSteps,
+		  LSGSRelaxation(X),
+                  LSGSscalarMatrix(X),LSGSscalarRHS(X,B),LSGSmatrixTopology(X)),
+  constraint(geom_cells),
+  option(disable_threading),prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
+    // initialize x to zero
+    vector<real> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
+
+    real * X = &x1[0] ;
+    vector<real> rhs(matrix.mxlinelen) ;
+
+    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
+      const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+      const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+      const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+      const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
+      
+      const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
+      
+      const int eqb = matrix.lineData[l].eqnstart ;
+
+      // First compute rhs ;
+      for(int i=0;i<lsz;++i)
+        rhs[i] = B[i] ;
+
+      real *restrict x = &X[eqb] ;
+      // now solve line
+      // forward solve 
+      x[0] = rhs[0] ;
+      for(int i=1;i<lsz;++i) {
+        x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
+      }
+      // backward solve
+      x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+      for(int i=lsz-2;i>=0;--i) {
+        x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+      }
+    }
+    vector<real> send_data(matrix.send_entitiesl.size()) ;
+    vector<real> recv_data(matrix.recv_entitiesl.size()) ;
+    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
+    vector<MPI_Status> status(matrix.recv_processors.size()) ;
+
+    double zero_resid = 1 ;
+    real w = *$LSGSRelaxation(X) ;
+    int num_iter = *$LSGSPreconSteps ;
+    // do num_iter steps
+    for(int iter = 0;iter < num_iter;++iter) {
+      
+      int psz = matrix.periodicCopy.size() ;
+      for(int i=0;i<psz;++i)
+        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
+      if(iter == 0) {
+        // copy send data for first iteration, aftwards the unrelaxed
+        // values are copied later in the loop.
+        for(size_t i=0;i<send_data.size();++i)
+          send_data[i] = X[matrix.send_entitiesl[i]] ;
+      }
+      
+      for(size_t i=0;i<matrix.recv_processors.size();++i) {
+        int rs = matrix.recv_offsets[i] ;
+        int re = matrix.recv_offsets[i+1] ;
+        int rsz = re-rs ;
+        int p = matrix.recv_processors[i] ;
+        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
+                  MPI_COMM_WORLD,&requests[i]) ;
+      }
+      for(size_t i=0;i<matrix.send_processors.size();++i) {
+        int ss = matrix.send_offsets[i] ;
+        int se = matrix.send_offsets[i+1] ;
+        int ssz = se-ss ;
+        int p = matrix.send_processors[i] ;
+        MPI_Send(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD) ;
+      }
+      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+      // copy recieved data 
+      for(size_t i=0;i<recv_data.size();++i)
+        X[matrix.recv_entitiesl[i]] = recv_data[i] ;
+      for(int i=0;i<psz;++i)
+        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
+      
+
+
+      // Forward sweep
+      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
+	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
+
+        const int ls = matrix.lineData[l].eqnstart ;
+        const int le = matrix.lineData[l].eqnend ;
+
+        for(int i=ls;i<le;++i)
+          xt[i] = X[i] ;
+        
+	const int lsz = le-ls ;
+	
+
+	for(int i=0;i<lsz;++i) 
+	  rhs[i] = B[i] ;
+
+
+	const int   os = matrix.lineData[l].OuterStart ;
+	const int   oe = matrix.lineData[l].OuterEnd ;
+	for(int i=os;i<oe;++i) {
+	  rhs[matrix.outerCLR[i].first-ls] 
+	    -= X[matrix.outerCLR[i].second]*F[i] ;
+	}
+      
+	real *restrict x = &X[ls] ;
+	// now solve line
+	// forward solve 
+	x[0] = rhs[0] ;
+	for(int i=1;i<lsz;++i) {
+	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
+	}
+	// backward solve
+	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+	for(int i=lsz-2;i>=0;--i) {
+	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+	}
+      }
+
+      // Backward sweep
+      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
+	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
+	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
+	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
+	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
+	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
+
+	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
+
+	const int ls = matrix.lineData[l].eqnstart ;
+
+	// First compute rhs ;
+	for(int i=0;i<lsz;++i)
+	  rhs[i] = B[i] ;
+
+	const int   os = matrix.lineData[l].OuterStart ;
+	const int   oe = matrix.lineData[l].OuterEnd ;
+	for(int i=os;i<oe;++i) {
+	  rhs[matrix.outerCLR[i].first-ls] -= X[matrix.outerCLR[i].second]*F[i] ;
+	}
+
+	real *restrict x = &X[ls] ;
+	// now solve line
+	// forward solve 
+	x[0] = rhs[0] ;
+	for(int i=1;i<lsz;++i) {
+	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
+	}
+	// backward solve
+	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
+	for(int i=lsz-2;i>=0;--i) {
+	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
+	}
+      }
+      // copy data to send before relaxation
+      for(size_t i=0;i<send_data.size();++i)
+        send_data[i] = X[matrix.send_entitiesl[i]] ;
+
+      // Relax update and compute current estimate for residual
+      double residl = 0 ;
+      for(int i=0;i<matrix.nmyeqn;++i) {
+        X[i] = w*X[i] + (1.-w)*xt[i] ;
+	double r = realToDouble(X[i]-xt[i]) ;
+	residl += r*r ;
+      }
+      double resid = 0 ;
+      MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
+      resid = sqrt(resid) ;
+      if(0 == iter)
+	zero_resid = max(resid,1e-16) ;
+      double rel_resid = resid/zero_resid ;
+      //      if(Loci::MPI_rank == 0)
+      //	cout << iter << ":sresid = " << rel_resid << endl ;
+      if(rel_resid > 1.0)
+	w *= 1./rel_resid ;
+    }
+    
+    // copy data out
+    for(int i=0;i<matrix.nmyeqn;++i) {
+      $LSGSPreconditionerScalar(X,B)[matrix.eql2g[i]] = x1[i] ; 
+    }
+
+  } ;
+
+  $type LSGSPreconditionerBlocked(Y,B) storeVec<real> ;
+  $rule pointwise(LSGSPreconditionerBlocked(Y,B)<- LSGSPreconSteps,
 		  LSGSRelaxation(Y),LSGSblockedMatrix(Y),LSGSblockedRHS(Y,B),
 		  LSGSmatrixTopology(Y)),
-    option(disable_threading),
-    prelude {
+  constraint(geom_cells),
+  option(disable_threading),
+  prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
     int vs = $LSGSblockedMatrix(Y)->vs ;
-    $LSGSPreconditioner(Y,B).setVecSize(vs) ;
+    $LSGSPreconditionerBlocked(Y,B).setVecSize(vs) ;
     int vs2 = vs*vs ;
     int vsize = matrix.eql2g.size() ;
     vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
@@ -2058,7 +2185,7 @@ namespace LGSI {
     }
     for(int i=0;i<matrix.nmyeqn;++i) {
       for(int j=0;j<vs;++j)
-	$LSGSPreconditioner(Y,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;
+	$LSGSPreconditionerBlocked(Y,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;
     }
   } ;
   
