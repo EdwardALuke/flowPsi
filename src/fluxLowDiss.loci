@@ -30,14 +30,16 @@ namespace flowPsi {
   $type inviscidFlux param<std::string> ;
   $type useKECFluxScheme Constraint ;
   $type useSkewSymmetricFluxScheme Constraint ;
+  $type useAUSMPlusUpFluxScheme Constraint ;
 
   $rule default(inviscidFlux) {
     $inviscidFlux = "hllc" ;
   }
 
-  $rule constraint(useKECFluxScheme,useSkewSymmetricFluxScheme<-inviscidFlux) {
+  $rule constraint(useKECFluxScheme,useSkewSymmetricFluxScheme,useAUSMPlusUpFluxScheme<-inviscidFlux) {
     $useKECFluxScheme = EMPTY ;
     $useSkewSymmetricFluxScheme = EMPTY ;
+    $useAUSMPlusUpFluxScheme = EMPTY ;
     if($inviscidFlux == "KEC" || $inviscidFlux == "kec") {
       $useKECFluxScheme = ~EMPTY ;
       if(Loci::MPI_rank==0) {
@@ -51,6 +53,12 @@ namespace flowPsi {
 	cout << "Selecting 4th Order Skew Symmetric Low Dissipation Scheme"
 	     << endl ;
       }    
+    }
+    if($inviscidFlux == "AUSMPlusUp") {
+      $useAUSMPlusUpFluxScheme = ~EMPTY;
+      if(Loci::MPI_rank == 0) {
+        cout << "Selecting AUSM+up inviscid flux scheme" << endl;
+      }
     }
 
   }
@@ -640,6 +648,21 @@ namespace flowPsi {
     roedis(pg_lq,u_lqp,t_lq, pg_rq,u_rqp,t_rq,
 	   $Rtilde, $gamma, $Pambient, an,coef,$us_n,$iflux) ;
 }
+
+  $rule pointwise(AUSMPlusUp::iflux <-
+    leftv3d(u), leftsP(temperature,Zero), leftsP(gagePressure,minPg),
+    rightv3d(u), rightsP(temperature,Zero), rightsP(gagePressure,minPg),
+    area, Pambient, Rtilde, gamma, us_n, Minf
+  ), constraint(useAUSMPlusUpFluxScheme, (cl,cr)->(vol)) {
+    ausmplusup_flux(
+      $iflux,
+      $leftsP(gagePressure,minPg), $leftsP(temperature,Zero), $leftv3d(u),
+      $rightsP(gagePressure,minPg), $rightsP(temperature,Zero), $rightv3d(u),
+      $area.n, $area.sada,
+      $Pambient, $Rtilde, $gamma, $us_n,
+      $Minf
+    );
+  }
 
   OUTPUT_SCALAR("cell2nodeMax(alpha_diss)",alpha) ;  
 }

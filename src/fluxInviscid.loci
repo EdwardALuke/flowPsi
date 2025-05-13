@@ -827,7 +827,140 @@ namespace flowPsi {
     fj[4][2] -= coefd*rr*Ur.y ;
     fj[4][3] -= coefd*rr*Ur.z ;
   }
-  
+
+  void ausmplusup_flux(
+    Loci::Array<real,5> &iflux,
+    real Pgl, real Tl, vect3d Ul,
+    real Pgr, real Tr, vect3d Ur,
+    vect3d area_n, real area_sada,
+    real Pambient, real Rtilde,real gamma, real us_n,
+    real Minf
+  ) {
+    real const Pl = Pgl+Pambient;
+    real const Pr = Pgr+Pambient;
+
+    real const rl = Pl/(Rtilde*Tl);
+    real const rr = Pr/(Rtilde*Tr);
+
+    real const gm1 = gamma-1.0;
+    real const gp1 = gamma+1.0;
+
+    real const Ulmag2 = dot(Ul, Ul);
+    real const Urmag2 = dot(Ur, Ur);
+
+    real const Unl = dot(Ul, area_n);
+    real const Unr = dot(Ur, area_n);
+
+    real const h0l = Rtilde*Tl*gamma/gm1+0.5*Ulmag2;
+    real const h0r = Rtilde*Tr*gamma/gm1+0.5*Urmag2;
+
+    real const e0l = h0l - Rtilde*Tl;
+    real const e0r = h0r - Rtilde*Tr;
+
+    real const clstar2 = 2.0*gm1/gp1*h0l;
+    real const crstar2 = 2.0*gm1/gp1*h0r;
+
+    real const clstar = sqrt(clstar2);
+    real const crstar = sqrt(crstar2);
+
+    // This defnition leads to entropy violation.
+    // See paper "A sequel to AUSM, Part II", Liou, 2006
+    //real const cltilde = clstar2/max(fabs(Unl), clstar);
+    //real const crtilde = crstar2/max(fabs(Unr), crstar);
+
+    // This definition is the entropy fix, according to the paper.
+    real const cltilde = Unl > clstar ? clstar2/Unl : clstar2/clstar; // clstar2/max(Unl, clstar);
+    real const crtilde = (-Unr) > crstar ? crstar2/(-Unr) : crstar2/crstar; // crstar2/max(-Unr, crstar);
+
+    real const chalf = cltilde < crtilde ? cltilde : crtilde; // min(cltilde, crtilde);
+
+    real const Minf2 = Minf*Minf;
+    real const Mavg2 = 0.5*(Unl*Unl+Unr*Unr)/(chalf*chalf);
+    real const M02 = Mavg2 > 1.0 ? 1.0 : (Minf2 > 1.0 ? 1.0 : Mavg2 > Minf2 ? Mavg2 : Minf2); // min(1.0, max(Mavg2, Minf*Minf));
+    real const M0 = sqrt(M02);
+    real const fa = M0*(2.0-M0);
+
+    // some constants
+    real const Kp = 0.25;
+    real const Ku = 0.75;
+    real const sigma = 1.0;
+    real const beta = 1.0/8.0;
+    //real const alpha = 3.0/16.0;
+    real const alpha = (3.0/16.0)*(-4.0+5.0*fa*fa);
+
+    real const rhalf = 0.5*(rl+rr);
+
+    real const Ml = Unl/chalf;
+    real const Mr = Unr/chalf;
+
+    real Mlp, Plp;
+    real Pp, Pm;
+    if(Ml < -1.0) {
+      Mlp = 0.0;
+      Pp = 0.0;
+      Plp = 0.0;
+    } else if(Ml <= 1.0) {
+      real const tmp1 = Ml+1.0, tmp2 = Ml*Ml-1.0;
+      real const tmp12 = tmp1*tmp1, tmp22 = tmp2*tmp2;
+      Mlp = 0.25*tmp12+beta*tmp22;
+      Pp = (0.25*tmp12*(2.0-Ml)+alpha*Ml*tmp22);
+      Plp = Pl*Pp;
+    } else {
+      Mlp = Ml;
+      Pp = 1.0;
+      Plp = Pl;
+    }
+
+    real Mrm, Prm;
+    if(Mr < -1.0) {
+      Mrm = Mr;
+      Pm = 1.0;
+      Prm = Pr;
+    } else if(Mr <= 1.0) {
+      real const tmp1 = Mr-1.0, tmp2 = Mr*Mr-1.0;
+      real const tmp12 = tmp1*tmp1, tmp22 = tmp2*tmp2;
+      Mrm = -0.25*tmp12-beta*tmp22;
+      Pm = (0.25*tmp12*(2.0+Mr)-alpha*Mr*tmp22);
+      Prm = Pr*Pm;
+    } else {
+      Mrm = 0.0;
+      Pm = 0.0;
+      Prm = 0.0;
+    }
+
+    //real const Mp = -Kp/fa*max(1.0-sigma*Mavg2, 0.0)*(Pr-Pl)/(rhalf*chalf*chalf);
+    real const Fa = 1.0-sigma*Mavg2;
+    real const Mp = -Kp/fa*(Fa > 0.0 ? Fa : 0.0)*(Pr-Pl)/(rhalf*chalf*chalf);
+    real const Pu = -Ku*Pp*Pm*(rl+rr)*fa*chalf*(Unr-Unl);
+
+    real const Mhalf = Mlp+Mrm+Mp;
+    real const Phalf = Plp+Prm+Pu;
+
+    if(Mhalf >= 0.0) {
+      real const ut = Mhalf*chalf-us_n;
+      real const mdot = area_sada*rl*ut;
+      real pg = Phalf-Pambient;
+
+      iflux[0] = mdot;
+      iflux[1] = mdot*Ul.x+area_sada*pg*area_n.x;
+      iflux[2] = mdot*Ul.y+area_sada*pg*area_n.y;
+      iflux[3] = mdot*Ul.z+area_sada*pg*area_n.z;
+      //iflux[4] = mdot*e0l+area_sada*Pl*Unl;
+      iflux[4] = mdot*h0l;
+    } else {
+      real const ut = Mhalf*chalf-us_n;
+      real const mdot = area_sada*rr*ut;
+      real pg = Phalf-Pambient;
+
+      iflux[0] = mdot;
+      iflux[1] = mdot*Ur.x+area_sada*pg*area_n.x;
+      iflux[2] = mdot*Ur.y+area_sada*pg*area_n.y;
+      iflux[3] = mdot*Ur.z+area_sada*pg*area_n.z;
+      //iflux[4] = mdot*e0r+area_sada*Pr*Unr;
+      iflux[4] = mdot*h0r;
+    }
+  }
+
   inline void damping_fjp(Mat<real_fj> fj,
                           real pgl, real Tl, vect3d Ul,
                           vect3d an, real area,
