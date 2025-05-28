@@ -79,6 +79,13 @@ namespace flowPsi {
 		real pambient, real Rt,real gamma, real Us_n,
 		real Eta) ;
 
+  void ausmplusup_flux(Loci::Array<real,5> &iflux,
+		 real pgl, real Tl, vect3d Ul,
+		 real pgr, real Tr, vect3d Ur,
+		 vect3d an, real area,
+		 real pambient, real Rt,real gamma, real Us_n,
+		 real Minf) ;
+
   inline void inviscidRiemannFlux(Loci::Array<real,5> &iflux,
 				  real pgl, real Tl, vect3d Ul,
 				  real pgr, real Tr, vect3d Ur,

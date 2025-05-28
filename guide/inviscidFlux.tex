@@ -4,7 +4,8 @@ The default inviscid flux used in the {\it flowPsi} is Torro's HLLC
 scheme \cite{Torro.1994}.  However, a low dissipation flux is also
 available when may be enabled by setting the {\tt inviscidFlux} to
 either 'kec' or 'ssf'.  The 'ssf' scheme will revert to a $4^{th}$
-order accurate skew symmetric scheme on Cartesian meshes.
+order accurate skew symmetric scheme on Cartesian meshes. 'AUSMPlusUp'
+flux scheme is also available.
 
 \subsection{Preconditioned HLLC flux option}
 
@@ -380,3 +381,132 @@ vanish with mesh refinement for any smooth solution, but will always
 be active at shocks.  The final value for $\alpha_{diss}$ used by the
 flux is defined by the maximum of the left and right values for
 $\alpha_{comp}$ and the local face value for $\alpha_{geom}$.
+
+\subsubsection{AUSM+up Flux Scheme}
+In AUSM family schemes \cite{Liou2006-AUSM+up}, the inviscid numerical
+flux is split in convective and pressure terms as follows.
+\begin{equation}
+  \vec{F}_x = \rho u \underbrace{\begin{bmatrix}
+    1 \\ u \\ v \\ w \\ H
+  \end{bmatrix}}_{\vec{\psi}} + \underbrace{\begin{bmatrix}
+    0 \\ p \\ 0 \\ 0 \\ 0
+  \end{bmatrix}}_{\vec{p}},
+  \vec{F}_y = \rho v \begin{bmatrix}
+    1 \\ u \\ v \\ w \\ H
+  \end{bmatrix} + \begin{bmatrix}
+    0 \\ 0 \\ p \\ 0 \\ 0
+  \end{bmatrix},
+  \vec{F}_z = \rho w \begin{bmatrix}
+    1 \\ u \\ v \\ w \\ H
+  \end{bmatrix} + \begin{bmatrix}
+    0 \\ 0 \\ 0 \\ p \\ 0
+  \end{bmatrix}
+\end{equation}
+The numerical flux at an interface is given by,
+\begin{equation}
+  \vec{f}_{\text{1/2}} = \dot{m}_{\text{1/2}} \vec{\psi}_{\text{L/R}} + \vec{p}_{\text{1/2}}
+\end{equation}
+where $\vec{\psi}_{\text{L/R}}$ is determined from simple upwinding,
+\begin{equation}
+  \vec{\psi}_{\text{L/R}} = \begin{cases}
+    \vec{\psi}_{\text{L}} & , \text{for} \; \dot{m}_{\text{1/2}} > 0, \\
+    \vec{\psi}_{\text{R}} & , \text{otherwise}
+  \end{cases}
+\end{equation}
+and $\vec{p}_{\text{1/2}}$ is given as follows.
+\begin{equation}
+\vec{p}_{\text{1/2}} = p_{{\text{1/2}}} \begin{bmatrix}
+0 \\ n_x \\ n_y \\ n_z \\ 0
+\end{bmatrix}
+\end{equation}
+Here, the subscript $_{\text{1/2}}$ indicates the interface
+conditions. For example, $\dot{m}_{\text{1/2}}$ is the mass flux at
+the interface given by,
+\begin{equation}
+\dot{m}_{\text{1/2}} = u_{\text{1/2}} \rho_{\text{L/R}} = a_{\text{1/2}} M_{\text{1/2}} \rho_{\text{L/R}}
+\end{equation}
+The interface Mach number is defined as,
+\begin{equation}
+M_{\text{L/R}} = \frac{u_{\text{L/R}}}{a_{\text{1/2}}}
+\end{equation}
+where $a_{\text{1/2}}$ is the interface speed of sound defined as
+follows.
+\begin{equation}
+a_{\text{1/2}} = \min(\hat{a}_{\text{L}}, \hat{a}_{\text{R}})
+\end{equation}
+Here $\hat{a}_{\text{L}}$, $\hat{a}_{\text{R}}$, and $a^*$ (critical
+speed of sound) are defined as follows.
+\begin{equation}
+\hat{a}_{\text{L}} = \frac{{a^{*}}^2}{\max(a^*,  u_{\text{L}})},
+\hat{a}_{\text{R}} = \frac{{a^{*}}^2}{\max(a^*, -u_{\text{R}})},
+u^{*} = \frac{2(\gamma-1)}{\gamma+1} H_t
+\end{equation}
+In these equations, $u_{\text{L/R}} = \mathbf{u}_{\text{L/R}} \cdot
+\mathbf{n}$ is the velocity normal to the interface. Now, define,
+\begin{align}
+  \bar{M}^2 &= \frac{(u_{\text{L}}^{2} + u_{\text{R}}^{2})}{2 a_{1/2}^2} \\
+  M_{o}^2 &= \min(1, \max(\bar{M}^2, M_{\infty}^2)) \in [0, 1] \\
+  f_{a}(M_{o}) &= M_{o}(2 - M_{o}) \in [0, 1]
+\end{align}
+to calculate the interface Mach number as follows,
+\begin{equation}
+  M_{\text{1/2}} = \mathcal{M}_{(4)}^+ (M_{\text{L}}) + \mathcal{M}_{(4)}^- (M_{\text{R}}) + M_p
+\end{equation}
+and interface pressure as follows.
+\begin{equation}
+p_{\text{1/2}} = \mathcal{P}_{(5)}^{+} \left( M_{\text{L}} \right) p_{\text{L}}
++
+\mathcal{P}_{(5)}^{-} \left( M_{\text{R}} \right) p_{\text{R}}
++
+p_u
+\end{equation}
+Here, $M_{(m)}^{\pm}$ ($m = 1, 2, 4$) and $\mathcal{P}_{(n)}$ ($n =
+5$) are polynomial functions of degree $m$ and $n$, respectively,
+given by,
+\begin{align}
+\mathcal{M}_{(1)}^{\pm}(M) &= \frac{1}{2} \left( M \pm |M| \right) \\
+\mathcal{M}_{(2)}^{\pm}(M) &= \pm \frac{1}{4} \left( M \pm 1 \right)^2 \\
+\mathcal{M}_{(4)}^{\pm}(M) &= \begin{cases}
+\mathcal{M}_{(1)}^{\pm}(M) & , \text{for} \; |M| \ge 1, \\
+\mathcal{M}_{(2)}^{\pm}(M) \left( 1 \mp 16 \beta \mathcal{M}_{(2)}^{\mp}(M) \right) & , \text{otherwise} \\
+\end{cases} \\
+\mathcal{P}_{(5)}^{\pm}(M) &= \begin{cases}
+\frac{1}{M} \mathcal{M}_{(1)}^{\pm}(M) & , \text{for} \; |M| \ge 1, \\
+\mathcal{M}_{(2)}^{\pm}(M) \left[ \left( \pm 2 - M \right) \mp 16 \alpha M \mathcal{M}_{(2)}^{\mp}(M) \right] & , \text{otherwise} \\
+\end{cases}
+\end{align}
+$M_p$ is pressure diffusion term given by,
+\begin{equation}
+M_p = - K_p \max(1 - \sigma \bar{M}^2, 0) \frac{p_{\text{R}} - p_{\text{L}}}{\rho_{\text{1/2}} a_{\text{1/2}}^2}
+\end{equation}
+and $p_u$ is velocity diffussion term given by,
+\begin{equation}
+p_u = -K_u \mathcal{P}_{(5)}^{+} \mathcal{P}_{(5)}^{-} \left(
+\rho_{\text{L}} + \rho_{\text{R}} \right) \left( f_a a_{\text{1/2}} \right)
+\left( u_{\text{R}} - u_{\text{L}} \right)
+\end{equation}
+where, $\sigma \le 1$, $\rho_{\text{1/2}} = \frac{\left(
+  \rho_{\text{L}} + \rho_{\text{R}} \right)}{2}$, $0 \le K_p \le 1$,
+and $\sigma \le 1$.
+The mass and pressure fluxes are then defined as,
+\begin{equation}
+\dot{m}_{\text{1/2}} = a_{1/2} M_{\text{1/2}} \begin{cases}
+\rho_{\text{L}} & , \text{for} \; M_{\text{1/2}} > 0 \\
+\rho_{\text{R}} & ,\text{otherwise} \\
+\end{cases}
+\end{equation}
+The parameters $\alpha$ and $\beta$ are chosen as,
+\begin{align}
+\alpha &= \frac{3}{16} \left( -4 + 5 f_{a}^2 \right) \in \left[ -\frac{3}{4}, \frac{3}{16} \right] \\
+\beta &= \frac{1}{8} \\
+\end{align}
+and the constants are set to: $K_{p} = 0.25$, $K_{u} = 0.75$, and
+$sigma = 1.0$.  The AUSM\textsuperscript{+}-up flux is then given as,
+\begin{equation}
+\vec{f}_{\text{1/2}} = \dot{m}_{\text{1/2}} \begin{cases}
+\vec{\psi}_{\text{L}} & , \text{for} \; \dot{m}_{\text{1/2}} > 0 \\
+\vec{\psi}_{\text{R}} & , \text{otherwise} \\
+\end{cases}
++ \vec{p}_{\text{1/2}}
+\end{equation}
+
