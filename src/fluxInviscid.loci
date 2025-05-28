@@ -854,9 +854,6 @@ namespace flowPsi {
     real const h0l = Rtilde*Tl*gamma/gm1+0.5*Ulmag2;
     real const h0r = Rtilde*Tr*gamma/gm1+0.5*Urmag2;
 
-    real const e0l = h0l - Rtilde*Tl;
-    real const e0r = h0r - Rtilde*Tr;
-
     real const clstar2 = 2.0*gm1/gp1*h0l;
     real const crstar2 = 2.0*gm1/gp1*h0r;
 
@@ -945,7 +942,6 @@ namespace flowPsi {
       iflux[1] = mdot*Ul.x+area_sada*pg*area_n.x;
       iflux[2] = mdot*Ul.y+area_sada*pg*area_n.y;
       iflux[3] = mdot*Ul.z+area_sada*pg*area_n.z;
-      //iflux[4] = mdot*e0l+area_sada*Pl*Unl;
       iflux[4] = mdot*h0l;
     } else {
       real const ut = Mhalf*chalf-us_n;
@@ -956,7 +952,6 @@ namespace flowPsi {
       iflux[1] = mdot*Ur.x+area_sada*pg*area_n.x;
       iflux[2] = mdot*Ur.y+area_sada*pg*area_n.y;
       iflux[3] = mdot*Ur.z+area_sada*pg*area_n.z;
-      //iflux[4] = mdot*e0r+area_sada*Pr*Unr;
       iflux[4] = mdot*h0r;
     }
   }
