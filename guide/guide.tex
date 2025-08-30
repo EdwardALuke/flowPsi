@@ -1268,20 +1268,6 @@ of 1.57 inches, you would use the command:
 ugrid2vog -Lref "1.57 inch" wingsection
 \end{verbatim}
 
-\subsubsection{\tt xdr2vog}
-
-This converter allows one to convert the older XDR format mesh files
-to the volume grid representation used by {\em FlowPsi}.  This command can be
-run in parallel using mpirun for faster processing of large meshes.
-The converter has a {\tt -o} option to disable optimizations that
-would change the numbering of nodes and cells in the mesh from the
-given XDR mesh file.  Additionally, you may input the units of the XDR
-mesh with the option {\tt -in} for inches, {\tt -ft} for feet, {\tt
-  -cm} for centimeters, or {\tt -mm} for millimeters.  With no option,
-{\tt xdr2vog} will assume the input is in meters.  The {\tt -Lref}
-option can be used as with {\tt ugrid2vog} to specify other unit
-systems.  
-
 \subsubsection{\tt vogmerge}
 
 The {\tt vogmerge} utility allows one to combine VOG file grids, apply
