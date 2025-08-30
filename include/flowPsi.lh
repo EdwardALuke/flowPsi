@@ -312,6 +312,7 @@ $type ViscousSimulation Constraint ;
 $type fluidLinearSolverSGS Constraint ;
 $type fluidLinearSolverFSGS Constraint ;
 $type fluidLinearSolverLSGS Constraint ;
+$type fluidLinearSolverGMRES Constraint ;
 $type fluidLinearSolverPETSC Constraint ;
 
 $type wallLaw_BC Constraint ;

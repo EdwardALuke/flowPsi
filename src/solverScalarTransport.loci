@@ -636,6 +636,12 @@ namespace flowPsi {
   inplace(X_dq|LSGSScalarSolve(X,X_B)), 
     parametric(scalarTransportP(X,C)),prelude {} ;
 
+  $type gmresS(X,X_B) store<real> ;
+  $rule pointwise(X_dq<-gmresS(X,X_B)),
+    constraint(geom_cells,fluidLinearSolverGMRES,C),
+  inplace(X_dq|gmresS(X,X_B)), 
+    parametric(scalarTransportP(X,C)),prelude {} ;
+
   $type FSGSScalarSolve(X) store<real> ;
   $rule pointwise(X_dq<-FSGSScalarSolve(X)),
     constraint(geom_cells,fluidLinearSolverFSGS,C),
@@ -1258,6 +1264,12 @@ namespace flowPsi {
   $rule pointwise(X_dq<-LSGSScalarSolve(X,X_B)),
     constraint(geom_cells,fluidLinearSolverLSGS,C),
   inplace(X_dq|LSGSScalarSolve(X,X_B)), 
+    parametric(scalarTransport(X,C)),prelude {} ;
+
+  $type gmresS(X,X_B) store<real> ;
+  $rule pointwise(X_dq<-gmresS(X,X_B)),
+    constraint(geom_cells,fluidLinearSolverGMRES,C),
+  inplace(X_dq|gmresS(X,X_B)), 
     parametric(scalarTransport(X,C)),prelude {} ;
 
   $type FSGSScalarSolve(X) store<real> ;

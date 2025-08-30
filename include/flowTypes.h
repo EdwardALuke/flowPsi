@@ -39,15 +39,19 @@ using Loci::gParam ;
 #endif
 
 namespace flowPsi {
-  
+  //#define DOUBLE_FJMAT
   typedef Loci::real_t real ;
 #ifdef USE_AUTODIFF
   typedef Loci::real_t realF ;
 #else
   typedef float realF ;
 #endif
+#ifdef DOUBLE_FJMAT
+  typedef real real_fj ;
+#else
   typedef realF real_fj ;
-
+#endif
+  
   using Loci::realToDouble ;
   using Loci::realToFloat ;
 

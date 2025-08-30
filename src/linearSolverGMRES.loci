@@ -1,0 +1,581 @@
+//#############################################################################
+//#
+//# Copyright 2015-2019, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
+#include <Loci.h>
+$include "FVM.lh"
+$include "gmres.lh"
+#include "plane_rotate.h"
+#include "linearSolverLSGS.h"
+
+// The Generalized Minimum Residual (GMRES) method is designed to solve
+// nonsymmetric linear systems. The most popular form of GMRES is based
+// on the modified Gram-Schmidt procedure, and uses restarts to control
+// storage requirements.
+
+// x0 is an initial guess
+// for j = 1, 2, ......   //gmres retart loop
+// 	Solve r from Mr = b - Ax0 	//M is preconditioner
+//      v(1) = r/norm(r)        //the first orthogonal vector of the base
+//      s[1] = norm(r).e1 //the first element of vector s is assigned
+//
+//      //the Modified Gram-Schmidt orthogonalization
+//      for i = 1, m    //m is the orthogonal vector size of the base
+//              Solve w from    Mw = Av(i)
+//              for k = 1, i
+//                      h[k,i] = (w, v(k))      //form the Hessenberg Matrix
+//                      w = w - h[k,i]*v(k)
+//              end
+//              h[i+1,i] = norm(w)
+//              v(i+1) = w/norm(w) //form the new orthogonal vector of the base
+//      end
+//      //Solve least-square problem Hy=s, transform Hessenberg matrix into
+//      //upper triangular form by using plane rotations.
+//
+//      //Update x
+//      x1=x0+y1*v(1)+y2*v(2)......
+//
+//      //Restart GMRES
+//      x0=x1
+// end
+namespace LGSI {
+
+  using std::cout ;
+  using std::endl ;
+  using std::cerr ;
+  
+  $type LSGSMatrixName(X) param<std::string> ;
+  /// Maximum Number of GMRES Iterations
+  $rule default(GMRESMaxIter) { $GMRESMaxIter = 100 ; }
+  /// Number of the orthogonal vectors
+  $rule default(GMRESRestart) { $GMRESRestart = 50 ; }
+  /// GMRES relative error tolerance
+  $rule default(GMRESRelTol) { $GMRESRelTol = 1e-4 ; }
+  /// GMRES absolute error tolerance
+  $rule default(GMRESAbsTol) { $GMRESAbsTol = 1e-12 ; }
+  /// GMRES Diagnostic Output Level
+  $rule default(GMRESDiagnosticLevel) { $GMRESDiagnosticLevel = 0 ; }
+  /// GMRES inner error reduction
+  $rule default(GMRESInnerTol) { $GMRESInnerTol = 1e-1; }
+
+  
+  $type GMRESSolverControls param<Loci::options_list> ;
+  $rule default(GMRESSolverControls) {
+  }
+
+  $rule singleton(GMRESRelTol(X)<-LSGSMatrixName(X),GMRESRelTol,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESRelTol(X) = $GMRESRelTol ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "RelTol" ;
+          if(ol.optionExists(setting))
+            ol.getOption(setting,$GMRESRelTol(X)) ;
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  $rule singleton(GMRESAbsTol(X)<-LSGSMatrixName(X),GMRESAbsTol,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESAbsTol(X) = $GMRESAbsTol ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "AbsTol" ;
+          if(ol.optionExists(setting))
+            ol.getOption(setting,$GMRESAbsTol(X)) ;
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  $rule singleton(GMRESInnerTol(X)<-LSGSMatrixName(X),GMRESInnerTol,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESInnerTol(X) = $GMRESInnerTol ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "InnerTol" ;
+          if(ol.optionExists(setting))
+            ol.getOption(setting,$GMRESInnerTol(X)) ;
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  $rule singleton(GMRESMaxIter(X)<-LSGSMatrixName(X),GMRESMaxIter,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESMaxIter(X) = $GMRESMaxIter ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "MaxIter" ;
+          if(ol.optionExists(setting)) {
+            double val = $GMRESMaxIter(X) ;
+            ol.getOption(setting,val) ;
+            $GMRESMaxIter(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+    $rule singleton(GMRESRestart(X)<-LSGSMatrixName(X),GMRESRestart,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESRestart(X) = $GMRESRestart ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "Restart" ;
+          if(ol.optionExists(setting)) {
+            double val = $GMRESRestart(X) ;
+            ol.getOption(setting,val) ;
+            $GMRESRestart(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  $rule singleton(GMRESDiagnosticLevel(X)<-LSGSMatrixName(X),GMRESDiagnosticLevel,
+                  GMRESSolverControls) {
+    using namespace Loci ;
+    $GMRESDiagnosticLevel(X) = $GMRESDiagnosticLevel ;
+    string name = $LSGSMatrixName(X) ;
+    if($GMRESSolverControls.optionExists(name)) {
+      option_value_type vt = $GMRESSolverControls.getOptionValueType(name) ;
+      option_values ov = $GMRESSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "DiagnosticLevel" ;
+          if(ol.optionExists(setting)) {
+            double val = $GMRESDiagnosticLevel(X) ;
+            ol.getOption(setting,val) ;
+            $GMRESDiagnosticLevel(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+
+  
+#ifndef AUTODIFF_MODULE
+
+  typedef matrixStructure *matrixStructureP ;
+  $type LSGSmatrixTopology(X) blackbox<matrixStructureP> ;
+  $type LSGSscalarMatrix(X) blackbox<scalarMatrixData<double> > ;
+  $type LSGSscalarRHS(X,B) blackbox<scalarRHSData<double> > ;
+  $type LSGSblockedMatrix(Y) blackbox<blockedMatrixData> ;
+  $type LSGSblockedRHS(Y,B) blackbox<blockedRHSData<real_fj> > ;
+  $type LSGSRelaxation(X) param<double> ;
+  $type LSGSMatrixName(X) param<std::string> ;
+  $type LSGSPreconSteps(X) param<int> ;
+  
+  $rule pointwise(gmresS(A,B)<-
+                  LSGSmatrixTopology(A),LSGSscalarMatrix(A),
+                  LSGSscalarRHS(A,B),
+                  LSGSRelaxation(A),
+                  LSGSMatrixName(A),
+                  LSGSPreconSteps(X),
+                  GMRESMaxIter(A),GMRESRestart(A),GMRESRelTol(A),
+                  GMRESInnerTol(A),GMRESAbsTol(A),GMRESDiagnosticLevel(A)),
+  parametric(gmresS(A,B)),
+  option(disable_threading),
+  prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(A)) ;
+    string name = *$LSGSMatrixName(A) ;
+    // Get initial guess to start from by solving the preconditioner
+    vector<double> x0 ;
+    LSGSScalarSolve(x0,
+                    matrix,
+                    *$LSGSscalarMatrix(A),
+                    $LSGSscalarRHS(A,B)->B,
+                    *$LSGSRelaxation(A),
+                    1e-13,1e-13,
+                    *$LSGSPreconSteps(X),
+                    0,
+                    name) ;
+
+    
+    int ngmres = *$GMRESMaxIter(A) ;
+    int nrestart = *$GMRESRestart(A) ;
+    double reltol = *$GMRESRelTol(A) ;
+    double abstol = *$GMRESAbsTol(A) ;
+    double innertol = *$GMRESInnerTol(A) ;
+    int diag = *$GMRESDiagnosticLevel(A) ;
+    int vecsize = matrix.nmyeqn ;
+    double maxresid = sqrt(scalarInnerProduct(x0,x0,vecsize)) ;
+
+    // Allocate V array for gmres
+    vector<vector<real_fj> > V(nrestart+1) ;
+    {
+      vector<real_fj> vtmp(vecsize) ;
+      V[0].swap(vtmp) ;
+    }
+    // Allocate for H matrix
+    vector<vector<double> > H(nrestart+1) ;
+
+    vector<double> y(nrestart+1),cs(nrestart+1),sn(nrestart+1); 
+    vector<double> beta(nrestart+1) ;
+
+    /// Start gmres loop here
+    for(int jgm=0;jgm<ngmres;++jgm) {
+      // Solve r from Mr = b-Ax0
+      vector<double> Ax ;
+      LSGSScalarMatVecProd(Ax,matrix,*$LSGSscalarMatrix(A),x0) ;
+      for(int i=0;i<vecsize;++i)
+        Ax[i] = $LSGSscalarRHS(A,B)->B[i]-Ax[i] ;
+
+      if(diag > 1) {
+        double adota = scalarInnerProduct(Ax,Ax,vecsize) ;
+        double realnorm = sqrt(adota) ;
+        if(Loci::MPI_rank == 0) 
+          cout << "gmres " << name << " true residual = " << realnorm << endl ;
+      }
+      vector<double> r ;
+      LSGSScalarSolve(r,matrix,*$LSGSscalarMatrix(A),Ax,*$LSGSRelaxation(A),
+                      1e-13,1e-13,*$LSGSPreconSteps(X),0,name) ;
+      double rdotr = scalarInnerProduct(r,r,vecsize) ;
+      double normr = sqrt(rdotr) ;
+      maxresid = max(maxresid,normr) ;
+
+      if(diag>0 && Loci::MPI_rank==0)
+        cout << "gmres " << name << " relresid=" << normr/maxresid
+             << " absresid=" << normr << endl ;
+      if(normr < abstol || normr < reltol*maxresid) {
+        for(int i=0;i<vecsize;++i)
+          x0[i] += r[i] ;
+        break ;
+      }
+          
+      double rnormr = 1./max(1e-30,normr) ;
+      for(int i=0;i<vecsize;++i)
+        V[0][i] = r[i]*rnormr ;
+      beta[0] = normr ;
+      int m = 0 ;
+      // Modified Gram-Schmidt Orthogonalization
+      for(int igs=0;igs<nrestart;++igs) {
+        if(V[igs+1].size() == 0) {
+          vector<real_fj> vtmp(vecsize) ;
+          V[igs+1].swap(vtmp) ;
+        }
+        if(H[igs].size() == 0) {
+          vector<double> tmp(igs+2,0.0) ;
+          H[igs].swap(tmp) ;
+        }
+
+        // Solve W from M W = AV(igs)
+        for(int i=0;i<vecsize;++i)
+          r[i] = V[igs][i] ;
+        LSGSScalarMatVecProd(Ax,matrix,*$LSGSscalarMatrix(A),r) ;
+        vector<double> W ;
+        LSGSScalarSolve(W,matrix,*$LSGSscalarMatrix(A),Ax,*$LSGSRelaxation(A),
+                        1e-13,1e-13,*$LSGSPreconSteps(X),0,*$LSGSMatrixName(A)) ;
+        for(int ik=0;ik<=igs;++ik) {
+          double wdotv = scalarInnerProduct(W,V[ik],vecsize) ;
+          for(int i=0;i<vecsize;++i)
+            W[i] -= wdotv*V[ik][i] ;
+          H[igs][ik] = wdotv ;
+        }
+        double wdotw = scalarInnerProduct(W,W,vecsize) ;
+        double normw = sqrt(wdotw) ;
+        double rnormw = 1./normw ;
+        H[igs][igs+1] = normw ;
+        // Add the new orthogonal vector to the base
+        for(int i=0;i<vecsize;++i)
+          V[igs+1][i] = rnormw*W[i] ;
+
+        const int k = igs ;
+        // Apply rotations for ith column
+        for(int i=0;i<k;++i) {
+          double temp =  cs[i]*H[k][i] + sn[i]*H[k][i+1] ;
+          H[k][i+1]   = -sn[i]*H[k][i] + cs[i]*H[k][i+1] ;
+          H[k][i]     = temp ;
+        }
+        // Update the next sin cos value for rotation
+        GeneratePlaneRotation(H[k][k],H[k][k+1],cs[k],sn[k]) ;
+        
+        // eliminate H[i+1,i]
+        H[k][k]   = cs[k]*H[k][k] +sn[k]*H[k][k+1] ;
+        H[k][k+1] = 0 ;
+
+        beta[k+1] = -sn[k]*beta[k] ;
+        beta[k]   =  cs[k]*beta[k] ;
+        m++ ;
+        //        cout << "error = " << fabs(beta[k+1]) << endl ;
+        // If we reduce error by 
+        if(fabs(beta[k+1]) < fabs(beta[0])*innertol)
+          break ;
+      }
+      // Perform Backsolve
+      backSolveH(y,H,beta,m-1) ;
+
+      for(int i=0;i<vecsize;++i) {
+        double sum = 0 ;
+        for(int k=0;k<m;++k)
+          sum += y[k]*V[k][i] ;
+        x0[i] += sum ;
+      }
+    }
+    for(int i=0;i<matrix.nmyeqn;++i)
+      $gmresS(A,B)[matrix.eql2g[i]] = x0[i] ;
+                    
+  } ;
+  
+  $rule pointwise(gmresB(A,B)<-
+                  LSGSmatrixTopology(A),
+                  LSGSblockedMatrix(A),
+                  LSGSblockedRHS(A,B),
+                  LSGSRelaxation(A),
+                  LSGSMatrixName(A),
+                  LSGSPreconSteps(X),
+                  GMRESMaxIter(A),GMRESRestart(A),GMRESRelTol(A),
+                  GMRESAbsTol(A),GMRESInnerTol(A),GMRESDiagnosticLevel(A)),
+  parametric(gmresB(A,B)),
+  option(disable_threading),
+  prelude {
+    const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(A)) ;
+    int vs = $LSGSblockedMatrix(A)->vs ;
+    string name = *$LSGSMatrixName(A) ;
+    $gmresB(A,B).setVecSize(vs) ;
+    
+    // Get initial guess to start from by solving the preconditioner
+    vector<double> x0 ;
+    LSGSBlockSolve(x0,
+                   matrix,
+                   *$LSGSblockedMatrix(A),
+                   $LSGSblockedRHS(A,B)->B,
+                   *$LSGSRelaxation(A),
+                   0,0,
+                   *$LSGSPreconSteps(X),
+                   0,
+                   *$LSGSMatrixName(A)) ;
+    
+    int ngmres = *$GMRESMaxIter(A) ;
+    int nrestart = *$GMRESRestart(A) ;
+    double reltol = *$GMRESRelTol(A) ;
+    double abstol = *$GMRESAbsTol(A) ;
+    double innertol = *$GMRESInnerTol(A) ;
+    int diag = *$GMRESDiagnosticLevel(A) ;
+    // Allocate V array for gmres
+    int vecsize = matrix.nmyeqn*vs ;
+    double maxresid = sqrt(scalarInnerProduct(x0,x0,vecsize)) ;
+
+    std::vector<real_fj> tmp(vecsize) ;
+    vector<vector<real_fj> > V(nrestart+1) ;
+    for(int i=0;i<nrestart+1;++i) {
+      vector<real_fj> vtmp(vecsize) ;
+      V[i].swap(vtmp) ;
+    }
+
+    // Allocate for H matrix
+    vector<vector<double> > H(nrestart+1) ;
+
+    vector<double> y(nrestart+1),cs(nrestart+1),sn(nrestart+1); 
+    vector<double> beta(nrestart+1) ;
+    
+    /// Start gmres loop here
+    for(int jgm=0;jgm<ngmres;++jgm) {
+      // Solve r from Mr = b-Ax0
+      vector<double> Ax ;
+      LSGSBlockedMatVecProd(Ax,matrix,*$LSGSblockedMatrix(A),x0) ;
+      //      LSGSScalarMatVecProd(Ax,matrix,*$LSGSscalarMatrix(A),x0) ;
+      for(int i=0;i<vecsize;++i)
+        tmp[i] = $LSGSblockedRHS(A,B)->B[i]-Ax[i] ;
+      vector<double> r ;
+      if(diag > 1) {
+        double adota = scalarInnerProduct(tmp,tmp,vecsize) ;
+        double realnorm = sqrt(adota) ;
+        if(Loci::MPI_rank == 0) 
+          cout << "gmres " << name << " true residual = " << realnorm << endl ;
+      }
+
+      LSGSBlockSolve(r,
+                     matrix,
+                     *$LSGSblockedMatrix(A),
+                     tmp,
+                     *$LSGSRelaxation(A),
+                     0,0,
+                     *$LSGSPreconSteps(X),
+                     0,
+                     name) ;
+
+      double rdotr = scalarInnerProduct(r,r,vecsize) ;
+      double normr = sqrt(rdotr) ;
+      maxresid = max(maxresid,normr) ;
+
+      if(diag>0 && Loci::MPI_rank==0)
+        cout << "gmres " << name << " relresid=" << normr/maxresid
+             << " absresid=" << normr << endl ;
+      if(normr < abstol || normr < reltol*maxresid) {
+        for(int i=0;i<vecsize;++i)
+          x0[i] += r[i] ;
+        break ;
+      }
+          
+      double rnormr = 1./max(1e-30,normr) ;
+      for(int i=0;i<vecsize;++i)
+        V[0][i] = r[i]*rnormr ;
+      beta[0] = normr ;
+      int m=0 ;
+      // Modified Gram-Schmidt Orthogonalization
+      for(int igs=0;igs<nrestart;++igs) {
+        if(V[igs+1].size() == 0) {
+          vector<real_fj> vtmp(vecsize) ;
+          V[igs+1].swap(vtmp) ;
+        }
+        if(H[igs].size() == 0) {
+          vector<double> tmp(igs+2,0.0) ;
+          H[igs].swap(tmp) ;
+        }
+
+        // Solve W from M W = AV(igs)
+        for(int i=0;i<vecsize;++i)
+          r[i] = V[igs][i] ;
+        vector<real_fj> tmp ;
+        LSGSBlockedMatVecProd(tmp,matrix,*$LSGSblockedMatrix(A),r) ;
+
+        vector<double> W ;
+        LSGSBlockSolve(W,
+                       matrix,
+                       *$LSGSblockedMatrix(A),
+                       tmp,
+                       *$LSGSRelaxation(A),
+                       0,0,
+                       *$LSGSPreconSteps(X),
+                       0,
+                       name) ;
+
+        for(int ik=0;ik<=igs;++ik) {
+          double wdotv = scalarInnerProduct(W,V[ik],vecsize) ;
+          for(int i=0;i<vecsize;++i)
+            W[i] -= wdotv*V[ik][i] ;
+          H[igs][ik] = wdotv ;
+        }
+        double wdotw = scalarInnerProduct(W,W,vecsize) ;
+        double normw = sqrt(wdotw) ;
+        double rnormw = 1./normw ;
+        H[igs][igs+1] = normw ;
+        // Add the new orthogonal vector to the base
+        for(int i=0;i<vecsize;++i)
+          V[igs+1][i] = rnormw*W[i] ;
+
+        const int k = igs ;
+        // Apply rotations for ith column
+        for(int i=0;i<k;++i) {
+          double temp =  cs[i]*H[k][i] + sn[i]*H[k][i+1] ;
+          H[k][i+1]   = -sn[i]*H[k][i] + cs[i]*H[k][i+1] ;
+          H[k][i]     = temp ;
+        }
+        // Update the next sin cos value for rotation
+        GeneratePlaneRotation(H[k][k],H[k][k+1],cs[k],sn[k]) ;
+        
+        // eliminate H[i+1,i]
+        H[k][k]   = cs[k]*H[k][k] +sn[k]*H[k][k+1] ;
+        H[k][k+1] = 0 ;
+
+        beta[k+1] = -sn[k]*beta[k] ;
+        beta[k]   =  cs[k]*beta[k] ;
+        m++ ;
+        //        cout << "error = " << fabs(beta[k+1]) << endl ;
+        // If we reduce error by 
+        if(fabs(beta[k+1]) < fabs(beta[0])*innertol)
+          break ;
+      }
+      // Perform Backsolve
+      backSolveH(y,H,beta,m-1) ;
+      for(int i=0;i<vecsize;++i) {
+        double sum = 0 ;
+        for(int k=0;k<m;++k)
+          sum += y[k]*V[k][i] ;
+        x0[i] += sum ;
+      }
+    }
+    for(int i=0;i<matrix.nmyeqn;++i)
+      for(int j=0;j<vs;++j)
+        $gmresB(A,B)[matrix.eql2g[i]][j] = x0[i*vs+j] ;
+                    
+  } ;
+  
+#endif
+}

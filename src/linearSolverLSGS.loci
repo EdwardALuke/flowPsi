@@ -25,18 +25,155 @@
 #include <set>
 #include "flowTypes.h"
 $include "flowPsi.lh"
+#include "linearSolverLSGS.h"
 
-// Scalar solver using modified line gauss seidel method
 namespace LGSI {
+    class matrixHelpersGeneric: public LGSI::matrixHelpers {
+  public:
+    virtual void preprocessLine(double *D, 
+				const real_fj *L, const real_fj *U, 
+				int lsz, int vs) const ;
+    virtual void linerhs(double *rhs, const double *X, const real_fj *B, 
+			const pair<int,int> *CLR, const real_fj *F, 
+			int ls, int le, int os, int oe, int vs) const ;
+    virtual void lineSolve(double *X, const double *rhs, 
+			   const double *D, 
+			   const real_fj *L, const real_fj *U, 
+			   int lsz, int vs) const ;
+  } ;
+
+  void matrixHelpersGeneric::
+  preprocessLine(double *restrict D, 
+		 const real_fj *restrict L, 
+		 const real_fj *restrict U, 
+		 int lsz, int vs) const  {
+    int vs2 = vs*vs ;
+
+    Mat<double> D0(D,vs) ;
+    vector<real_fj> v(vs),t(vs) ;
+    D0.decompose_lu() ;
+    for(int i=1;i<lsz;++i) {
+      const_Mat<double> Dm(D,vs) ;
+      D += vs2 ;
+      Mat<double> Dn(D,vs) ;
+      const_Mat<real_fj> Lm(L,vs) ;
+      const_Mat<real_fj> Um(U,vs) ;
+      for(int j=0;j<vs;++j) { // Solve Dn -= Lm*Dm^-1*Um
+	for(int k=0;k<vs;++k)
+	  v[k] = Um[k][j] ;
+	Dm.solve_lu(&v[0],&t[0]) ;
+	for(int k=0;k<vs;++k)
+	  v[k] = 0.0 ;
+	Lm.dotprod_accum(&t[0],&v[0]) ;
+	for(int k=0;k<vs;++k)
+	  Dn[k][j] -= v[k] ;
+      }
+      Dn.decompose_lu() ;
+      L += vs2 ;
+      U += vs2 ;
+    }      
+  }
+  void matrixHelpersGeneric::
+  linerhs(double *restrict rhs, const double *restrict X, const real_fj *restrict B,
+	  const pair<int,int> *restrict CLR, const real_fj *restrict F, 
+	 int ls, int le, int os, int oe, int vs) const {
+    // note, here we compute the negative of the rhs, but we compensate
+    // for this in the line solver.
+    // also note, rhs computation in terms of equation number while
+    // line solver starts with first element of line = 0
+    for(int i=ls*vs;i<le*vs;++i)
+      rhs[i] = -B[i] ;
+
+    int vs2 = vs*vs ;
+    //    F += os*vs2 ;
+    //rhs[matrix.outerCLR[i].first-ls] += X[matrix.outerCLR[i].second]*F[i] ;
+    for(int i=os;i<oe;++i) {
+      const double * Xi   = &X[CLR[i].second*vs] ;
+      double *       rhsi = &rhs[CLR[i].first*vs] ;
+      const_Mat<real_fj> Fi(&F[i*vs2],vs) ;
+      Fi.dotprod_accum(Xi,rhsi) ; // Add into rhs
+			    //      F += vs2 ;
+    }
+
+  }
+
+
+
+
+  void matrixHelpersGeneric::
+  lineSolve(double *restrict X, const double *restrict rhs, 
+	    const double *restrict D,
+	    const real_fj *restrict L, const real_fj *restrict U, 
+	    int lsz, int vs) const {
+    int vs2 = vs*vs ;
+    vector<double> v(vs),t(vs) ;
+    // forward solve part
+      
+    for(int i=0;i<vs;++i)
+      X[i] = -rhs[i] ;
+    int moffset = 0 ;
+    int voffset = 0 ;
+    for(int i=1;i<lsz;++i) {
+      //   X[i] = L[i-1]*D[i-1]*rhs[i-1]- rhs[i] ;
+      for(int j=0;j<vs;++j)
+	X[voffset+vs+j] = -rhs[voffset+vs+j] ;
+      const_Mat<double> Dm(&D[moffset],vs) ;
+      Dm.solve_lu(&X[voffset],&v[0]) ;
+      for(int j=0;j<vs;++j)
+	v[j] = -v[j] ;
+      const_Mat<real_fj> Lm(&L[moffset],vs) ;
+      Lm.dotprod_accum(&v[0],&X[voffset+vs]) ;
+      
+      moffset += vs2 ;
+      voffset += vs ;
+    }
+    // backward solve
+    voffset = (lsz-1)*vs ;
+    moffset = (lsz-1)*vs2 ;
+    const_Mat<double> De(&D[moffset],vs) ;
+    De.solve_lu(&X[voffset],&v[0]) ;
+    for(int i=0;i<vs;++i)
+      X[voffset+i] = v[i] ;
+    voffset -= vs ;
+    moffset -= vs2 ;
+    for(int i=lsz-2;i>=0;--i) {
+      // solve X[i] = D[i]*(X[i]-X[i+1]*U[i]) 
+      for(int j=0;j<vs;++j)
+	v[j] = -X[voffset+j] ; // sign change so we can use dotprod_accum
+      const_Mat<real_fj> Um(&U[moffset],vs) ;
+      Um.dotprod_accum(&X[voffset+vs],&v[0]) ;
+      const_Mat<double> Dm(&D[moffset],vs) ;
+      for(int j=0;j<vs;++j)
+	v[j] = -v[j] ;
+      Dm.solve_lu(&v[0],&X[voffset]) ;
+      voffset -= vs ;
+      moffset -= vs2 ;
+    }
+  }
+  
+}
+// Scalar solver using modified line gauss seidel method
+namespace {
   using std::vector ;
   using std::sort ;
   using std::swap ;
   using std::set ;
   using Loci::realToDouble ;
   using Loci::realToFloat ;
+  using LGSI::matrixStructure ;
+  using LGSI::lineLayout ;
+  using LGSI::scalarMatrixData ;
+  using LGSI::scalarRHSData ;
+  using LGSI::LSGSScalarSolve ;
+  using LGSI::scalarInnerProduct ;
+  using LGSI::matrixHelpers ;
+  using LGSI::blockedMatrixData ;
+  using LGSI::blockedRHSData ;
+  using LGSI::matrixHelpersGeneric ;
+  using flowPsi::real ;
+  using flowPsi::realF ;
+  using flowPsi::real_fj ;
 #ifdef USE_AUTODIFF
-  typedef Loci::real_t real ;
-  typedef Loci::real_t realF ;
 #ifdef AUTODIFF2ND
 #define LSGS_TYPE Loci::MPI_FADD2
 #else
@@ -47,8 +184,6 @@ namespace LGSI {
 #endif
 #endif
 #else	
-  typedef double real ;
-  typedef float realF ;
 #define LSGS_TYPE MPI_DOUBLE
 #endif
   using std::cerr ;
@@ -76,21 +211,21 @@ namespace LGSI {
   }
 
   // Scalar solve
-  $type B store<real> ;
-  $type X_D store<real> ;
-  $type X_L store<real> ;
-  $type X_U store<real> ;
-  $type LSGSConnectivity(X) store<realF> ;
+  $type B store<double> ;
+  $type X_D store<double> ;
+  $type X_L store<double> ;
+  $type X_U store<double> ;
+  $type LSGSConnectivity(X) store<real_fj> ;
 
-  $type LSGSRelaxation param<real> ;
-  $type LSGSAbsTol param<real> ;
-  $type LSGSRelTol param<real> ;
+  $type LSGSRelaxation param<double> ;
+  $type LSGSAbsTol param<double> ;
+  $type LSGSRelTol param<double> ;
   $type LSGSMaxIter param<int> ;
+  $type LSGSPreconSteps param<int> ;
   $type LSGSDiagnosticLevel param<int> ;
 
   $type LSGSSolverControls param<Loci::options_list> ;
-  $rule default(LSGSSolverControls) {
-  }
+  $rule default(LSGSSolverControls) {  }
   
   $rule default(LSGSDiagnosticLevel) {
     $LSGSDiagnosticLevel = 0 ;
@@ -110,7 +245,11 @@ namespace LGSI {
     $LSGSMaxIter = 10 ;
   }
 
-  $type LSGSRelaxation(X) param<real> ;
+  $rule default(LSGSPreconSteps) {
+    $LSGSPreconSteps = 2 ;
+  }
+
+  $type LSGSRelaxation(X) param<double> ;
   $rule singleton(LSGSRelaxation(X)<-LSGSMatrixName(X),LSGSRelaxation,
                   LSGSSolverControls) {
     using namespace Loci ;
@@ -136,7 +275,7 @@ namespace LGSI {
     }
   }
 
-  $type LSGSRelTol(X) param<real> ;
+  $type LSGSRelTol(X) param<double> ;
   $rule singleton(LSGSRelTol(X)<-LSGSMatrixName(X),LSGSRelTol,
                   LSGSSolverControls) {
     using namespace Loci ;
@@ -162,7 +301,7 @@ namespace LGSI {
     }
   }
 
-  $type LSGSAbsTol(X) param<real> ;
+  $type LSGSAbsTol(X) param<double> ;
   $rule singleton(LSGSAbsTol(X)<-LSGSMatrixName(X),LSGSAbsTol,
                   LSGSSolverControls) {
     using namespace Loci ;
@@ -206,9 +345,37 @@ namespace LGSI {
           ol.Input(value_list) ;
           string setting = "MaxIter" ;
           if(ol.optionExists(setting)) {
-            real val = $LSGSMaxIter(X) ;
+            double val = $LSGSMaxIter(X) ;
             ol.getOption(setting,val) ;
             $LSGSMaxIter(X) = int(floor(val + 0.5)) ;
+          }
+        }
+      default:
+        break ;
+      }
+    }
+  }
+  $type LSGSPreconSteps(X) param<int> ;
+  $rule singleton(LSGSPreconSteps(X)<-LSGSMatrixName(X),LSGSPreconSteps,
+                  LSGSSolverControls) {
+    using namespace Loci ;
+    $LSGSPreconSteps(X) = $LSGSPreconSteps ;
+    string name = $LSGSMatrixName(X) ;
+    if($LSGSSolverControls.optionExists(name)) {
+      option_value_type vt = $LSGSSolverControls.getOptionValueType(name) ;
+      option_values ov = $LSGSSolverControls.getOption(name) ;
+      options_list::arg_list value_list ;
+      switch(vt) {
+      case FUNCTION:
+        {
+          ov.get_value(value_list) ;
+          options_list ol ;
+          ol.Input(value_list) ;
+          string setting = "PreconSteps" ;
+          if(ol.optionExists(setting)) {
+            double val = $LSGSPreconSteps(X) ;
+            ol.getOption(setting,val) ;
+            $LSGSPreconSteps(X) = int(floor(val + 0.5)) ;
           }
         }
       default:
@@ -234,7 +401,7 @@ namespace LGSI {
           ol.Input(value_list) ;
           string setting = "DiagnosticLevel" ;
           if(ol.optionExists(setting)) {
-            real val = $LSGSDiagnosticLevel(X) ;
+            double val = $LSGSDiagnosticLevel(X) ;
             ol.getOption(setting,val) ;
             $LSGSDiagnosticLevel(X) = int(floor(val + 0.5)) ;
           }
@@ -266,95 +433,13 @@ namespace LGSI {
     } ENDFORALL ;
   } ;
 
-  
-  
-  struct lineLayout {
-    int eqnstart,eqnend,Lstart,Ustart,OuterStart,OuterEnd ;
-  } ;
-
-  struct matrixStructure {
-    int access_counter ;
-    int nmyeqn ;
-    // equation variable map
-    vector<int> eql2g ; // Local to global map for equation information
-    // line information
-    vector<lineLayout> lineData ;
-    // maximum line length
-    int mxlinelen ;
-    // Global to local map for off diagonal matrix information
-    const_Map globalL2l,globalU2l ;
-    // connectivity information
-    vector<pair<int,int> > outerCLR ; // outer face left/right eqn numbers
-    //
-    // Communication structure
-    vector<int> send_processors ;
-    vector<int> send_offsets ;
-    vector<int> send_entities ;
-    vector<int> send_entitiesl ;
-    vector<int> recv_processors ;
-    vector<int> recv_offsets ;
-    vector<int> recv_entities ;
-    vector<int> recv_entitiesl ;
-
-    vector<pair<int,int> > periodicCopy ;
-    matrixStructure(const matrixStructure &ms) {
-      access_counter = ms.access_counter ;
-      nmyeqn = ms.nmyeqn ;
-      eql2g = ms.eql2g ;
-      lineData = ms.lineData ;
-      mxlinelen = ms.mxlinelen ;
-      outerCLR = ms.outerCLR ;
-      globalL2l.setRep(ms.globalL2l.Rep()) ;
-      globalU2l.setRep(ms.globalU2l.Rep()) ;
-      send_processors = ms.send_processors ;
-      send_offsets = ms.send_offsets ;
-      send_entities = ms.send_entities ;
-      send_entitiesl = ms.send_entitiesl ;
-      recv_processors = ms.recv_processors ;
-      recv_offsets = ms.recv_offsets ;
-      recv_entities = ms.recv_entities ;
-      recv_entitiesl = ms.recv_entitiesl ;
-      periodicCopy = ms.periodicCopy ;
-    }
-    matrixStructure &operator=(const matrixStructure &ms) {
-      access_counter = ms.access_counter ;
-      nmyeqn = ms.nmyeqn ;
-      eql2g = ms.eql2g ;
-      lineData = ms.lineData ;
-      mxlinelen = ms.mxlinelen ;
-      outerCLR = ms.outerCLR ;
-      globalL2l.setRep(ms.globalL2l.Rep()) ;
-      globalU2l.setRep(ms.globalU2l.Rep()) ;
-      send_processors = ms.send_processors ;
-      send_offsets = ms.send_offsets ;
-      send_entities = ms.send_entities ;
-      send_entitiesl = ms.send_entitiesl ;
-      recv_processors = ms.recv_processors ;
-      recv_offsets = ms.recv_offsets ;
-      recv_entities = ms.recv_entities ;
-      recv_entitiesl = ms.recv_entitiesl ;
-      periodicCopy = ms.periodicCopy ;
-      return *this ;
-    }
-    matrixStructure() { access_counter = -1 ;}
-  } ;
-
   $type LSGSmatrixInitialize(X) blackbox<matrixStructure> ;
 
   typedef matrixStructure *matrixStructureP ;
   $type LSGSmatrixTopology(X) blackbox<matrixStructureP> ;
 
-  struct scalarMatrixData {
-    vector<real> D ;
-    vector<real> F ;
-  } ;
-
-  struct scalarRHSData {
-    vector<real> B ;
-  } ;
-  
-  $type LSGSscalarMatrix(X) blackbox<scalarMatrixData> ;
-  $type LSGSscalarRHS(X,B) blackbox<scalarRHSData> ;
+  $type LSGSscalarMatrix(X) blackbox<scalarMatrixData<double> > ;
+  $type LSGSscalarRHS(X,B) blackbox<scalarRHSData<double> > ;
 
   $rule blackbox(LSGSmatrixInitialize(X)),constraint(UNIVERSE),prelude {
     *$LSGSmatrixInitialize(X) = matrixStructure() ;
@@ -593,7 +678,7 @@ namespace LGSI {
         const int usz = $upper[ii].size() ;
         const int msz = lsz+usz ;
         vector<int> cmap(msz) ;
-        vector<realF> cval(msz) ;
+        vector<real_fj> cval(msz) ;
         for(int i=0;i<lsz;++i) {
           cval[i] = $LSGSConnectivity(X)[$lower[ii][i]] ;
           cmap[i] = toeqn[$cl[$lower[ii][i]]] ;
@@ -1119,8 +1204,8 @@ namespace LGSI {
   $rule blackbox(LSGSscalarMatrix(X)<-LSGSmatrixTopology(X),
 		 X_D,upper->X_U,lower->X_L), prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    vector<real> D(matrix.eql2g.size()); 
-    vector<real> F(matrix.outerCLR.size()); 
+    vector<double> D(matrix.eql2g.size()); 
+    vector<double> F(matrix.outerCLR.size()); 
     
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
@@ -1137,16 +1222,16 @@ namespace LGSI {
 
     // Preprocess lines (recompute diagonal term)
     for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      real *L = &F[matrix.lineData[l].Lstart] ;
-      real *U = &F[matrix.lineData[l].Ustart] ;
-      real *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
+      double *L = &F[matrix.lineData[l].Lstart] ;
+      double *U = &F[matrix.lineData[l].Ustart] ;
+      double *restrict Dp = &D[matrix.lineData[l].eqnstart] ;
       int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       
       //      D[0] = 1./(D[0]<0.0?min(D[0],-1e-30):max(D[0],1e-30)) ;
       Dp[0] = 1./Dp[0] ;
       for(int i=1;i<lsz;++i) {
-        real Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
-        Dp[i] = 1./(Dt<0.0?min<real>(Dt,-1e-30):max<real>(Dt,1e-30)) ;
+        double Dt = (Dp[i]-L[i-1]*Dp[i-1]*U[i-1]) ;
+        Dp[i] = 1./(Dt<0.0?min<double>(Dt,-1e-30):max<double>(Dt,1e-30)) ;
       }
     }
     $LSGSscalarMatrix(X)->D.swap(D) ; 
@@ -1157,7 +1242,7 @@ namespace LGSI {
   $rule blackbox(LSGSscalarRHS(X,B)<-LSGSmatrixTopology(X),
 		 B), prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    vector<real> B(matrix.eql2g.size()); 
+    vector<double> B(matrix.eql2g.size()); 
     
     // Copy matrix into data structure
     for(int i=0;i<matrix.nmyeqn;++i) {
@@ -1167,220 +1252,38 @@ namespace LGSI {
     
   } ;
 
-  $type LSGSScalarSolve(X,B)           store<real> ;
+  $type LSGSScalarSolve(X,B)           store<double> ;
 
   $rule pointwise(LSGSScalarSolve(X,B)<-LSGSMaxIter(X),LSGSAbsTol(X),LSGSRelTol(X),
 		  LSGSRelaxation(X), LSGSscalarMatrix(X),LSGSscalarRHS(X,B),LSGSmatrixTopology(X),
                   LSGSMatrixName(X),LSGSDiagnosticLevel(X)),
     option(disable_threading),prelude {
+
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    // initialize x to zero
-    vector<real> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
+    vector<double> x1 ;
+    LSGSScalarSolve(x1,
+                    matrix,
+                    *$LSGSscalarMatrix(X),
+                    $LSGSscalarRHS(X,B)->B,
+                    *$LSGSRelaxation(X),
+                    *$LSGSAbsTol(X),
+                    *$LSGSRelTol(X),
+                    *$LSGSMaxIter(X),
+                    *$LSGSDiagnosticLevel(X),
+                    *$LSGSMatrixName(X)) ;
 
-    real * X = &x1[0] ;
-    vector<real> rhs(matrix.mxlinelen) ;
-
-    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-      const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-      const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-      const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-      
-      const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
-      
-      const int eqb = matrix.lineData[l].eqnstart ;
-
-      // First compute rhs ;
-      for(int i=0;i<lsz;++i)
-        rhs[i] = B[i] ;
-
-      real *restrict x = &X[eqb] ;
-      // now solve line
-      // forward solve 
-      x[0] = rhs[0] ;
-      for(int i=1;i<lsz;++i) {
-        x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-      }
-      // backward solve
-      x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-      for(int i=lsz-2;i>=0;--i) {
-        x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-      }
-    }
-    vector<real> send_data(matrix.send_entitiesl.size()) ;
-    vector<real> recv_data(matrix.recv_entitiesl.size()) ;
-    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
-    vector<MPI_Status> status(matrix.recv_processors.size()) ;
-
-    double zero_resid = 1 ;
-    real w = *$LSGSRelaxation(X) ;
-    int num_iter = *$LSGSMaxIter(X) ;
-    // do num_iter steps
-    for(int iter = 0;iter < num_iter;++iter) {
-      
-      int psz = matrix.periodicCopy.size() ;
-      for(int i=0;i<psz;++i)
-        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
-      if(iter == 0) {
-        // copy send data for first iteration, aftwards the unrelaxed
-        // values are copied later in the loop.
-        for(size_t i=0;i<send_data.size();++i)
-          send_data[i] = X[matrix.send_entitiesl[i]] ;
-      }
-      
-      for(size_t i=0;i<matrix.recv_processors.size();++i) {
-        int rs = matrix.recv_offsets[i] ;
-        int re = matrix.recv_offsets[i+1] ;
-        int rsz = re-rs ;
-        int p = matrix.recv_processors[i] ;
-        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
-                  MPI_COMM_WORLD,&requests[i]) ;
-      }
-      for(size_t i=0;i<matrix.send_processors.size();++i) {
-        int ss = matrix.send_offsets[i] ;
-        int se = matrix.send_offsets[i+1] ;
-        int ssz = se-ss ;
-        int p = matrix.send_processors[i] ;
-        MPI_Send(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD) ;
-      }
-      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
-      // copy recieved data 
-      for(size_t i=0;i<recv_data.size();++i)
-        X[matrix.recv_entitiesl[i]] = recv_data[i] ;
-      for(int i=0;i<psz;++i)
-        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
-      
-
-
-      // Forward sweep
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
-
-        const int ls = matrix.lineData[l].eqnstart ;
-        const int le = matrix.lineData[l].eqnend ;
-
-        for(int i=ls;i<le;++i)
-          xt[i] = X[i] ;
-        
-	const int lsz = le-ls ;
-	
-
-	for(int i=0;i<lsz;++i) 
-	  rhs[i] = B[i] ;
-
-
-	const int   os = matrix.lineData[l].OuterStart ;
-	const int   oe = matrix.lineData[l].OuterEnd ;
-	for(int i=os;i<oe;++i) {
-	  rhs[matrix.outerCLR[i].first-ls] 
-	    -= X[matrix.outerCLR[i].second]*F[i] ;
-	}
-      
-	real *restrict x = &X[ls] ;
-	// now solve line
-	// forward solve 
-	x[0] = rhs[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
-      }
-
-      // Backward sweep
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
-
-	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
-
-	const int ls = matrix.lineData[l].eqnstart ;
-
-	// First compute rhs ;
-	for(int i=0;i<lsz;++i)
-	  rhs[i] = B[i] ;
-
-	const int   os = matrix.lineData[l].OuterStart ;
-	const int   oe = matrix.lineData[l].OuterEnd ;
-	for(int i=os;i<oe;++i) {
-	  rhs[matrix.outerCLR[i].first-ls] -= X[matrix.outerCLR[i].second]*F[i] ;
-	}
-
-	real *restrict x = &X[ls] ;
-	// now solve line
-	// forward solve 
-	x[0] = rhs[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
-      }
-      // copy data to send before relaxation
-      for(size_t i=0;i<send_data.size();++i)
-        send_data[i] = X[matrix.send_entitiesl[i]] ;
-
-      // Relax update and compute current estimate for residual
-      double residl = 0 ;
-      for(int i=0;i<matrix.nmyeqn;++i) {
-        X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = realToDouble(X[i]-xt[i]) ;
-	residl += r*r ;
-      }
-      double resid = 0 ;
-      MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
-      resid = sqrt(resid) ;
-      if(0 == iter)
-	zero_resid = max(resid,1e-16) ;
-      double rel_resid = resid/zero_resid ;
-      //      if(Loci::MPI_rank == 0)
-      //	cout << iter << ":sresid = " << rel_resid << endl ;
-      if(rel_resid > 1.0)
-	w *= 1./rel_resid ;
-
-      if(*$LSGSDiagnosticLevel(X) > 0 && Loci::MPI_rank == 0) {
-        cout << "LSGS Matrix " << *$LSGSMatrixName(X) 
-             << ", iter=" << iter+1 
-             << ", resid=" << resid << ", rel_resid=" << rel_resid << endl ;
-      }
-
-      if(resid < realToDouble(*$LSGSAbsTol(X))) 
-	break ;
-      if(rel_resid < realToDouble(*$LSGSRelTol(X)))
-	break ;
-
-    }
-    
-    // copy data out
     for(int i=0;i<matrix.nmyeqn;++i) {
       $LSGSScalarSolve(X,B)[matrix.eql2g[i]] = x1[i] ; 
     }
 
   } ;
     
-#ifdef DOUBLE_FJMAT
-  typedef real real_fj ;
-#else
-  typedef realF real_fj ;
-#endif
   // Blocked version
   $type Y_D storeMat<real_fj> ;
   $type Y_L storeMat<real_fj> ;
   $type Y_U storeMat<real_fj> ;
-  $type LSGSBlockedSSolve(Y,B) storeVec<real> ;
+  $type LSGSBlockedSSolve(Y,B) storeVec<double> ;
+
 
   $rule pointwise(LSGSConnectivity(Y)<-Y_L,Y_U),parametric(LSGSblockedMatrix(Y)) {
     real_fj diagnorm = 0 ;
@@ -1391,198 +1294,9 @@ namespace LGSI {
   }
 
 
-  class matrixHelpers: public Loci::CPTR_type {
-  public:
-    virtual void preprocessLine(real *D, 
-				const real_fj *L, const real_fj *U, 
-				int lsz, int vs) const = 0 ;
-    virtual void linerhs(real *rhs, const real *X, const real_fj *B, 
-			const pair<int,int> *CLR, const real_fj *F, 
-			int ls, int le, int os, int oe, int vs) const = 0;
-    virtual void lineSolve(real *X, const real *rhs, 
-			   const real *D,
-			   const real_fj *L, const real_fj *U, 
-			   int lsz, int vs) const = 0 ;
-    virtual real lineVerify(const real *X, const real *rhs, 
-			      const real *D,
-			      const real_fj *L, const real_fj *U, 
-			      int lsz, int vs) const = 0 ;
-  } ;
-
-  class matrixHelpersGeneric: public matrixHelpers {
-  public:
-    virtual void preprocessLine(real *D, 
-				const real_fj *L, const real_fj *U, 
-				int lsz, int vs) const ;
-    virtual void linerhs(real *rhs, const real *X, const real_fj *B, 
-			const pair<int,int> *CLR, const real_fj *F, 
-			int ls, int le, int os, int oe, int vs) const ;
-    virtual void lineSolve(real *X, const real *rhs, 
-			   const real *D, 
-			   const real_fj *L, const real_fj *U, 
-			   int lsz, int vs) const ;
-    virtual real lineVerify(const real *X, const real *rhs, 
-			      const real *D,
-			      const real_fj *L, const real_fj *U, 
-			      int lsz, int vs) const ;
-  } ;
-
-  void matrixHelpersGeneric::
-  preprocessLine(real *restrict D, 
-		 const real_fj *restrict L, 
-		 const real_fj *restrict U, 
-		 int lsz, int vs) const  {
-    int vs2 = vs*vs ;
-
-    Mat<real> D0(D,vs) ;
-    vector<real_fj> v(vs),t(vs) ;
-    D0.decompose_lu() ;
-    for(int i=1;i<lsz;++i) {
-      const_Mat<real> Dm(D,vs) ;
-      D += vs2 ;
-      Mat<real> Dn(D,vs) ;
-      const_Mat<real_fj> Lm(L,vs) ;
-      const_Mat<real_fj> Um(U,vs) ;
-      for(int j=0;j<vs;++j) { // Solve Dn -= Lm*Dm^-1*Um
-	for(int k=0;k<vs;++k)
-	  v[k] = Um[k][j] ;
-	Dm.solve_lu(&v[0],&t[0]) ;
-	for(int k=0;k<vs;++k)
-	  v[k] = 0.0 ;
-	Lm.dotprod_accum(&t[0],&v[0]) ;
-	for(int k=0;k<vs;++k)
-	  Dn[k][j] -= v[k] ;
-      }
-      Dn.decompose_lu() ;
-      L += vs2 ;
-      U += vs2 ;
-    }      
-  }
-  void matrixHelpersGeneric::
-  linerhs(real *restrict rhs, const real *restrict X, const real_fj *restrict B,
-	  const pair<int,int> *restrict CLR, const real_fj *restrict F, 
-	 int ls, int le, int os, int oe, int vs) const {
-    // note, here we compute the negative of the rhs, but we compensate
-    // for this in the line solver.
-    // also note, rhs computation in terms of equation number while
-    // line solver starts with first element of line = 0
-    for(int i=ls*vs;i<le*vs;++i)
-      rhs[i] = -B[i] ;
-
-    int vs2 = vs*vs ;
-    //    F += os*vs2 ;
-    //rhs[matrix.outerCLR[i].first-ls] += X[matrix.outerCLR[i].second]*F[i] ;
-    for(int i=os;i<oe;++i) {
-      const real * Xi   = &X[CLR[i].second*vs] ;
-      real *       rhsi = &rhs[CLR[i].first*vs] ;
-      const_Mat<real_fj> Fi(&F[i*vs2],vs) ;
-      Fi.dotprod_accum(Xi,rhsi) ; // Add into rhs
-			    //      F += vs2 ;
-    }
-
-  }
-
-
-
-
-  void matrixHelpersGeneric::
-  lineSolve(real *restrict X, const real *restrict rhs, 
-	    const real *restrict D,
-	    const real_fj *restrict L, const real_fj *restrict U, 
-	    int lsz, int vs) const {
-    int vs2 = vs*vs ;
-    vector<real> v(vs),t(vs) ;
-    // forward solve part
-      
-    for(int i=0;i<vs;++i)
-      X[i] = -rhs[i] ;
-    int moffset = 0 ;
-    int voffset = 0 ;
-    for(int i=1;i<lsz;++i) {
-      //   X[i] = L[i-1]*D[i-1]*rhs[i-1]- rhs[i] ;
-      for(int j=0;j<vs;++j)
-	X[voffset+vs+j] = -rhs[voffset+vs+j] ;
-      const_Mat<real> Dm(&D[moffset],vs) ;
-      Dm.solve_lu(&X[voffset],&v[0]) ;
-      for(int j=0;j<vs;++j)
-	v[j] = -v[j] ;
-      const_Mat<real_fj> Lm(&L[moffset],vs) ;
-      Lm.dotprod_accum(&v[0],&X[voffset+vs]) ;
-      
-      moffset += vs2 ;
-      voffset += vs ;
-    }
-    // backward solve
-    voffset = (lsz-1)*vs ;
-    moffset = (lsz-1)*vs2 ;
-    const_Mat<real> De(&D[moffset],vs) ;
-    De.solve_lu(&X[voffset],&v[0]) ;
-    for(int i=0;i<vs;++i)
-      X[voffset+i] = v[i] ;
-    voffset -= vs ;
-    moffset -= vs2 ;
-    for(int i=lsz-2;i>=0;--i) {
-      // solve X[i] = D[i]*(X[i]-X[i+1]*U[i]) 
-      for(int j=0;j<vs;++j)
-	v[j] = -X[voffset+j] ; // sign change so we can use dotprod_accum
-      const_Mat<real_fj> Um(&U[moffset],vs) ;
-      Um.dotprod_accum(&X[voffset+vs],&v[0]) ;
-      const_Mat<real> Dm(&D[moffset],vs) ;
-      for(int j=0;j<vs;++j)
-	v[j] = -v[j] ;
-      Dm.solve_lu(&v[0],&X[voffset]) ;
-      voffset -= vs ;
-      moffset -= vs2 ;
-    }
-  }
-
-  real matrixHelpersGeneric::
-  lineVerify(const real *X, const real *rhs, 
-	     const real *D,
-	     const real_fj *L, const real_fj *U, 
-	     int lsz, int vs) const {
-    int vs2 = vs*vs ;
-    vector<real> sum(vs*lsz) ;
-    real mxrhs = 0 ;
-    for(int l=0;l<lsz;++l) {
-      for(int i=0;i<vs;++i) {
-	sum[l*vs+i] = rhs[l*vs+i] ;
-	mxrhs = max(mxrhs,fabs(rhs[l*vs+i])) ;
-      }
-      const_Mat<real> Di(&D[l*vs2],vs) ;
-      Di.dotprod_accum(&X[l*vs],&sum[l*vs]) ;
-    }
-    for(int l=0;l<lsz-1;++l) {
-      const_Mat<real_fj> Ul(&U[l*vs2],vs) ;
-      Ul.dotprod_accum(&X[(l+1)*vs],&sum[l*vs]) ;
-      const_Mat<real_fj> Ll(&L[l*vs2],vs) ;
-      Ll.dotprod_accum(&X[l*vs],&sum[(l+1)*vs]) ;
-    }
-    real msq = 0 ;
-    for(int i=0;i<vs*lsz;++i)
-      msq += sum[i]*sum[i] ;
-
-    if(mxrhs < 1e-30)
-      return 0 ;
-    return sqrt(msq)/mxrhs ;
-
-  }
-
-  struct blockedMatrixData {
-    Loci::CPTR<matrixHelpers> matrixHelp ;
-    int vs,vs2  ;
-    //    vector<real_fj> B ;
-    vector<real> D ;
-    //    vector<real_fj> Dreal ;
-    vector<real_fj> F ;
-  } ;
-  struct blockedRHSData {
-    vector<real_fj> B ;
-  } ;
-
   $type LSGSblockedMatrix(Y) blackbox<blockedMatrixData> ;
 
-  $type LSGSblockedRHS(Y,B) blackbox<blockedRHSData> ;
+  $type LSGSblockedRHS(Y,B) blackbox<blockedRHSData<real_fj> > ;
 
   $rule blackbox(LSGSblockedMatrix(Y)<-LSGSmatrixTopology(Y),
 		 Y_D,upper->Y_U,lower->Y_L), prelude {
@@ -1594,7 +1308,7 @@ namespace LGSI {
     $LSGSblockedMatrix(Y)->matrixHelp = new matrixHelpersGeneric ;
 
     //    vector<real_fj> B(matrix.eql2g.size()*vs); 
-    vector<real> D(matrix.eql2g.size()*vs2); 
+    vector<double> D(matrix.eql2g.size()*vs2); 
     vector<real_fj> F(matrix.outerCLR.size()*vs2); 
     
     // Copy matrix into data structure
@@ -1604,7 +1318,7 @@ namespace LGSI {
       for(int j=0;j<vs2;++j) 
 	D[i*vs2+j] = Dp[j] ;
       //      for(int j=0;j<vs2;++j) 
-      //	Dreal[i*vs2+j] = Dp[j] ;
+      //	Ddouble[i*vs2+j] = Dp[j] ;
     }
     entitySet ldom  = matrix.globalL2l.domain() ;
     FORALL(ldom,ii) {
@@ -1627,7 +1341,7 @@ namespace LGSI {
       int lsz =  matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
       const real_fj *L = &F[matrix.lineData[l].Lstart*vs2] ;
       const real_fj *U = &F[matrix.lineData[l].Ustart*vs2] ;
-      real * Dp = &D[matrix.lineData[l].eqnstart*vs2] ;
+      double * Dp = &D[matrix.lineData[l].eqnstart*vs2] ;
 
       $LSGSblockedMatrix(Y)->matrixHelp
 	->preprocessLine(Dp,L,U,lsz,vs) ;
@@ -1663,223 +1377,19 @@ namespace LGSI {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
     int vs = $LSGSblockedMatrix(Y)->vs ;
     $LSGSBlockedSSolve(Y,B).setVecSize(vs) ;
-    int vs2 = vs*vs ;
-    int vsize = matrix.eql2g.size() ;
-    vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
-    
-    real *X = &x1[0] ;
-    
-    vector<real> rhs(matrix.mxlinelen*vs) ;
-    double zero_resid =1;
-    // jacobi initializes iteration
-    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-      int ls = matrix.lineData[l].eqnstart ;
-      int le = matrix.lineData[l].eqnend ;
 
-      real * rhsg = &rhs[0] - ls*vs ; 
-      for(int i=ls*vs;i<le*vs;++i)
-	rhsg[i] = -B[i] ;
+    vector<double> X ;
+    LSGSBlockSolve(X,
+                   matrix,
+                   *$LSGSblockedMatrix(Y),
+                   $LSGSblockedRHS(Y,B)->B,
+                   *$LSGSRelaxation(Y),
+                   *$LSGSAbsTol(Y),
+                   *$LSGSRelTol(Y),
+                   *$LSGSMaxIter(Y),
+                   *$LSGSDiagnosticLevel(Y),
+                   *$LSGSMatrixName(Y)) ;
 
-      const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-      const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-      const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-      int lsz = le-ls ;
-      $LSGSblockedMatrix(Y)->matrixHelp
-	->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      //      const real *Dr = &($LSGSblockedMatrix(Y)->Dreal[ls*vs2]) ;
-      //      real err = $LSGSblockedMatrix(Y)->matrixHelp
-      //      	->lineVerify(X+ls*vs,&rhs[0],Dr,L,U,lsz,vs) ;
-      //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
-    }
-
-    vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
-    vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
-    vector<MPI_Request> requests(matrix.recv_processors.size()+matrix.send_processors.size()) ;
-    vector<MPI_Status> status(matrix.recv_processors.size()+matrix.send_processors.size()) ;
-    int num_iter = *$LSGSMaxIter(Y) ;
-    real w = *$LSGSRelaxation(Y) ;
-
-    // Entry communication 
-    for(int iter = 0;iter<num_iter;++iter) {
-      // copy send data 
-      int psz = matrix.periodicCopy.size() ;
-      if(iter == 0) {
-        for(int i=0;i<psz;++i) {
-          for(int j=0;j<vs;++j) {
-            X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
-          }
-        }
-        for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
-          int loc = matrix.send_entitiesl[i]*vs ;
-          int ii = i*vs ;
-          for(int j=0;j<vs;++j)
-            send_data[ii+j] = X[loc+j] ;
-        }
-        for(size_t i=0;i<matrix.recv_processors.size();++i) {
-          int rs = matrix.recv_offsets[i]*vs ;
-          int re = matrix.recv_offsets[i+1]*vs ;
-          int rsz = re-rs ;
-          int p = matrix.recv_processors[i] ;
-          MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
-                    MPI_COMM_WORLD,&requests[i]) ;
-        }
-
-        int rpsz = matrix.recv_processors.size() ;
-        
-        for(size_t i=0;i<matrix.send_processors.size();++i) {
-          int ss = matrix.send_offsets[i]*vs ;
-          int se = matrix.send_offsets[i+1]*vs ;
-          int ssz = se-ss ;
-          int p = matrix.send_processors[i] ;
-          MPI_Isend(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD,
-                    &requests[i+rpsz]) ;
-        }
-        MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
-        // copy recieved data 
-        for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
-          int loc = matrix.recv_entitiesl[i]*vs ;
-          int ii = i*vs ;
-          for(int j=0;j<vs;++j)
-            X[loc+j] = recv_data[ii+j] ;
-        }
-      }
-      for(int i=0;i<psz;++i) {
-        for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
-        }
-      }
-
-      // Forward sweep
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
-	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-	int os = matrix.lineData[l].OuterStart ;
-	int oe = matrix.lineData[l].OuterEnd ;
-	real *restrict rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->linerhs(rhsg,&X[0],B,CLR,F,ls,le,os,oe,vs) ;
-
-	const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-	int lsz = le-ls ;
-	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      }
-
-      // Backward sweep
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
-	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-	int os = matrix.lineData[l].OuterStart ;
-	int oe = matrix.lineData[l].OuterEnd ;
-	real * rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
-
-	const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-	int lsz = le-ls ;
-	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      }
-      
-      // Copy data for communication
-      for(int i=0;i<psz;++i) {
-        for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
-        }
-      }
-      for(size_t i=0;i<matrix.send_entitiesl.size();++i) {
-        int loc = matrix.send_entitiesl[i]*vs ;
-        int ii = i*vs ;
-        for(int j=0;j<vs;++j)
-          send_data[ii+j] = X[loc+j] ;
-      }
-      
-      // Initiate interprocessor communication
-      for(size_t i=0;i<matrix.recv_processors.size();++i) {
-        int rs = matrix.recv_offsets[i]*vs ;
-        int re = matrix.recv_offsets[i+1]*vs ;
-        int rsz = re-rs ;
-        int p = matrix.recv_processors[i] ;
-        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
-                  MPI_COMM_WORLD,&requests[i]) ;
-      }
-
-      int rpsz = matrix.recv_processors.size() ;
-        
-      for(size_t i=0;i<matrix.send_processors.size();++i) {
-        int ss = matrix.send_offsets[i]*vs ;
-        int se = matrix.send_offsets[i+1]*vs ;
-        int ssz = se-ss ;
-        int p = matrix.send_processors[i] ;
-        MPI_Isend(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD,
-                  &requests[i+rpsz]) ;
-      }
-
-      // Compute residual
-      double residl = 0 ;
-      for(int i=0;i<matrix.nmyeqn*vs;++i) {
-	X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = realToDouble(X[i]-xt[i]) ;
-	residl += r*r ;
-      }
-
-      
-      // Finish communication after local line solve
-      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
-      // copy recieved data 
-      for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
-        int loc = matrix.recv_entitiesl[i]*vs ;
-        int ii = i*vs ;
-        for(int j=0;j<vs;++j)
-          X[loc+j] = recv_data[ii+j] ;
-      }
-
-      for(int i=0;i<psz;++i) {
-        for(int j=0;j<vs;++j) {
-          X[matrix.periodicCopy[i].first*vs+j] = X[matrix.periodicCopy[i].second*vs+j] ;
-        }
-      }
-
-      // Check residual
-      double resid = 0 ;
-      MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
-      resid = sqrt(resid) ;
-      if(0 == iter)
-	zero_resid = max(resid,1e-16) ;
-      double rel_resid = resid/zero_resid ;
-      //      if(Loci::MPI_rank == 0)
-      //	cout << iter << ":resid = " << rel_resid << endl ;
-      if(rel_resid > 1.0)
-	w *= 1./rel_resid ;
-
-      if(*$LSGSDiagnosticLevel(Y) > 0 && Loci::MPI_rank == 0 ) {
-        cout << "LSGS Matrix " << *$LSGSMatrixName(Y)
-             << ", iter=" << iter+1 
-             << ", resid=" << resid << ", rel_resid=" << rel_resid << endl ;
-      }
-      
-      if(resid < realToDouble(*$LSGSAbsTol(Y))) 
-	break ;
-      if(rel_resid < realToDouble(*$LSGSRelTol(Y)))
-	break ;
-      
-    }
     for(int i=0;i<matrix.nmyeqn;++i) {
       for(int j=0;j<vs;++j)
 	$LSGSBlockedSSolve(Y,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;
@@ -1888,198 +1398,25 @@ namespace LGSI {
 
   
 
-  $type LSGSPreconSteps param<int> ;
-  $rule default(LSGSPreconSteps) {
-    $LSGSPreconSteps = 3 ;
-  }
   
 
-  $type LSGSPreconditionerScalar(X,B)           store<real> ;
+  $type LSGSPreconditionerScalar(X,B)           store<double> ;
 
-  $rule pointwise(LSGSPreconditionerScalar(X,B)<-LSGSPreconSteps,
+  $rule pointwise(LSGSPreconditionerScalar(X,B)<-LSGSPreconSteps(X),
 		  LSGSRelaxation(X),
                   LSGSscalarMatrix(X),LSGSscalarRHS(X,B),LSGSmatrixTopology(X)),
   constraint(geom_cells),
   option(disable_threading),prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(X)) ;
-    // initialize x to zero
-    vector<real> x1(matrix.eql2g.size(),0.0), xt(matrix.nmyeqn) ;
-
-    real * X = &x1[0] ;
-    vector<real> rhs(matrix.mxlinelen) ;
-
-    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-      const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-      const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-      const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-      
-      const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
-      
-      const int eqb = matrix.lineData[l].eqnstart ;
-
-      // First compute rhs ;
-      for(int i=0;i<lsz;++i)
-        rhs[i] = B[i] ;
-
-      real *restrict x = &X[eqb] ;
-      // now solve line
-      // forward solve 
-      x[0] = rhs[0] ;
-      for(int i=1;i<lsz;++i) {
-        x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-      }
-      // backward solve
-      x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-      for(int i=lsz-2;i>=0;--i) {
-        x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-      }
-    }
-    vector<real> send_data(matrix.send_entitiesl.size()) ;
-    vector<real> recv_data(matrix.recv_entitiesl.size()) ;
-    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
-    vector<MPI_Status> status(matrix.recv_processors.size()) ;
-
-    double zero_resid = 1 ;
-    real w = *$LSGSRelaxation(X) ;
-    int num_iter = *$LSGSPreconSteps ;
-    // do num_iter steps
-    for(int iter = 0;iter < num_iter;++iter) {
-      
-      int psz = matrix.periodicCopy.size() ;
-      for(int i=0;i<psz;++i)
-        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
-      if(iter == 0) {
-        // copy send data for first iteration, aftwards the unrelaxed
-        // values are copied later in the loop.
-        for(size_t i=0;i<send_data.size();++i)
-          send_data[i] = X[matrix.send_entitiesl[i]] ;
-      }
-      
-      for(size_t i=0;i<matrix.recv_processors.size();++i) {
-        int rs = matrix.recv_offsets[i] ;
-        int re = matrix.recv_offsets[i+1] ;
-        int rsz = re-rs ;
-        int p = matrix.recv_processors[i] ;
-        MPI_Irecv(&recv_data[rs],rsz,LSGS_TYPE,p,99,
-                  MPI_COMM_WORLD,&requests[i]) ;
-      }
-      for(size_t i=0;i<matrix.send_processors.size();++i) {
-        int ss = matrix.send_offsets[i] ;
-        int se = matrix.send_offsets[i+1] ;
-        int ssz = se-ss ;
-        int p = matrix.send_processors[i] ;
-        MPI_Send(&send_data[ss],ssz,LSGS_TYPE,p,99,MPI_COMM_WORLD) ;
-      }
-      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
-      // copy recieved data 
-      for(size_t i=0;i<recv_data.size();++i)
-        X[matrix.recv_entitiesl[i]] = recv_data[i] ;
-      for(int i=0;i<psz;++i)
-        X[matrix.periodicCopy[i].first] = X[matrix.periodicCopy[i].second] ;
-      
-
-
-      // Forward sweep
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
-
-        const int ls = matrix.lineData[l].eqnstart ;
-        const int le = matrix.lineData[l].eqnend ;
-
-        for(int i=ls;i<le;++i)
-          xt[i] = X[i] ;
-        
-	const int lsz = le-ls ;
-	
-
-	for(int i=0;i<lsz;++i) 
-	  rhs[i] = B[i] ;
-
-
-	const int   os = matrix.lineData[l].OuterStart ;
-	const int   oe = matrix.lineData[l].OuterEnd ;
-	for(int i=os;i<oe;++i) {
-	  rhs[matrix.outerCLR[i].first-ls] 
-	    -= X[matrix.outerCLR[i].second]*F[i] ;
-	}
-      
-	real *restrict x = &X[ls] ;
-	// now solve line
-	// forward solve 
-	x[0] = rhs[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
-      }
-
-      // Backward sweep
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real *L = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Lstart] ;
-	const real *U = &$LSGSscalarMatrix(X)->F[matrix.lineData[l].Ustart] ;
-	const real *D = &$LSGSscalarMatrix(X)->D[matrix.lineData[l].eqnstart] ;
-	const real *B = &$LSGSscalarRHS(X,B)->B[matrix.lineData[l].eqnstart] ;
-	const real *F = &$LSGSscalarMatrix(X)->F[0] ;
-
-	const int lsz = matrix.lineData[l].eqnend-matrix.lineData[l].eqnstart ;
-
-	const int ls = matrix.lineData[l].eqnstart ;
-
-	// First compute rhs ;
-	for(int i=0;i<lsz;++i)
-	  rhs[i] = B[i] ;
-
-	const int   os = matrix.lineData[l].OuterStart ;
-	const int   oe = matrix.lineData[l].OuterEnd ;
-	for(int i=os;i<oe;++i) {
-	  rhs[matrix.outerCLR[i].first-ls] -= X[matrix.outerCLR[i].second]*F[i] ;
-	}
-
-	real *restrict x = &X[ls] ;
-	// now solve line
-	// forward solve 
-	x[0] = rhs[0] ;
-	for(int i=1;i<lsz;++i) {
-	  x[i] = rhs[i] - L[i-1]*D[i-1]*x[i-1] ;
-	}
-	// backward solve
-	x[lsz-1] = D[lsz-1]*x[lsz-1] ;
-	for(int i=lsz-2;i>=0;--i) {
-	  x[i] = D[i]*(x[i] - x[i+1]*U[i]) ;
-	}
-      }
-      // copy data to send before relaxation
-      for(size_t i=0;i<send_data.size();++i)
-        send_data[i] = X[matrix.send_entitiesl[i]] ;
-
-      // Relax update and compute current estimate for residual
-      double residl = 0 ;
-      for(int i=0;i<matrix.nmyeqn;++i) {
-        X[i] = w*X[i] + (1.-w)*xt[i] ;
-	double r = realToDouble(X[i]-xt[i]) ;
-	residl += r*r ;
-      }
-      double resid = 0 ;
-      MPI_Allreduce(&residl,&resid,1,MPI_DOUBLE,MPI_SUM,MPI_COMM_WORLD) ;
-      resid = sqrt(resid) ;
-      if(0 == iter)
-	zero_resid = max(resid,1e-16) ;
-      double rel_resid = resid/zero_resid ;
-      //      if(Loci::MPI_rank == 0)
-      //	cout << iter << ":sresid = " << rel_resid << endl ;
-      if(rel_resid > 1.0)
-	w *= 1./rel_resid ;
-    }
-    
+    vector<double> x1 ;
+    LSGSScalarSolve(x1,
+                    matrix,
+                    *$LSGSscalarMatrix(X),
+                    $LSGSscalarRHS(X,B)->B,
+                    *$LSGSRelaxation(X),
+                    0.0,0.0,
+                    *$LSGSPreconSteps(X),
+                    0,string("LSGSPrecond") ) ;
     // copy data out
     for(int i=0;i<matrix.nmyeqn;++i) {
       $LSGSPreconditionerScalar(X,B)[matrix.eql2g[i]] = x1[i] ; 
@@ -2087,102 +1424,27 @@ namespace LGSI {
 
   } ;
 
-  $type LSGSPreconditionerBlocked(Y,B) storeVec<real> ;
-  $rule pointwise(LSGSPreconditionerBlocked(Y,B)<- LSGSPreconSteps,
+  $type LSGSPreconditionerBlocked(Y,B) storeVec<double> ;
+  $rule pointwise(LSGSPreconditionerBlocked(Y,B)<- LSGSPreconSteps(X),
 		  LSGSRelaxation(Y),LSGSblockedMatrix(Y),LSGSblockedRHS(Y,B),
-		  LSGSmatrixTopology(Y)),
+		  LSGSmatrixTopology(Y),LSGSMatrixName(Y)),
   constraint(geom_cells),
   option(disable_threading),
   prelude {
     const struct matrixStructure & restrict matrix = *(*$LSGSmatrixTopology(Y)) ;
     int vs = $LSGSblockedMatrix(Y)->vs ;
     $LSGSPreconditionerBlocked(Y,B).setVecSize(vs) ;
-    int vs2 = vs*vs ;
-    int vsize = matrix.eql2g.size() ;
-    vector<real> x1(vsize*vs) , xt(matrix.nmyeqn*vs) ;
-    
-    real *X = &x1[0] ;
-    
-    vector<real> rhs(matrix.mxlinelen*vs) ;
-    // jacobi initializes iteration
-    for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-      const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-      int ls = matrix.lineData[l].eqnstart ;
-      int le = matrix.lineData[l].eqnend ;
+    vector<double> X ;
+    LSGSBlockSolve(X,
+                   matrix,
+                   *$LSGSblockedMatrix(Y),
+                   $LSGSblockedRHS(Y,B)->B,
+                   *$LSGSRelaxation(Y),
+                   0,0,
+                   *$LSGSPreconSteps(X),
+                   0,
+                   *$LSGSMatrixName(Y)) ;
 
-      real * rhsg = &rhs[0] - ls*vs ; 
-      for(int i=ls*vs;i<le*vs;++i)
-	rhsg[i] = -B[i] ;
-
-      const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-      const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-      const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-      int lsz = le-ls ;
-      $LSGSblockedMatrix(Y)->matrixHelp
-	->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      //      const real *Dr = &($LSGSblockedMatrix(Y)->Dreal[ls*vs2]) ;
-      //      real err = $LSGSblockedMatrix(Y)->matrixHelp
-      //      	->lineVerify(X+ls*vs,&rhs[0],Dr,L,U,lsz,vs) ;
-      //      cout << "l=" << l << ",err = " << err << ",lsz =" << lsz<< endl ;
-    }
-
-    vector<real> send_data(matrix.send_entitiesl.size()*vs) ;
-    vector<real> recv_data(matrix.recv_entitiesl.size()*vs) ;
-    vector<MPI_Request> requests(matrix.recv_processors.size()) ;
-    vector<MPI_Status> status(matrix.recv_processors.size()) ;
-    int num_iter = *$LSGSPreconSteps ;
-    real w = *$LSGSRelaxation(Y) ;
-    for(int iter = 0;iter<num_iter;++iter) {
-      // Forward sweep
-      for(size_t l=0;l<matrix.lineData.size();++l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
-	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-	int os = matrix.lineData[l].OuterStart ;
-	int oe = matrix.lineData[l].OuterEnd ;
-	real *restrict rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->linerhs(rhsg,&X[0],B,CLR,F,ls,le,os,oe,vs) ;
-
-	const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-	int lsz = le-ls ;
-	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      }
-
-      // Backward sweep
-      for(int l=matrix.lineData.size()-1;l>=0;--l) { // loop over lines
-	const real_fj *B = &($LSGSblockedRHS(Y,B)->B[0]) ;
-	const real_fj *F = &($LSGSblockedMatrix(Y)->F[0]) ;
-	const pair<int,int> *CLR = &(matrix.outerCLR[0]) ;
-	int ls = matrix.lineData[l].eqnstart ;
-	int le = matrix.lineData[l].eqnend ;
-	int os = matrix.lineData[l].OuterStart ;
-	int oe = matrix.lineData[l].OuterEnd ;
-	real * rhsg = &rhs[0] - ls*vs ; 
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->linerhs(rhsg,X,B,CLR,F,ls,le,os,oe,vs) ;
-
-	const real *D = &($LSGSblockedMatrix(Y)->D[ls*vs2]) ;
-	const real_fj *L = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Lstart*vs2] ;
-	const real_fj *U = &$LSGSblockedMatrix(Y)->F[matrix.lineData[l].Ustart*vs2] ;
-	int lsz = le-ls ;
-	for(int i=ls*vs;i<le*vs;++i)
-	  xt[i] = X[i] ;
-	$LSGSblockedMatrix(Y)->matrixHelp
-	  ->lineSolve(X+ls*vs,&rhs[0],D,L,U,lsz,vs) ;
-      }
-      for(int i=0;i<matrix.nmyeqn*vs;++i) {
-	X[i] = w*X[i] + (1.-w)*xt[i] ;
-      }
-    }
     for(int i=0;i<matrix.nmyeqn;++i) {
       for(int j=0;j<vs;++j)
 	$LSGSPreconditionerBlocked(Y,B)[matrix.eql2g[i]][j] = X[i*vs+j] ;

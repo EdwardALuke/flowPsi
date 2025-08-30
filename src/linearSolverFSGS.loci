@@ -339,8 +339,8 @@ namespace FGSI {
 #endif
 #endif
 #else	
-  typedef double real ;
-  typedef float realF ;
+  //  typedef double real ;
+  //  typedef float realF ;
 #define FSGS_TYPE MPI_DOUBLE
 #endif
 

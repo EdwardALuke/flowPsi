@@ -1,0 +1,33 @@
+#include <Loci.h>
+#include "flowTypes.h"
+$include "FVM.lh"
+$include "flowPsi.lh"
+
+
+$type GMRESMaxIter param<int> ;
+$type GMRESRestart param<int> ;
+$type GMRESRelTol param<double> ;
+$type GMRESAbsTol param<double> ;
+$type GMRESInnerTol param<double> ;
+$type GMRESDiagnosticLevel param<int> ;
+
+$type GMRESMaxIter(X) param<int> ;
+$type GMRESRestart(X) param<int> ;
+$type GMRESRelTol(X) param<double> ;
+$type GMRESAbsTol(X) param<double> ;
+$type GMRESInnerTol(X) param<double> ;
+$type GMRESDiagnosticLevel(X) param<int> ;
+
+$type gmresFinished(A,B)    param<bool> ;
+$type gmresRestartFinished(A,B) param<bool> ;
+$type gmresInnerFinished(A,B) param<bool> ;
+
+$type gmresAbsResid(A,B) param<double> ;
+$type gmresRelResid(A,B) param<double> ;
+
+//GMRES Scalar version
+$type gmresS(Amat,Bvec) store<double> ;
+
+//GMRES Blocked version
+$type gmresB(Amat,Bvec) storeVec<double> ;
+
