@@ -1,3 +1,23 @@
+//#############################################################################
+//#
+//# Copyright 2015-2025, Mississippi State University
+//#
+//# This file is part of the flowPsi computational fluid dynamics solver.
+//#
+//# The flowPsi solver is free software: you can redistribute it and/or modify
+//# it under the terms of the GNU General Public License as published by
+//# the Free Software Foundation, either version 3 of the License, or
+//# (at your option) any later version.
+//#
+//# The flowPsi solver is distributed in the hope that it will be useful,
+//# but WITHOUT ANY WARRANTY; without even the implied warranty of
+//# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+//# GNU General Public License for more details.
+//#
+//# You should have received a copy of the GNU General Public License
+//# along with the flowPsi solver.  If not, see <http://www.gnu.org/licenses>
+//#
+//#############################################################################
 #include <Loci.h>
 #include <Tools/fpe.h>
 #include <Tools/parse.h>
@@ -7,9 +27,13 @@
 #include "readGrid.h"
 #include "flowPsiIO.h"
 
+#include <FVMOverset/overset.h>
+$include "FVMOverset/overset.lh"
+
 #include "FVMAdapt/globals.h"
 #include "FVMAdapt/defines.h"
 #include "FVMAdapt/dataxferDB.h"
+#include "FVMAdapt/gridInterface.h"
 
 #include <map>
 #include <vector>
@@ -34,6 +58,9 @@ namespace flowPsi {
   using std::cerr ;
   using std::vector;
   using std::map ;
+  using Loci::redistributeStore ;
+  using Loci::getC2PGlobal ;
+  
 
   //--------------------------------------------------------------------------
   // Setup vars file variables for mesh adaptation
@@ -56,8 +83,8 @@ namespace flowPsi {
   $rule default(maxAdaptSteps) {
     $maxAdaptSteps = 0 ;
   }
-
-  $rule default(adaptMode),comments("adaptMode can be isotropic, anisotropic, or 2D") {
+  /// adaptMode can be 'isotropic', 'anisotropic', or '2D'
+  $rule default(adaptMode) {
     $adaptMode = "anisotropic" ;
   }
 
@@ -70,53 +97,86 @@ namespace flowPsi {
       $adaptMode3D = ~EMPTY ;
     }
   }
-    
-  $rule default(adaptMinEdgeLength), 
-    comments("Sets minimum edge length allowed for refinement")  
-  { $adaptMinEdgeLength = 1e-6 ; }
+  /// Sets minimum edge length allowed for refinement
+  $rule default(adaptMinEdgeLength) { $adaptMinEdgeLength = 1e-6 ; }
 
-  $rule optional(adaptGeometryEdgeLength), 
-    comments("Sets target edge length for overset geometry refinement") { }
+  /// Sets target edge length for overset geometry refinement
+  $rule optional(adaptGeometryEdgeLength) { }
 
-  $rule default(adaptGeometryLayers),
-    comments("Sets thickness of derefinement levels for overset geometry refinement")
-  { $adaptGeometryLayers = 8 ;  }
+  /// Sets thickness of derefinement levels for overset geometry refinement
+  $rule default(adaptGeometryLayers)  { $adaptGeometryLayers = 8 ;  }
 
-  $rule default(adaptFaceFold),
-    comments("Sets face folding criterion to disable refining highly twisted faces")
-  { $adaptFaceFold = 1.5708 ; }
+  /// Sets face folding criterion to disable refining highly twisted faces
+  $rule default(adaptFaceFold) { $adaptFaceFold = 1.5708 ; }
 
-  $rule default(adaptBalanceType),
-    comments("Sets mesh balancing method used to balance refinement levels")
-  { $adaptBalanceType = 0 ; }
+  /// Sets mesh balancing method used to balance refinement levels
+  $rule default(adaptBalanceType)  { $adaptBalanceType = 0 ; }
 
-  $rule optional(adaptFrequency),
-    comments("Sets how frequently in solver iterations before mesh adaptation will be evaluated")
-  { $adaptFrequency = 100 ;  }
+  /// Sets how frequently in solver iterations before mesh adaptation will be
+  /// evaluated
+  $rule optional(adaptFrequency)  { $adaptFrequency = 100 ;  }
 
-  $rule default(adaptStart),
-    comments("Disables refinement until this timestep is reached")
-  { $adaptStart = 100 ; }
+  /// Disables refinement until this timestep is reached
+  $rule default(adaptStart)  { $adaptStart = 100 ; }
 
-  $rule default(adaptSensitivity),
-    comments("Sets error threshold for refinement")
-  { $adaptSensitivity = 1.0 ;  }
+  /// Sets error threshold for refinement
+  $rule default(adaptSensitivity)  { $adaptSensitivity = 1.0 ;  }
 
 
-  $rule default(coarsenSensitivity),
-    comments("Sets error threshold for derefinement")
-  { $coarsenSensitivity = 0.5 ;  }
+  /// Sets error threshold for derefinement
+  $rule default(coarsenSensitivity) { $coarsenSensitivity = 0.5 ;  }
 
-  $rule optional(adaptSensor),
-    comments("Selects error metrics to use for refinement")
-  { $adaptSensor.namelist = "" ;  }
-  
+  /// Selects error metrics to use for refinement
+  $rule optional(adaptSensor)  { $adaptSensor.namelist = "" ;  }
   
 
+  $type maxAdaptCellCount param<double> ;
+
+  /// Maximum number of cells in adaption phase in millions of cells.
+  /// This is a floating point number so fractional values are allowed.
+  /// A negative value disables this feature.
+  $rule default(maxAdaptCellCount) {
+    $maxAdaptCellCount=-1. ;
+  }
+
+  
+  $type numCells param<double> ;
+  /// Find the number of cells in the current mesh, used to estimate
+  /// how many cells can be refined.
+  $rule unit(numCells),constraint(UNIVERSE) { $numCells=0 ; }
+  $rule apply(numCells<-vol)[Loci::Summation],constraint(geom_cells), prelude {
+    *$numCells += double(seq.size())*1.0e-6 ;
+  } ;
+
+  /// Estimate of how many cells can be refined before the maximum cell count
+  /// is reached
+  $type maxRefineCellCount param<int> ;
+
+  /// Compute how many cells can be refined  by assuming that 1 cell becomes 8
+  /// for 3-D refinement and 1 cell becomes 4 for 2-D refinement.
+  $rule singleton(maxRefineCellCount<-numCells,maxAdaptCellCount,adaptMode) {
+    double factor = 1.e6/7.0 ;
+    if($adaptMode == "2D")
+      factor = 1.e6/3.0 ;
+    // default no limit
+    $maxRefineCellCount = std::numeric_limits<int>::max()  ;
+    // If we are already above the cell count limit, we cannot mark any cell
+    // for refinement, otherwise find out how many cells can be added to the
+    // current mesh to reach limit and estimate how many refined cells will
+    // achieve that size.
+    if($maxAdaptCellCount > 0)
+      $maxRefineCellCount = int(max($maxAdaptCellCount-$numCells,0.0)*factor) ;
+    $[Once] {
+      cout << "maxAdaptCellCount=" << $maxAdaptCellCount
+           << ", numCells=" << $numCells
+           << ", maxRefineCellCount=" << $maxRefineCellCount
+           << endl ;
+    }
+  }
+       
   $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
   $type componentID store<int> ;
-  $type nblank store<flowPsi::byte_t> ;
-  $type componentTransformMap blackbox<map<string,vector<componentXform> > > ;
+  $type nblank store<chem::byte_t> ;
 
   //--------------------------------------------------------------------------
   // Code for cell based mesh adaptation flags
@@ -127,8 +187,6 @@ namespace flowPsi {
   $type cellMeanCount param<int> ;
   $type cellMean(X) param<double> ;
   $type cellSigmaSq(X) param<double> ;
-  $type cellThreshold(X)  param<float> ;
-  $type cellThresholdLow(X) param<float> ;
   $type cellRefFlag store<int> ;
   $type refineCell(X) store<int> ;
 
@@ -214,38 +272,121 @@ namespace flowPsi {
     join($cellSigmaSq(Xf),term) ;
   }
 
-  $rule singleton(cellThreshold(Xf)<-cellSigmaSq(Xf),cellMean(Xf),adaptSensitivity) {
-    float sigma = sqrt($cellSigmaSq(Xf)) ;
-    $cellThreshold(Xf) = $cellMean(Xf)+$adaptSensitivity*sigma ;
-    //cout << "cellThreshold" << $cellThreshold(Xf) << endl ;
+  /// Scaled Error Estimate which is a non-dimensional value which is how many
+  /// standard deviations the error is above (or below) the mean.  Negative
+  /// numbers indicate that the error is below the mean.  When combining
+  /// multiple error contributions, the maximum estimate represents the error
+  /// in the cell.
+  $type totScaledError store<float> ;
+  $type ERRVAR store<float> ;
+
+  // The unit assumes very small error (identity of the maxiumum operator)
+  $rule unit(totScaledError),constraint(geom_cells) {
+    $totScaledError = -1e30 ;
+  }
+
+  /// Error variables are added through the parametric variable adaptSensor(X)
+  /// which is created in the fact database when the vars file is read and
+  /// the adaptSensor variable is specified.
+  $rule apply(totScaledError<-ERRVAR,cellMean(ERRVAR),
+              cellSigmaSq(ERRVAR))[Loci::Maximum],
+  parametric(adaptSensor(ERRVAR)) {
+    float sigma = sqrt($cellSigmaSq(ERRVAR)) ;
+    float err_scaled = ($ERRVAR-$cellMean(ERRVAR))/(sigma+1e-30) ;
+    join($totScaledError,err_scaled) ;
+  }
+
+  /// If refining all cells at the current adapt sensitivity would cause
+  /// the total mesh size to exceed the specifed limit, we will adjust the
+  /// adaption sensitivity parameter so that the target number of refined
+  /// cells is met.
+  $type limitedAdaptSensitivity blackbox<double> ;
+  $rule unit(limitedAdaptSensitivity), constraint(geom_cells) {
+    $limitedAdaptSensitivity = 0 ;
   }
   
-  $rule singleton(cellThresholdLow(Xf)<-cellSigmaSq(Xf),cellMean(Xf),coarsenSensitivity) {
-    float sigma = sqrt($cellSigmaSq(Xf)) ;
-    $cellThresholdLow(Xf) = $cellMean(Xf)-$coarsenSensitivity*sigma ;
-    //cout << "cellThresholdLow=" << $cellThresholdLow(Xf) << endl ;
-  }
-  
-  $rule pointwise(refineCell(Xf)<-cellThreshold(Xf),cellThresholdLow(Xf),Xf) {
-    $refineCell(Xf) = 0 ;
-    if($Xf > $cellThreshold(Xf))
-      $refineCell(Xf) = 1 ;
-    if($Xf < $cellThresholdLow(Xf))
-      $refineCell(Xf) = -1 ;
-  }
+  $rule apply(limitedAdaptSensitivity<-totScaledError,adaptSensitivity,
+                  cellAdaptMask,maxRefineCellCount)[Loci::NullOp],
+    option(disable_threading),prelude {
+    // by default the user specified sensitivity is used.
+    double sensitivity = *$adaptSensitivity ;
+    *$limitedAdaptSensitivity = sensitivity ;
+    // Count how many cells will be refined at the current sensitivity level.
+    int cnt = 0 ;
+    entitySet domain = entitySet(seq) ;
+    FORALL(domain,ii) {
+      if($cellAdaptMask[ii] == 0 &&
+         $totScaledError[ii] > sensitivity)
+        cnt++ ;
+    } ENDFORALL ;
+
+    // Gather all of the refined sizes
+    vector<int> refsizes(Loci::MPI_processes,0) ;
+    MPI_Allgather(&cnt,1,MPI_INT,&refsizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+    int totsize = 0 ;
+    for(int i=0;i<Loci::MPI_processes;++i)
+      totsize += refsizes[i] ;
+    int targetRefineCells = *$maxRefineCellCount ;
+    // If the number of refined cells exceed the target, then we need 
+    // to find the sensitivity that will match the target
+    if(totsize > targetRefineCells) {
+      // sort the errors to identify how much error will achieve limit
+      //
+      // errorList contains error estimates for all cells that are currently
+      // selected for refinement
+      vector<double> errorList(cnt) ;
+      cnt = 0 ;
+      FORALL(domain,ii) {
+        if($cellAdaptMask[ii] == 0 &&
+           $totScaledError[ii] > sensitivity)
+          errorList[cnt++] = $totScaledError[ii] ;
+      } ENDFORALL ;
+      // Use parallel sort to sort his error list.
+      Loci::parSampleSort(errorList,std::greater<double>(),MPI_COMM_WORLD) ;
+      // Find the entry at the location of this array that is given
+      // by the cell count target
+      cnt = errorList.size() ;
+      MPI_Allgather(&cnt,1,MPI_INT,&refsizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
+      int remainingCells = targetRefineCells ;
+      // Find out which processor has the pivot error value
+      int source_rank = 0 ;
+      for(int i=0;i<Loci::MPI_processes;++i) {
+        if(remainingCells < refsizes[i]) {
+          source_rank = i ;
+          break ;
+        }
+        remainingCells -= refsizes[i] ;
+      }
+      // If we are the processor that contains the target error, grab it
+      // out of the array
+      if(Loci::MPI_rank == source_rank)
+        sensitivity = errorList[min<int>(remainingCells,errorList.size()-1)] ;
+      // and broadcast to other processors
+      MPI_Bcast(&sensitivity,1,MPI_DOUBLE,source_rank,MPI_COMM_WORLD) ;
+      // Update sensitivity to one that meets target refinement level
+      *$limitedAdaptSensitivity = sensitivity ;
+    }
+      
+  } ;
   
   // Compute refinement flag
-
-
   $rule unit(cellRefFlag),constraint(geom_cells,adaptSensor) {
     $cellRefFlag = -1 ;
   }
 
-  $type ERRVAR store<float> ;
-  $rule apply(cellRefFlag<-refineCell(ERRVAR))[Loci::Maximum],constraint(ERRVAR),parametric(adaptSensor(ERRVAR)) {
-    join($cellRefFlag,$refineCell(ERRVAR)) ;
+  /// Compute cell refinement flag (1 means refine cell, -1 means derefine cell)
+  /// This is achieved by comparing the estimated error to the sensitivity
+  /// settings input by user (where the refinement sensitivity has been limited
+  /// to prevent excessive mesh sizes)
+  $rule apply(cellRefFlag<-totScaledError,limitedAdaptSensitivity,coarsenSensitivity)[Loci::Maximum] {
+    int flag = 0 ;
+    if($totScaledError > $limitedAdaptSensitivity)
+      flag = 1 ;
+    if($totScaledError < -$coarsenSensitivity)
+      flag = -1 ;
+    join($cellRefFlag,flag) ;
   }
-  
+
   $rule apply(cellRefFlag<-adaptGeometryLayers,adaptGeometryEdgeLength,
 	      componentGeometryList,componentID,iblank,cellcenter,
 	      cellMaxEdgeLength)[Loci::Maximum] {
@@ -281,8 +422,7 @@ namespace flowPsi {
     if($cellRefFlag > 0 && $cellAdaptMask != 0)
       $cellRefFlagMask = 0 ;
   }
-
-  $rule pointwise(OUTPUT{n,it}<-cellRefFlagMask{n,it}),conditional(do_adapt{n,it}),option(disable_threading), prelude {
+  $rule pointwise(OUTPUT{n,it}<-cellRefFlagMask{n,it},cellcenter{n,it}),conditional(do_adapt{n,it}),option(disable_threading), prelude {
     entitySet dom = entitySet(seq) ;
 
     store<char> flags ;
@@ -291,25 +431,32 @@ namespace flowPsi {
       int fl =$cellRefFlagMask{n,it}[ii] ;
       flags[ii] = ((0==fl)?0:((fl > 0)?1:2)) ;
     } ENDFORALL ;
+    
 
-    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
-    if(dist==0) {
-      Loci::DataXFER_DB.insertItem("refineTag",flags.Rep()) ;
-    } else {
-      int offset = 0 ;
-      Loci::storeRepP vardist = Loci::Local2FileOrder(flags.Rep(),dom,offset,
-						      dist,
-						      MPI_COMM_WORLD) ;
-      Loci::DataXFER_DB.insertItem("refineTag",vardist) ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("c2p") ;
+    if(ptr != 0) {
+      Loci::DataXFER_DB.deleteItem("c2p") ;
+      Loci::DataXFER_DB.deleteItem("c2pglobal") ;
     }
+    
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+    int offset = 0 ;
+    Loci::storeRepP vardist = Loci::Local2FileOrder(flags.Rep(),dom,offset,
+                                                    dist,
+                                                    MPI_COMM_WORLD) ;
+    Loci::DataXFER_DB.insertItem("refineTag",vardist) ;
     
   } ;
 
   //---diagnostics
   $type cellRefFlagf store<real> ;
   $rule pointwise(cellRefFlagf<-cellRefFlag) {$cellRefFlagf = $cellRefFlag;}
-    
+
+  $type totScaledErrorf store<real> ;
+  $rule pointwise(totScaledErrorf<-totScaledError) { $totScaledErrorf=$totScaledError ; }
+  
   OUTPUT_SCALAR("cell2nodeMax(cellRefFlagf)",refFlag) ;
+  OUTPUT_SCALAR("cell2nodeMax(totScaledErrorf)",combinedErrorFactor) ;
   OUTPUT_SCALAR("cell2nodeMax(cellMaxEdgeLength)",cellMaxEdgeLength) ;
 
   $type scalarCellError(XE,YE) store<float> ;
@@ -378,27 +525,32 @@ namespace flowPsi {
     join($refCount,cnt) ;
   }
 
-  $type stop_iter param<int> ;
-  $rule singleton(do_adapt{n,it}<- ncycle{n},stime{n,it},$it{n,it},refCount{n,it},newtonMaxIter,timeSteppingMode,adaptFrequency,adaptStart,refineLevel,maxAdaptSteps,stop_iter) {
+  $type derefCount param<int> ;
+
+  $rule unit(derefCount),constraint(UNIVERSE) {
+    $derefCount = 0 ;
+  }
+
+  $rule apply(derefCount<-cellRefFlagMask)[Loci::Summation] {
+    int cnt = ($cellRefFlagMask < 0)?1:0 ;
+    join($derefCount,cnt) ;
+  }
+
+  $rule singleton(do_adapt{n,it}<- ncycle{n},stime{n,it},$it{n,it},refCount{n,it},newtonMaxIter,timeSteppingMode,adaptFrequency,adaptStart,refineLevel,maxAdaptSteps) {
     $do_adapt{n,it} = false ;
 
-    int newton_iter = $timeSteppingMode==1?($newtonMaxIter):1 ;
     int ncyc = $ncycle{n}+1 ;
-    if(
-       $$it{n,it}+1 == newton_iter && 
+    int newton_iter = $timeSteppingMode==1?($newtonMaxIter):1 ;
+    if($$it{n,it}+1 == newton_iter && 
        $refineLevel < $maxAdaptSteps &&
        ncyc >= $adaptStart && 
-       (ncyc%$adaptFrequency) == 0 &&
-       $refCount{n,it} > 0) {
-      $[Once] {
-	cout << "refCount = " << $refCount{n,it} << endl ;
-      }
+       (ncyc%$adaptFrequency) == 0) {
       $do_adapt{n,it} = true ;
       param<int> nc ; 
       *nc = ncyc ;
       Loci::DataXFER_DB.insertItem("ncycle",nc.Rep()) ;
       param<real> st ;
-     *st = $stime{n,it} ;
+      *st = $stime{n,it} ;
       Loci::DataXFER_DB.insertItem("stime",st.Rep()) ;
 
       param<bool> adaptCycle ;
@@ -412,7 +564,7 @@ namespace flowPsi {
   // Interpolation I/O parts
 
   $rule pointwise(OUTPUT{n,it}<-componentTransformMap{n,it}), conditional(do_adapt{n,it}),option(disable_threading),prelude {
-    blackbox<map<string,vector<componentXform> > > tmp ;
+    blackbox<map<string,vector<Loci::componentXform> > > tmp ;
     tmp.Rep()->allocate(~EMPTY) ;
     *tmp = *($componentTransformMap{n,it}) ;
     Loci::DataXFER_DB.insertItem("componentXform",tmp.Rep()) ;
@@ -435,26 +587,436 @@ namespace flowPsi {
     } ENDFORALL ;
 
     fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
-    if(dist==0) {
-      Loci::DataXFER_DB.insertItem("pgrestart",pg.Rep()) ;
-      Loci::DataXFER_DB.insertItem("trestart",t.Rep()) ;
-      Loci::DataXFER_DB.insertItem("urestart",vel.Rep()) ;
-    } else {
-      int offset = 0 ;
-      Loci::storeRepP vardist = Loci::Local2FileOrder(pg.Rep(),dom,offset,
-						      dist,
-						      MPI_COMM_WORLD) ;
-      Loci::DataXFER_DB.insertItem("pgrestart",vardist) ;
+    Map l2f ;
+    getL2FMap(l2f,dom, dist) ;
+    vector<int> splits ;
+    FindSimpleDistribution(dom, l2f, splits,MPI_COMM_WORLD) ;
 
-      vardist = Loci::Local2FileOrder(t.Rep(),dom,offset,
-				      dist,
-				      MPI_COMM_WORLD) ;
-      Loci::DataXFER_DB.insertItem("trestart",vardist) ;
-      vardist = Loci::Local2FileOrder(vel.Rep(),dom,offset,
-				      dist,
-				      MPI_COMM_WORLD) ;
-      Loci::DataXFER_DB.insertItem("urestart",vardist) ;
+    Loci::storeRepP vardist = 0;
+    redistributeStore(vardist,pg.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+    Loci::DataXFER_DB.insertItem("pgrestart",vardist) ;
+    vardist = 0 ;
+    redistributeStore(vardist,t.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+    Loci::DataXFER_DB.insertItem("trestart",vardist) ;
+    vardist = 0 ;
+    redistributeStore(vardist,vel.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+    Loci::DataXFER_DB.insertItem("urestart",vardist) ;
+  } ;
+
+  $type nodalScalarMax(X) store<float> ;
+  $rule unit(nodalScalarMax(X)),constraint(pos) {
+    $nodalScalarMax(X) = std::numeric_limits<float>::lowest() ;
+  }
+
+  $type X store<real> ;
+  $type X_f store<real> ;
+  $rule apply(face2node->nodalScalarMax(X)<-(cl,cr)->X)[Loci::Maximum] {
+    const real Xf = max($cl->$X,$cr->$X) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalScalarMax(X),realToFloat(Xf)) ;
+  }
+  $rule apply(face2node->nodalScalarMax(X)<-X_f)[Loci::Maximum],constraint(ci->X) {
+    const real Xf = $X_f ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalScalarMax(X),realToFloat(Xf)) ;
+  }
+
+  $type nodalScalarMin(X) store<float> ;
+  $rule unit(nodalScalarMin(X)),constraint(pos) {
+    $nodalScalarMin(X) = std::numeric_limits<float>::max() ;
+  }
+  $type X store<real> ;
+  $type X_f store<real> ;
+  $rule apply(face2node->nodalScalarMin(X)<-(cl,cr)->X)[Loci::Minimum] {
+    const real Xf = min($cl->$X,$cr->$X) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalScalarMin(X),realToFloat(Xf)) ;
+  }
+  $rule apply(face2node->nodalScalarMin(X)<-X_f)[Loci::Minimum],constraint(ci->X) {
+    const real Xf = $X_f ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalScalarMin(X),realToFloat(Xf)) ;
+  }
+
+  template <class T> struct Maximumv3d {
+    void operator()(T &res ,const T &arg)
+    {
+      res.x = ::max(res.x,arg.x) ;
+      res.y = ::max(res.y,arg.y) ;
+      res.z = ::max(res.z,arg.z) ;
     }
+  } ;  
+  template <class T> struct Minimumv3d {
+    void operator()(T &res ,const T &arg)
+    {
+      res.x = ::min(res.x,arg.x) ;
+      res.y = ::min(res.y,arg.y) ;
+      res.z = ::min(res.z,arg.z) ;
+    }
+  } ;  
+
+  $type nodalv3dMax(X) store<vector3d<float> > ;
+  $rule unit(nodalv3dMax(X)),constraint(pos) {
+    float m = std::numeric_limits<float>::lowest() ;
+    $nodalv3dMax(X) = vector3d<float>(m,m,m) ;
+  }
+  $type V store<vect3d> ;
+  $type V_f store<vect3d> ;
+  $rule apply(face2node->nodalv3dMax(V)<-(cl,cr)->V)[Maximumv3d] {
+    const vector3d<float> Vf(realToFloat(max($cl->$V.x,$cr->$V.x)),
+			     realToFloat(max($cl->$V.y,$cr->$V.y)),
+			     realToFloat(max($cl->$V.z,$cr->$V.z))) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalv3dMax(V),Vf) ;
+  }
+  $rule apply(face2node->nodalv3dMax(V)<-V_f)[Maximumv3d],constraint(ci->V) {
+    const vector3d<float> Vf = realToFloat($V_f) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalv3dMax(V),Vf) ;
+  }
+
+  $type nodalv3dMin(V) store<vector3d<float> > ;
+  $rule unit(nodalv3dMin(V)),constraint(pos) {
+    float m = std::numeric_limits<float>::max() ;
+    $nodalv3dMin(V) = vector3d<float>(m,m,m) ;
+  }
+  $type V store<vect3d> ;
+  $type V_f store<vect3d> ;
+  $rule apply(face2node->nodalv3dMin(V)<-(cl,cr)->V)[Minimumv3d] {
+    const vector3d<float> Vf(realToFloat(min($cl->$V.x,$cr->$V.x)),
+			     realToFloat(min($cl->$V.y,$cr->$V.y)),
+			     realToFloat(min($cl->$V.z,$cr->$V.z))) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalv3dMin(V),Vf) ;
+  }
+  $rule apply(face2node->nodalv3dMin(V)<-V_f)[Minimumv3d],constraint(ci->V) {
+    const vector3d<float> Vf = realToFloat($V_f) ;
+    const int fsz = $face2node.size() ;
+    for(int i=0;i<fsz;++i)
+      join($face2node[i]->$nodalv3dMin(V),Vf) ;
+  }
+
+  $type cellMaxVal(X) store<float> ;
+  $type cellMinVal(X) store<float> ;
+  $rule pointwise(cellMaxVal(X)<-(upper,lower)->face2node->nodalScalarMax(X)) {
+    float Xv = std::numeric_limits<float>::lowest() ;    
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      const int fsz = $upper[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j)
+	Xv = max(Xv,$upper[i]->$face2node[j]->$nodalScalarMax(X)) ;
+    }
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      const int fsz = $lower[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j)
+	Xv = max(Xv,$lower[i]->$face2node[j]->$nodalScalarMax(X)) ;
+    }
+    $cellMaxVal(X) = Xv ;
+  }
+
+  $rule pointwise(cellMinVal(X)<-(upper,lower)->face2node->nodalScalarMin(X)) {
+    float Xv = std::numeric_limits<float>::max() ;    
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      const int fsz = $upper[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j)
+	Xv = min(Xv,$upper[i]->$face2node[j]->$nodalScalarMin(X)) ;
+    }
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      const int fsz = $lower[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j)
+	Xv = min(Xv,$lower[i]->$face2node[j]->$nodalScalarMin(X)) ;
+    }
+    $cellMinVal(X) = Xv ;
+  }
+  $type cellMaxVal3d(X) store<vector3d<float> >;
+  $type cellMinVal3d(X) store<vector3d<float> > ;
+  $rule pointwise(cellMaxVal3d(X)<-(upper,lower)->face2node->nodalv3dMax(X)) {
+    float m = std::numeric_limits<float>::lowest() ;    
+    vector3d<float> Xv(m,m,m) ;
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      const int fsz = $upper[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	Xv.x = max(Xv.x,$upper[i]->$face2node[j]->$nodalv3dMax(X).x) ;
+	Xv.y = max(Xv.y,$upper[i]->$face2node[j]->$nodalv3dMax(X).y) ;
+	Xv.z = max(Xv.z,$upper[i]->$face2node[j]->$nodalv3dMax(X).z) ;
+      }
+    }
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      const int fsz = $lower[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	Xv.x = max(Xv.x,$lower[i]->$face2node[j]->$nodalv3dMax(X).x) ;
+	Xv.y = max(Xv.y,$lower[i]->$face2node[j]->$nodalv3dMax(X).y) ;
+	Xv.z = max(Xv.z,$lower[i]->$face2node[j]->$nodalv3dMax(X).z) ;
+      }
+    }
+    $cellMaxVal3d(X) = Xv ;
+  }
+
+  $rule pointwise(cellMinVal3d(X)<-(upper,lower)->face2node->nodalv3dMin(X)) {
+    float m = std::numeric_limits<float>::max() ;    
+    vector3d<float> Xv(m,m,m) ;
+
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      const int fsz = $upper[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	Xv.x = min(Xv.x,$upper[i]->$face2node[j]->$nodalv3dMin(X).x) ;
+	Xv.y = min(Xv.y,$upper[i]->$face2node[j]->$nodalv3dMin(X).y) ;
+	Xv.z = min(Xv.z,$upper[i]->$face2node[j]->$nodalv3dMin(X).z) ;
+      }
+    }
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      const int fsz = $lower[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	Xv.x = min(Xv.x,$lower[i]->$face2node[j]->$nodalv3dMin(X).x) ;
+	Xv.y = min(Xv.y,$lower[i]->$face2node[j]->$nodalv3dMin(X).y) ;
+	Xv.z = min(Xv.z,$lower[i]->$face2node[j]->$nodalv3dMin(X).z) ;
+      }
+    }
+    $cellMinVal3d(X) = Xv ;
+  }
+
+  $type cellMaxRadius store<float> ;
+  $rule pointwise(cellMaxRadius<-cellcenter,(upper,lower)->face2node->pos) {
+    double rmax2 = 0 ;
+    const vect3d c = $cellcenter ;
+    const int usz = $upper.size() ;
+    for(int i=0;i<usz;++i) {
+      const int fsz = $upper[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	const vect3d dv = $upper[i]->$face2node[j]->$pos-c ;
+	rmax2 = max(rmax2,realToDouble(dot(dv,dv))) ;
+      }
+    }
+    const int lsz = $lower.size() ;
+    for(int i=0;i<lsz;++i) {
+      const int fsz = $lower[i]->$face2node.size() ;
+      for(int j=0;j<fsz;++j) {
+	const vect3d dv = $lower[i]->$face2node[j]->$pos-c ;
+	rmax2 = max(rmax2,realToDouble(dot(dv,dv))) ;
+      }
+    }
+    $cellMaxRadius = sqrt(rmax2) ;
+  }
+
+  $rule pointwise(OUTPUT{n,it}<-
+		  lower->cl->cellcenter{n,it},
+		  upper->cr->cellcenter{n,it},
+		  boundary_map->facecenter{n,it},
+		  lower->cl->fileNumber(geom_cells),
+		  upper->cr->fileNumber(geom_cells),
+		  cellcenter{n,it},vol{n,it}),
+    constraint(geom_cells{n,it}),conditional(do_adapt{n,it}),
+    option(disable_threading),
+    prelude {
+    entitySet dom = entitySet(seq) ;
+
+    store<int> count_dv ; // number of deltas including boundary faces
+    store<int> count_iv ; // number of deltas only interior cells ;
+    count_dv.allocate(dom) ;
+    count_iv.allocate(dom) ;
+    int lmxiv= 0, lmxdv=0 ;
+    FORALL(dom,ii) {
+      count_iv[ii] = $upper[ii].size()+$lower[ii].size() ;
+      count_dv[ii] = count_iv[ii] + $boundary_map[ii].size() ;
+      lmxiv = max(lmxiv,count_iv[ii]) ;
+      lmxdv = max(lmxdv,count_dv[ii]) ;
+    } ENDFORALL ;
+
+    int mn = 0 ;
+    int mnl = std::numeric_limits<int>::max() ;
+    FORALL(dom,ii) {
+      mnl = min(mnl,$fileNumber(geom_cells)[ii]) ;
+    } ENDFORALL ;
+    mn=mnl ;
+    MPI_Allreduce(&mnl,&mn,1,MPI_INT,MPI_MIN,MPI_COMM_WORLD) ;
+
+    multiStore<int> gradCells  ;
+    multiStore<vector3d<double> > deltas ;
+    gradCells.allocate(count_iv) ;
+    deltas.allocate(count_dv) ;
+    FORALL(dom,ii) {
+      vect3d center = $cellcenter{n,it}[ii] ;
+      const int usz = $upper[ii].size() ;
+      for(int i=0;i<usz;++i) {
+	const int cell = $cr[$upper[ii][i]] ;
+	gradCells[ii][i] = $fileNumber(geom_cells)[cell]-mn ;
+	deltas[ii][i] = ($cellcenter{n,it}[cell]-center) ;
+      }
+      const int lsz = $lower[ii].size() ;
+      for(int i=0;i<lsz;++i) {
+	const int cell = $cl[$lower[ii][i]] ;
+	gradCells[ii][usz+i] = $fileNumber(geom_cells)[cell]-mn ;
+	deltas[ii][usz+i] = ($cellcenter{n,it}[cell]-center) ;
+      }
+      const int bsz = $boundary_map[ii].size() ;
+      for(int i=0;i<bsz;++i) {
+	const int face = $boundary_map[ii][i] ;
+	deltas[ii][usz+lsz+i] = ($facecenter{n,it}[face]-center) ;
+      }
+    } ENDFORALL ;
+
+    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
+
+    Map l2f ;
+    getL2FMap(l2f,dom, dist) ;
+    vector<int> splits ;
+    FindSimpleDistribution(dom, l2f, splits,MPI_COMM_WORLD) ;
+
+    {
+      Loci::storeRepP vardist = 0;
+      redistributeStore(vardist,gradCells.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("gradCells",vardist) ;
+    }
+      
+    {
+      Loci::storeRepP vardist = 0;
+      redistributeStore(vardist,deltas.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+      Loci::DataXFER_DB.insertItem("deltas",vardist) ;
+    }
+
+    store<double> volw ;
+    volw.allocate(dom) ;
+
+    FORALL(dom,ii) {
+      volw[ii] = ($vol{n,it}[ii]) ;
+    } ENDFORALL ;
+
+    Loci::storeRepP vardist = 0  ;
+    redistributeStore(vardist,volw.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+    Loci::DataXFER_DB.insertItem("vol",vardist) ;
+  } ;
+
+
+  $type refineRestart param<int> ;
+  $type componentName_X blackbox<string> ;
+  $type adaptRestartXform_X blackbox<vector<componentXform> > ;
+  $rule blackbox(adaptRestartXform_X<-componentName_X,refineRestart),
+    parametric(volumeTag(X)),prelude {
+    vector<componentXform> xform ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("componentXform") ;
+    if(ptr != 0) {
+      blackbox<map<string,vector<componentXform> > > tmp ;
+      tmp = ptr ;
+      map<string,vector<componentXform> >::const_iterator mi ;
+      mi = tmp->find(*$componentName_X) ;
+      if(mi != tmp->end()) {
+	xform = mi->second ;
+      } else {
+	cerr << "Unable to find component " << *$componentName_X << " when looking up adapt restart component transforms!" << endl ;
+      }
+    }
+    *$adaptRestartXform_X = xform ;
+  } ;
+
+
+  $type pos_ic store<vect3d> ;
+  $rule pointwise(priority::priority::pos_ic<-pos,refineRestart,adaptRestartXform_X),
+    constraint(componentNodes_X),
+    parametric(volumeTag(X)) {
+    const vector<componentXform> &xform = $adaptRestartXform_X ;
+      vect3d xpos = $pos ;
+    for(size_t i=0;i<xform.size();++i)
+      xpos = xform[i].applyXform(xpos) ;
+    $pos_ic = xpos ;
+  }
+
+  $type cellcenterxform store<vect3d> ;
+  $rule pointwise(cellcenterxform<-cellcenter,adaptRestartXform_X),
+    constraint(volumeTag(X)), parametric(volumeTag(X)) {
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("componentXform") ;
+    const vector<componentXform> &xform = $adaptRestartXform_X ;
+    vect3d xpos = $cellcenter ;
+    for(size_t i=0;i<xform.size();++i)
+      xpos = xform[i].applyXform(xpos) ;
+    $cellcenterxform = xpos ;
+  }
+
+
+
+  using Loci::dataPartitionP ;
+  using Loci::createPartition ;
+  using Loci::gatherCommSchedule ;
+  
+  // Component Motion
+  $type componentMotionState_X_ic blackbox<vector<real> > ;
+  $type componentMotionState_X_next blackbox<vector<real> > ;
+  $type motionBehavior_X blackbox<Loci::CPTR<Loci::motionType> > ;
+  
+  $rule pointwise(OUTPUT{n,it}<-componentMotionState_X_next{n,it},
+                  componentName_X{n,it}),
+  constraint(componentMotion,motionBehavior_X),
+  parametric(volumeTag(X)), conditional(do_adapt{n,it}),
+  prelude {
+    string name = string("componentMotionState_") +
+      *$componentName_X{n,it} ;
+    param<vector<real> > motionsave ;
+    *motionsave = *$componentMotionState_X_next{n,it} ;
+    Loci::DataXFER_DB.insertItem(name,motionsave.Rep()) ;
+  } ;
+
+  $rule apply(componentMotionState_X_ic<-refineRestart,modelName,componentName_X)[Loci::NullOp], parametric(volumeTag(X)), prelude {
+    string name = string("componentMotionState_") +
+      *$componentName_X ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem(name) ;
+    if(ptr != 0) {
+      param<vector<real> > tmp;
+      tmp.setRep(ptr) ;
+      *$componentMotionState_X_ic = *tmp ;
+    } else {
+      cerr << "cannot find '" <<name << "' in XFER DB!" << endl ;
+      Loci::Abort() ;
+    }      
+  } ;
+
+
+  $type AMRInterpolationMapping blackbox<Loci::AMRinterpolation> ;
+
+  $rule blackbox(AMRInterpolationMapping<-refineRestart,cellcenterxform,
+                 vol,Pambient), prelude {
+    multiStore<int> gradCells  ;
+    Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("gradCells") ;
+    if(ptr == 0) {
+      cerr << "gradCells not in DB!" << endl ;
+    }
+    gradCells = ptr ;
+    multiStore<vector3d<double> > deltas ;
+    ptr = Loci::DataXFER_DB.getItem("deltas") ;
+    if(ptr == 0) {
+      cerr << "deltas not in DB!" << endl ;
+    }
+    deltas = ptr ;
+
+    store<double> volw ;
+    volw = Loci::DataXFER_DB.getItem("vol") ;
+    // Convert c2pg to the correct numbering
+    store<pair<int,int> > c2pg ;
+    c2pg = getC2PGlobal(*Loci::exec_current_fact_db) ;
+
+    $AMRInterpolationMapping->
+      setupRefinementMapping(c2pg,volw,gradCells,deltas,$cellcenterxform,$vol,
+                             *Loci::exec_current_fact_db) ;
+
+    volw.allocate(EMPTY) ;
+    gradCells.allocate(EMPTY) ;
+    deltas.allocate(EMPTY) ;
+    Loci::DataXFER_DB.deleteItem("vol") ;
+    Loci::DataXFER_DB.deleteItem("gradCells") ;
+    Loci::DataXFER_DB.deleteItem("deltas") ;
+    Loci::DataXFER_DB.deleteItem("centers") ;
   } ;
 
   template <typename T> struct unit_traits {
@@ -466,341 +1028,9 @@ namespace flowPsi {
   template <> struct unit_traits<vector3d<double> > {
     static vector3d<double> unit() { return vector3d<double>(0.0,0.0,0.0) ; }
   } ;
-  //--------------------------------------------------------------------------
-  // restart after adapt
-  template<class T> void interpolateStore(store<T> &qvecout,
-					  store<T> &qvecin,
-					  store<pair<int,int> > &c2pset,
-					  entitySet dom ) {
-    
-    store<float> weights ;
-    weights.allocate(dom) ;
-    FORALL(dom,ii) {
-      qvecout[ii] = unit_traits<T>::unit() ;
-      weights[ii] = 0 ;
-    } ENDFORALL ;
-
-    fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
-    if(dist==0) {
-      entitySet parentSet ;
-      entitySet targetSet ;
-      entitySet domc2p = c2pset.domain() ;
-
-      FORALL(domc2p,ii) {
-	parentSet += c2pset[ii].second ;
-	targetSet += c2pset[ii].first ;
-      } ENDFORALL ;
-
-      int parent_offset = qvecin.domain().Min() - parentSet.Min() ;
-      int local_offset = dom.Min()-targetSet.Min() ;
-      int sz = domc2p.size() ;
-      vector<pair<int,int> > c2p(sz) ;
-      int cnt = 0 ;
-      FORALL(domc2p,ii) {
-	c2p[cnt].first = c2pset[ii].second+parent_offset ;
-	c2p[cnt].second = c2pset[ii].first+local_offset ;
-	cnt++ ;;
-      } ENDFORALL ;
-
-      sort(c2p.begin(),c2p.end()) ;
-
-      for(int ii=0;ii<sz;) {
-	int pid = c2p[ii].first ;
-	int j = 1 ;
-	while(((ii+j) < sz) && (pid == c2p[ii+j].first))
-	  j++ ;
-	if(j == 1) {
-	  int tid = c2p[ii].second ;
-	  double w = 1.0 ;
-	  qvecout[tid] += qvecin[pid] ;
-	  weights[tid] += w ;
-	} else {
-	  for(int k=ii;k<ii+j;++k) {
-	    int tid = c2p[k].second ;
-	    qvecout[tid] += qvecin[pid] ;
-	    weights[tid] += 1. ;
-	  }
-	}
-	
-	ii += j ;
-      }
-      FORALL(dom,ii) {
-	if(weights[ii] > 0) {
-	  double w = 1./double(weights[ii]) ;
-	  qvecout[ii] *= w ;
-	}
-      } ENDFORALL ;
-    } else { // Parallel interpolation
-      int r = Loci::MPI_rank ;
-      int p = Loci::MPI_processes ;
-     
-      entitySet domc2p = c2pset.domain() ;
-
-      int first = domc2p.Min() ;
-      int minParent = c2pset[first].second ;
-      int minTarget = c2pset[first].first ;
-      FORALL(domc2p,ii) {
-	minParent = min(minParent,c2pset[ii].second) ;
-	minTarget = min(minTarget,c2pset[ii].first) ;
-      } ENDFORALL ;
-
-      int parentOffset = minParent ;
-      int targetOffset = minTarget ;
-      MPI_Allreduce(&minParent,&parentOffset,1,MPI_INT,MPI_MIN,
-		    MPI_COMM_WORLD) ;
-      MPI_Allreduce(&minTarget,&targetOffset,1,MPI_INT,MPI_MIN,
-		    MPI_COMM_WORLD) ;
-      int sz = domc2p.size() ;
-      vector<pair<int,int> > p2c(sz) ;
-      int cnt = 0 ;
-      FORALL(domc2p,ii) {
-	p2c[cnt].first = c2pset[ii].second-parentOffset ;
-	p2c[cnt].second = c2pset[ii].first-targetOffset ;
-	cnt++ ;;
-      } ENDFORALL ;
-
-      sort(p2c.begin(),p2c.end()) ;
-      
-      // Now distribute c2p to processors in parent file ordering
-      int prevdomsz = qvecin.domain().size() ;
-      vector<int> parentsizes(p) ;
-      MPI_Allgather(&prevdomsz,1,MPI_INT,&parentsizes[0],1,MPI_INT,
-		    MPI_COMM_WORLD) ;
-      vector<int> parentoffsets(p+1,0) ;
-      for(int i=0;i<p;++i)
-	parentoffsets[i+1] = parentoffsets[i]+parentsizes[i] ;
-      
-      vector<pair<int,int> > splits(p-1) ;
-      for(int i=0;i<p-1;++i)
-	splits[i] = pair<int,int>(parentoffsets[i+1],-1) ;
-
-      Loci::parSplitSort(p2c,splits,MPI_COMM_WORLD) ;
-
-      int p2csz = p2c.size() ;
-      // convert parent to local numbering and collect 
-      // id's of target cells in new mesh
-      vector<int> tlist(p2csz) ;
-      for(int i =0;i<p2csz;++i) {
-	p2c[i].first -= parentoffsets[r] ;
-	tlist[i] = p2c[i].second ;
-      }
-      // identify list of target points to which we are interpolating
-      sort(tlist.begin(),tlist.end()) ;
-      vector<int>::iterator l = std::unique(tlist.begin(),tlist.end()) ;
-      tlist.resize(std::distance(tlist.begin(),l)) ;
-      // Grab data needed for interpolation from target mesh 
-      // First reorder into file numbering the cellcenter and vol
-      // data which will be used to compute the interpolation
-
-      // first compute distribution of file numbered data
-      dMap g2f ;
-      g2f = dist->g2f.Rep() ;
-      // Get mapping from local to global numbering
-      Map l2g ;
-      l2g = dist->l2g.Rep() ;
-      int imx = std::numeric_limits<int>::min() ;
-      int imn = std::numeric_limits<int>::max() ;
-
-      // Find bounds in file numbering from this processor
-      FORALL(dom,i) {
-	int num = g2f[l2g[i]] ;
-	imx = max(num,imx) ;
-	imn = min(num,imn) ;
-      } ENDFORALL ;
-
-      // Find overall bounds
-      imx = Loci::GLOBAL_MAX(imx) ;
-      imn = Loci::GLOBAL_MIN(imn) ;
-      // Get partitioning of file numbers across processors
-      vector<entitySet> out_ptn = Loci::simplePartition(imn,imx,MPI_COMM_WORLD) ;
-      entitySet fdom = out_ptn[Loci::MPI_rank] ;
-      int offset = fdom.Min() ;
-      fdom <<= offset ;
-      // Compute how the file ordering is distributed to processors
-      vector<int> targetsizes(p) ;
-      int tlsize = fdom.size() ;
-      MPI_Allgather(&tlsize,1,MPI_INT,&targetsizes[0],1,MPI_INT,
-		    MPI_COMM_WORLD) ;
-      vector<int> toffsets(p+1,0) ;
-      for(int i=0;i<p;++i)
-	toffsets[i+1] = toffsets[i]+targetsizes[i] ;
-      // Now compute which processors to communicate with
-      vector<int> tlistoffsets(p+1,0) ;
-      int tsz = tlist.size() ;
-      tlistoffsets[p] = tsz ;
-      cnt = 1 ;
-      for(int i=0;i<tsz;++i) {
-	while(cnt != p && tlist[i] >= toffsets[cnt]) {
-	  tlistoffsets[cnt] = i ;
-	  cnt++ ;
-	}
-	if(cnt == p)
-	  break ;
-      }
-      if(cnt != p) { // handle end case
-	for(int i=cnt;i<p;++i)
-	  tlistoffsets[i] = tsz ;
-      }
-      // Now send the requests
-      vector<int> tlistsizes(p) ;
-      for(int i=0;i<p;++i)
-	tlistsizes[i] = tlistoffsets[i+1]-tlistoffsets[i] ;
-      vector<int> rlistsizes(p) ;
-      MPI_Alltoall(&tlistsizes[0],1,MPI_INT,
-		   &rlistsizes[0],1,MPI_INT,MPI_COMM_WORLD) ;
-      vector<int> rlistoffsets(p+1,0) ;
-      for(int i=0;i<p;++i)
-	rlistoffsets[i+1] = rlistoffsets[i]+rlistsizes[i] ;
-      
-      vector<int> recvlists(rlistoffsets[p]) ;
-      vector<MPI_Request> req_queue ;
-      for(int i=0;i<p;++i) {
-	if(rlistsizes[i] > 0) {
-	  MPI_Request tmp ;
-	  MPI_Irecv(&recvlists[rlistoffsets[i]],rlistsizes[i],MPI_INT,i,99,
-		    MPI_COMM_WORLD,&tmp) ;
-	  req_queue.push_back(tmp) ;
-	}
-      }
-      for(int i=0;i<p;++i) {
-	if(tlistsizes[i] > 0) {
-	  MPI_Send(&tlist[tlistoffsets[i]],tlistsizes[i],MPI_INT,i,99,
-		   MPI_COMM_WORLD) ;
-	}
-      }
-      if(req_queue.size() > 0) {
-	vector<MPI_Status> stat_queue(req_queue.size()) ;
-	MPI_Waitall(req_queue.size(),&req_queue[0],&stat_queue[0]) ;
-	req_queue.clear() ;
-      }
-
-      int rsz = recvlists.size() ;
-      // correct indexes to local numbering
-      
-      for(int i=0;i<rsz;++i)
-	recvlists[i] -= toffsets[r] ;
-      
-      // Now translate the p2c map target to the local numbering
-      std::map<int,int> f2c ;
-      for(int i=0;i<tsz;++i)
-	f2c[tlist[i]] = i ;
-      
-      for(int i=0;i<p2csz;++i) {
-	std::map<int,int>::const_iterator mi = f2c.find(p2c[i].second) ;
-	if(mi == f2c.end()) {
-	  cerr << "unable to remap p2c to local number" << endl ;
-	  Loci::Abort() ;
-	}
-	
-	p2c[i].second = mi->second ;
-      }
-      
-      entitySet locdom = interval(0,tsz-1) ;
-      store<T> qic_loc ;
-      qic_loc.allocate(locdom) ;
-      store<double> weights ;
-      weights.allocate(locdom) ;
-      // Now compute interpolated value 
-      entitySet qpdom = qvecin.domain() ;
-      for(int i=0;i<tsz;++i) {
-	weights[i] = 0 ;
-	qic_loc[i] = unit_traits<T>::unit() ;
-      }
-	
-      for(int ii=0;ii<p2csz;) {
-	int pid = p2c[ii].first ;
-
-	int j = 1 ;
-	while(((ii+j) < p2csz) && (pid == p2c[ii+j].first))
-	  j++ ;
-	if(j == 1) {
-	  int tid = p2c[ii].second ;
-	  double w = 1.0 ;
-	  
-	  qic_loc[tid] += qvecin[pid] ;
-	  weights[tid] += w ;
-	} else {
-	  for(int k=ii;k<ii+j;++k) {
-	    int tid = p2c[k].second ;
-	    qic_loc[tid] += qvecin[pid] ;
-	    weights[tid] += 1. ;
-	  }
-	}
-	
-	ii += j ;
-      }
-
-      // Now return interpolated versions to new file numbering
-      int nvs = 2 ; 
-      vector<pair<T,double> > senddata(tsz*nvs) ;
-      vector<pair<T,double> > recvdata(rsz*nvs) ;
-      // Fill send data buffer
-      for(int i=0;i<tsz;++i) {
-	senddata[i*nvs].first = qic_loc[i] ;
-	senddata[i*nvs+1].second = weights[i] ;
-      }
-      for(int i=0;i<p;++i) {
-	if(rlistsizes[i] > 0) {
-	  MPI_Request tmp ;
-	  MPI_Irecv(&recvdata[rlistoffsets[i]*nvs],
-		    rlistsizes[i]*nvs*sizeof(pair<T,double>),
-		    MPI_BYTE,i,99,MPI_COMM_WORLD,&tmp) ;
-	  req_queue.push_back(tmp) ;
-	}
-      }
-      for(int i=0;i<p;++i) {
-	if(tlistsizes[i] > 0) {
-	  MPI_Send(&senddata[tlistoffsets[i]*nvs],
-		   tlistsizes[i]*nvs*sizeof(pair<T,double>),
-		   MPI_BYTE,i,99,MPI_COMM_WORLD) ;
-	}
-      }
-      if(req_queue.size() > 0) {
-	vector<MPI_Status> stat_queue(req_queue.size()) ;
-	MPI_Waitall(req_queue.size(),&req_queue[0],&stat_queue[0]) ;
-	req_queue.clear() ;
-      }
-
-      store<T> q_ic_fn ;
-      store<double> wt_fn ;
-
-      q_ic_fn.allocate(fdom) ;
-      wt_fn.allocate(fdom) ;
-      // sum contribtions from processors
-      FORALL(fdom,ii) {
-	q_ic_fn[ii] = unit_traits<T>::unit();
-	wt_fn[ii] = 0 ;
-      } ENDFORALL ;
-      for(int i=0;i<rsz;++i) {
-	int id = recvlists[i] ;
-
-	q_ic_fn[id] += recvdata[i*nvs].first ;
-	wt_fn[id] += recvdata[i*nvs+1].second ;
-      }
-
-      // renormalize
-      FORALL(fdom,ii) {
-	double rw = 1./(wt_fn[ii]) ;
-	q_ic_fn[ii] *= rw;
-      } ENDFORALL ;
-      // Now distribute q_ic  to local numbering
-      store<T> q_ic_ln ;
-      q_ic_ln.allocate(dom) ;
-      Loci::storeRepP orep = q_ic_ln.Rep() ;
-
-      Loci::File2LocalOrder(orep,dom,q_ic_fn.Rep(),offset,dist,
-			    MPI_COMM_WORLD) ;
-
-      FORALL(dom,ii) {
-	qvecout[ii] = q_ic_ln[ii] ;
-      } ENDFORALL ;
-      
-    }
-  }
 
   $type refineRestart param<int> ;
-  $rule pointwise(priority::gagePressure_ic<-refineRestart),option(disable_threading),prelude {
-    entitySet dom = entitySet(seq) ;
+  $rule pointwise(priority::gagePressure_ic<-refineRestart,AMRInterpolationMapping),option(disable_threading),prelude {
     store<double> pgprev ;
     Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("pgrestart") ;
     if(ptr == 0)
@@ -808,24 +1038,12 @@ namespace flowPsi {
 
     pgprev = ptr ;
 
-    store<pair<int,int> > c2pset ;
-    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
-
-#ifdef USE_AUTODIFF
-    store<double> ic ;
-    ic.allocate(dom) ;
-    interpolateStore(ic, pgprev,c2pset,dom) ;
-    FORALL(dom,ii) {
-      $gagePressure_ic[ii] = ic[ii] ;
-    } ENDFORALL 
-#else
-    interpolateStore($gagePressure_ic, pgprev,c2pset,dom) ;
-#endif
+    $AMRInterpolationMapping->interpolateData(pgprev,$gagePressure_ic) ;
     Loci::DataXFER_DB.deleteItem("pgrestart") ;
   } ;
     
-  $rule pointwise(priority::temperature_ic<-refineRestart),option(disable_threading),prelude {
-    entitySet dom = entitySet(seq) ;
+  $rule pointwise(priority::temperature_ic<-refineRestart,
+                  AMRInterpolationMapping),option(disable_threading),prelude {
     store<double> tprev ;
     Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("trestart") ;
     if(ptr == 0)
@@ -833,24 +1051,13 @@ namespace flowPsi {
 
     tprev = ptr ;
 
-    store<pair<int,int> > c2pset ;
-    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
-    
-#ifdef USE_AUTODIFF
-    store<double> ic ;
-    ic.allocate(dom) ;
-    interpolateStore(ic, tprev,c2pset,dom) ;
-    FORALL(dom,ii) {
-      $temperature_ic[ii] = ic[ii] ;
-    } ENDFORALL 
-#else
-    interpolateStore($temperature_ic, tprev,c2pset,dom) ;
-#endif
+    $AMRInterpolationMapping->interpolateData(tprev,$temperature_ic) ;
+
     Loci::DataXFER_DB.deleteItem("trestart") ;
   } ;
 
-  $rule pointwise(priority::u_ic<-refineRestart),option(disable_threading),prelude {
-    entitySet dom = entitySet(seq) ;
+  $rule pointwise(priority::u_ic<-refineRestart,AMRInterpolationMapping),
+  option(disable_threading),prelude {
     store<vector3d<double> > uprev ;
     Loci::storeRepP ptr = Loci::DataXFER_DB.getItem("urestart") ;
     if(ptr == 0)
@@ -858,19 +1065,8 @@ namespace flowPsi {
 
     uprev = ptr ;
 
-    store<pair<int,int> > c2pset ;
-    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
-    
-#ifdef USE_AUTODIFF
-    store<vector3d<double> > ic ;
-    ic.allocate(dom) ;
-    interpolateStore(ic, uprev,c2pset,dom) ;
-    FORALL(dom,ii) {
-      $u_ic[ii] = ic[ii] ;
-    } ENDFORALL 
-#else
-    interpolateStore($u_ic, uprev,c2pset,dom) ;
-#endif
+    $AMRInterpolationMapping->interpolateData(uprev,$u_ic) ;
+
     Loci::DataXFER_DB.deleteItem("urestart") ;
   } ;
 
@@ -912,28 +1108,30 @@ namespace flowPsi {
       xtmp[ii] = $X{n,it}[ii] ;
 
     } ENDFORALL ;
+
     fact_db::distribute_infoP dist = Loci::exec_current_fact_db->get_distribute_info() ;
-    if(dist==0) {
-      Loci::DataXFER_DB.insertItem(name,xtmp.Rep()) ;
-    } else {
-      int offset = 0 ;
-      Loci::storeRepP vardist = Loci::Local2FileOrder(xtmp.Rep(),dom,offset,
-						      dist,MPI_COMM_WORLD) ;
-      if(vardist == 0) {
-	cerr << "vardist is null for '" << name << "'" << endl ;
-      }
-      Loci::DataXFER_DB.insertItem(name,vardist) ;
+    Map l2f ;
+    getL2FMap(l2f,dom, dist) ;
+    vector<int> splits ;
+    FindSimpleDistribution(dom, l2f, splits,MPI_COMM_WORLD) ;
+
+    Loci::storeRepP vardist = 0;
+    redistributeStore(vardist,xtmp.Rep(),dom,l2f,splits,MPI_COMM_WORLD) ;
+    if(vardist == 0) {
+      cerr << "vardist is null for '" << name << "'" << endl ;
     }
+    Loci::DataXFER_DB.insertItem(name,vardist) ;
   } ;
 
   // scalar transport restart on adapt
   $type X_ic store<real> ;
-  $rule pointwise(priority::X_ic<-refineRestart,scalarTransportName(X)),
+  $rule pointwise(priority::X_ic<-refineRestart,AMRInterpolationMapping,
+                  scalarTransportName(X)),
     constraint(geom_cells,C),
     parametric(scalarTransportP(X,C)), option(disable_threading),
     prelude {
     string name = string("scalar_")+*$scalarTransportName(X) ;
-    entitySet dom = entitySet(seq) ;
+
     store<real> Xtmp ;
     Loci::storeRepP ptr = Loci::DataXFER_DB.getItem(name) ;
     if(ptr == 0)
@@ -941,10 +1139,8 @@ namespace flowPsi {
 
     Xtmp = ptr ;
 
-    store<pair<int,int> > c2pset ;
-    c2pset = Loci::DataXFER_DB.getItem("c2p") ;
     
-    interpolateStore($X_ic, Xtmp,c2pset,dom) ;
+    $AMRInterpolationMapping->interpolateData(Xtmp,$X_ic) ;
 
     // Release the interpolation data
     Xtmp.allocate(EMPTY) ;
