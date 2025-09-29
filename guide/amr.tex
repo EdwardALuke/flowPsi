@@ -1,0 +1,305 @@
+\section{Adaptive Mesh Refinement (AMR)}
+
+Loci provides Adaptive Mesh Refinement (AMR) features that can be
+exploited by CHEM.  AMR features can be executed in either an offline
+or an online mode.  The offline AMR features are accomplished by
+executing stand-alone commands that can edit the refinement plans for
+a given mesh specified as a VOlume Grid (vog) file.  The AMR technique
+is designed to be able to refine any polyhedral mesh and refines a
+cell through a technique known as midpoint insertion.  A cell is
+refined by first splitting each edge of the cell at the edge midpoint.
+Then the face centroid is inserted and a face is formed for each
+vertex of the original face by adding edges between the edge midpoint
+and the face centroid.  This process proceeds recursively to refine
+the cell through inserting the cell centroid where every vertex of the
+cell is formed into a daughter cell.  This refinement approach has the
+advantage that it works on general meshes composed of arbitrary
+polyhedral cells.
+
+
+\subsection{{\tt adpt}: Generating the Tag File}
+The \verb!adpt! code reads the Chem grid and solution files and tags
+the nodes for refinement based on the error indicators given.  The
+result of running \verb!adpt! is the tag file (named
+\verb!refine.dat!) which consists of {\tt 1}'s and {\tt 0}'s to
+indicate whether or not a node is attached to a cell that needs to be
+refined.
+
+The format for the \verb!adpt! command is:
+
+\begin{verbatim}
+adpt {opt args} <iter> <sensitivity> case <errorvars>
+\end{verbatim}
+
+\noindent
+where
+
+\begin{description}
+\item {\tt \verb!{!opt args\verb!}!} :  optional arguments to reduce the extent of the refinement region (see below)
+\item {\tt <iter>} :  iteration number to use for the tag file
+\item {\tt <sensitivity>} :  error sensitivity (use a small number to tag more nodes for refinement)
+\item {\tt case} :  case name
+\item {\tt <errorvars>} :  list of error indicators to use
+\end{description}
+\noindent
+Note that when using the script, the resulting \verb!refine.dat! file
+is located in the level directory associated with the current
+refinement level ({\it{e.g.}}, \verb!level.2/!).
+
+The optional arguments allow the definition of a smaller region for
+refinement through the specification of min and max coordinate values
+and/or min and max distances to viscous walls.  If the coordinates of
+a cell are less than the minimum or greater than the maximum specified
+coordinate value, then the cell is not marked for refinement.
+Similarly, if the cell is located less than the minimum or greater
+than the maximum specified distance to a viscous wall, then the cell
+is not marked for refinement.  The optional arguments are specified
+using the following keywords and corresponding numerical values:
+\begin{verbatim}
+-xmin <min_x_val>
+-xmax <max_x_val>
+-ymin <min_y_val>
+-ymax <max_y_val>
+-zmin <min_z_val>
+-zmax <max_z_val>
+-dmin <min_d_val>
+-dmax <max_d_val>
+\end{verbatim}
+The coordinate and distance to viscous wall values may be used in any
+combination.
+
+\subsection{{\tt marker}: Generating the Refinement Plan}
+The tool \verb!marker! is used to produce a refinement plan from the
+original mesh and the tag file.  The refinement plan indicates how
+cells should be refined (which direction, how many times, {\it{etc.}})
+and also keeps track of the original nodes and any newly created
+hanging nodes.  The format of the \verb!marker! command is:
+
+\begin{verbatim}
+marker -tol <minspace> -fold <fold> -g <orig_vog> <restart_options>
+	-o <refplan> -levels <levels> -tag <tag_file>
+\end{verbatim}
+
+\noindent
+where
+
+\begin{description}
+\item {\tt <minspace>} :  smallest mesh size allowed (in meters)
+\item {\tt <fold>} :  folding parameter for twisted faces (keep set to 0.25)
+\item {\tt <orig\_vog>} :  original \verb!.vog! file name
+\item {\tt <restart\_options>} :  none if this run is not a continuation from a previous level; or
+\subitem {\tt -restart} :  flag to indicate a continuation from a previous refinement plan (level)
+\subitem {\tt -r <rest\_ref\_plan>} :  previous refinement plan file name to use for continuation
+\item {\tt <refplan>} :  new refinement plan file name
+\item {\tt <levels>} :  number of refinement levels within a refinement step (generally 1, but can be $>$ 1 for 3D isotropic refinement only)
+\item {\tt <tag\_file>} :  tag file name
+\end{description}
+
+The \verb!-restart! option is important on all mesh refinement levels
+except the first ({\it{i.e.}}, the refinement step from the original
+mesh to the first refinement level).  The refinement plan keeps track
+of the refinement history of each cell and especially how each cell
+was formed.  The plan also keeps track of hanging nodes, and all of
+this information is needed to maintain mesh quality through subsequent
+refinement levels.
+
+
+\subsection{{\tt refmesh}: Generating the Refined Mesh}
+
+The refinement plan provides the instructions on how to refine each
+cell during the current step while \verb!refmesh! carries out the
+refinement instructions to generate the new mesh.  The options for
+\verb!refmesh! are:
+
+\begin{verbatim}
+refmesh -g <orig_vog> -r <refplan> -o <new_vog>
+\end{verbatim}
+
+\noindent
+where
+
+\begin{description}
+\item {\tt <orig\_vog>} :  original \verb!.vog! file name
+\item {\tt -r <ref\_plan>} :  refinement plan file name to use
+\item {\tt <new\_vog>} :  new (refined) \verb!.vog! file name
+\end{description}
+
+\subsection{Curved Boundary and Viscous Mesh Adaptation Tools}
+
+When a highly curved surface mesh is refined, a representation of the
+surface geometry is needed in order to allow the newly created mesh
+points to remain on the true surface.  The surface geometry is
+represented by cubic Bezier patches which can either be created from
+the original \verb!.vog! file using \verb!computegeom! or from
+SolidMesh using \verb!getgeom!.  Once a mesh is refined, the surface
+mesh points are popped back to the original geometry, and the interior
+mesh is adjusted to smoothly conform to the geometry using
+\verb!adjustpos!.  If a viscous calculation is being refined, hanging
+nodes in the highly stretched boundary layer mesh are avoided using
+\verb!viscousFix!.  This tool tags points near the viscous boundary
+consistently so that if any points within a given delta are tagged for
+refinement, then all points within that delta are tagged.
+
+
+\subsubsection{{\tt computegeom} and {\tt getgeom}: Defining the Boundary Geometry for Surface Mesh Refinement}
+
+This tool is used to define the geometry for surface mesh refinement
+of highly curved boundary surfaces.  There are two ways to create the
+geometry file (\verb!*.geom!).  The first method is approximate and
+uses an existing \verb!.vog! file:
+\begin{verbatim}
+     computegeom -o sphere.geom sphere
+\end{verbatim}
+where \verb!sphere.vog! is the original grid file.  The second method is more accurate and uses exact surface normal and geometry information from SolidMesh:
+\begin{verbatim}
+     getgeom sphere
+\end{verbatim}
+where \verb!sphere.surf! and \verb!sphere.surfn! are supplied by the user.  The above command then produces \verb!sphere.geom!.
+
+
+\subsubsection{{\tt viscousFix}: Viscous Mesh Adaptation}
+
+The tool \verb!viscousFix! is used to tag additional points that are
+within a specified delta of a viscous boundary.  The code reads the
+tag file produced by \verb!adpt! and the topology file produced by
+Chem from the \verb!output/! directory.  The user identifies which
+boundaries are viscous walls, specifies a delta to use, and inputs the
+tag file name and the iteration number.  The format of the command is:
+\begin{verbatim}
+     viscousFix -bc <viscous_bc_name> -delta <delta_from_wall>
+         -tag <tag_file> -o <output_tag_file> <case_name> <iteration>
+\end{verbatim}
+An example of the command is for 3 viscous walls with a delta of 0.01 at iteration 0 is:
+\begin{verbatim}
+     viscousFix -bc wall1 -bc wall2 -bc wall3 -delta 0.01
+         -tag refine.dat -o vrefine.dat sphere 0
+\end{verbatim}
+The output tag file \verb!vrefine.dat! should then be used by \verb!marker! to produce the refinement plan.
+
+
+\subsubsection{{\tt adjustpos}: Preserving the Boundary Geometry}
+
+For the refinement of highly curved boundary surfaces, the linear
+refinement pass must be adjusted to allow surface mesh points to pop
+back to the boundary geometry and to allow the near surface mesh to
+deform smoothly into the domain.  The tool \verb!adjustpos! is used
+after a refinement cycle to accomplish this adjustment.  For example,
+if we have a linear refined mesh given by \verb!sphere2l.vog!, we can
+generate the curvature adjusted mesh \verb!sphere2.vog! using the
+command:
+\begin{verbatim}
+     adjustpos -i sphere2l.vog -o sphere.vog -g sphere.geom
+\end{verbatim}
+where \verb!sphere.geom! is the geometry file created either by \verb!computegeom! or \verb!getgeom!.
+
+\subsection{Online AMR}
+
+Online adaptation can also be used where the adaption process is
+integrated into the CHEM solver.  This can be used for both steady
+state and unsteady problems and unlike the command line version,
+allows for mesh coarsening as well as refinement.  To enable online
+AMR the {\tt adaptFrequency} variable needs to be set in the vars file
+which sets the number of timesteps between adaption phases.  A summary
+of the online adaption options is as given:
+
+\begin{enumerate}
+\item {\tt adaptFrequency}
+
+  How frequently adaption cycles will occur.  If set to a value of
+  100, then an adaption cycle will be performed every 100 timesteps.
+
+\item {\tt adaptStart}
+
+  No adaptation will occur before the timestep set by {\tt adaptStart}
+
+\item {\tt adaptSensitivity}
+
+  This sets how mesh elements are selected for refinemnt.  Any cell
+  with an error that exceeds the mean error value by this factor times
+  the standard deviation of the error will be marked for refinement.
+  A value closer to zero will result in more refinement.
+
+\item {\tt coarsenSensitivity}
+
+  This sets how mesh elements will be selected for a coarsening
+  operation.  Note that only cells that have been refined can be
+  coarsened.  Similar to {\tt adaptSensitivity} this will mark cells
+  that are this factor of a standard deviation below the mean error
+  for coarsening.
+
+\item {\tt adaptSensor} ({\it list})
+
+  This sets the error sensors that will be utilized for mesh
+  refinement.  Currently the sensors are as follows:
+
+  \begin{table}[htbp]
+
+  \begin{centering}
+    \leavevmode
+  \begin{tabular}{|l|l|}
+    \hline
+    Variable & description \\
+    \hline\hline
+    Terror   & Error in the temperature field\\
+    Rerror   & Error in the density field \\
+    Perror   & Error in the pressure field \\
+    OHerror  & Error in OH mass fractions\\
+    NOerror  & Error in NO mass fractions\\
+    Uerror   & Error in the velocity field\\
+    \hline
+  \end{tabular}
+\caption{Error Estimators for mesh adaption}
+  \label{tab:AMRerror}
+  \end{centering}
+\end{table}
+
+\item {\tt maxAdaptSteps}  ({\it integer})
+
+  The maximum number of adapt cycles that will be performed.
+
+\item {\tt adaptMode} ({\it string})
+
+  The type of adaptation that will be utilized. This can be set to
+  'isotropic', 'anisotropic' or '2D'.  Use '2D' for two dimesional
+  simulations where the grid is extruded 1 cell in the z-axis.  The
+  'isotropic' refinement always splits the cell equally, while the
+  'anisotropic' refinement will choose to refine prisms and hexes such
+  that the resulting cells tend to have equal mesh spacing in all
+  directions.  
+
+\item {\tt adaptMinEdgeLength} ({\it float, units meters})
+
+  Stop refining cells which have a minimum edge length of this size.
+
+\item {\tt adaptGeometryEdgeLength} ({\it float, unit meters})
+
+  Provides a target edge length for refining background grid in
+  overset problems.
+
+\item {\tt adaptGeometryLayers} ({\it float, nondimensional})
+
+  Sets thickness of derefinement levels for overset goemetry
+  refinement.  This is specified with respect to the {\tt
+    adaptGeometryEdgeLength}. 
+
+\item {\tt adaptFaceFold} ({\it float, nondimensional})
+
+  Identifies folded faces to disable refinement of highly twisted
+  faces.
+
+\item {\tt adaptBalanceType} ({\it integer})
+
+  Sets method used to balance refinement level between neighboring
+  cells.
+
+\item {\tt maxAdaptCellCount} ({\it double})
+
+  Sets the maximum number of cells after refinement specified in
+  millions of cells.  Fractional numbers can be used, for example
+  setting to $0.1$ would result in a limit of $100,000$ cells.
+  
+\item {\tt adaptMaskDistance} ({\it double, units meters})
+
+  Sets how close to a solid wall adaptation will be allowed.
+
+\end{enumerate}
