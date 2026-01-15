@@ -516,7 +516,101 @@ w=options(MaxIter=100,RelTol=0.01,DiagnosticLevel=1)
 
 Note that for the Spalart Allmaras turbulence model, the equation solver is {\tt nuTilde}.
 
-  
+
+\item {\tt PETSCSolverControls}
+
+  flowPsi simulation could involve one or more PDEs depending on the
+  selected {\tt flowRegime} and turulence model. For example, {\tt
+    flowRegime: laminar}, would involve solution of the fluid flow
+  equations, identified in flowPsi by the variable {\tt fluid} whereas
+  {\tt flowRegime: turbulent} and the KOmega model consists of
+  solution of two additional PDEs involving variables for turbulent
+  kinetic energy ($k$) and specific dissipation rate
+  ($\omega$). Options list specified by {\tt PETSCSolverControls}
+  provides variable-specific control of the PETSc linear system
+  solve. In the following example, PETSc Krylov solver options are
+  specified for the variables {\tt fluid}, {\tt k}, and {\tt w}.
+
+\begin{verbatim}
+PETSCSolverControls: <
+  fluid=options(ksp_type=gmres, pc_type=jacobi, ksp_max_it=50,
+                ksp_atol=1e-6, ksp_rtol=0.01),
+  k=options(ksp_max_it=100, ksp_monitor, mat_type=aijcusparse, vec_type=cuda),
+  w=options(ksp_max_it=100, ksp_monitor)
+>
+\end{verbatim}
+The options specified for a variable in {\tt PETSCSolverControls} are
+passed as is to the PETSc options database, with the name of the
+variable prepended to the option name. For example, {\tt
+ fluid=options(..., pc\_type=jacobi, ...)} will create an entry with
+name {\tt -fluid\_pc\_type} in PETSc options database and assign value
+{\tt jacobi} to it. When PETSc KSP and PC objects are created for the
+{\tt fluid} variable, they are configured from these variable-specific
+PETSc options.  For various PETSc solve options and their valid
+values, refer to the PETSc manual. Some useful options are as follows.
+\begin{enumerate}
+\item {\tt ksp\_type} sets the type of Krylov solver.
+\item {\tt pc\_type} sets the type of preconditioner.
+\item {\tt ksp\_max\_it} sets the maximum number of Krylov solver
+  iterations.
+\item {\tt ksp\_atol} sets absolute tolerance for convergence test.
+\item {\tt ksp\_rtol} sets relative tolerance for convergence test.
+\item {\tt ksp\_monitor} prints Krylov solver residual information.
+\item {\tt ksp\_converged\_reason} prints Krylov solver convergence
+  reason.
+\item {\tt mat\_type}, {\tt vec\_type} specifies the type of matrix
+  and vector. This option is used to offload PETSc solve to GPU
+  device. For example, specifying {\tt mat\_type=aijcusparse} and {\tt
+    vec\_type=cuda} for {\tt fluid} variable will offload its linear
+  system solve to CUDA device, provided PETSc is configured with CUDA
+  backend.
+\item {\tt ksp\_view} prints information about the KSP object.
+\item {\tt mat\_view} prints matrix.
+\end{enumerate}
+
+To specify PETSc options that are not specific to the KSP object of a
+particular variable, use {\tt generic=options(...)}. For example, the
+following listing allows gathering PETSc performance logging
+information and also prints unused options at the end of the
+simulation.
+\begin{verbatim}
+PETSCSolverControls: <
+  generic=options(log_view=":filename.txt:ascii_flamegraph", options_left)
+>
+\end{verbatim}
+Here are a few options that could be useful. Refer to the PETSc manual
+for further information.
+\begin{enumerate}
+\item {\tt log\_view} prints summary log information. Value of {\tt
+  :filename.txt:ascii\_flamegraph} saves the logging information in a
+  format suitable for visualizing as a Flame graph.
+\item {\tt log\_view\_memory} displays memory usage in each PETSc
+  event.
+\item {\tt log\_view\_gpu\_time} displays time in each event for GPU
+  kernels, but slows down the computation.
+\item {\tt options\_left} prints information about unused options at
+  the end of the simulation.
+\item {\tt options\_view} prints a table of all runtime options
+  specified.
+\end{enumerate}
+
+Note for GPU offloading: Special options for cluster manager (such as
+Slurm or PBS) may be required to provide mapping between node-local
+MPI rank and node-local GPU device. Slurm provides {\tt --gpu-bind}
+option to specify the mapping. If such mapping is not specified, each
+rank on the node may create process contexts on a single GPU device
+which may cause memory overflow and eventually terminate the
+simulation.
+
+\item {\tt petscCOOAssembly}
+
+  Set to 1 if PETSc coordinate assembly is required, 0
+  otherwise. Here, PETSc assembly refers to the operation of inputing
+  the flowPsi matrix and vector non-zero values to the PETSc matrix
+  and vector objects. In certain circumstances such as offloading the
+  solve to GPU, coordinate assembly may be faster than the traditional
+  assembly.
+
 \item {\tt limiter }
 
   This variable describes the limiter that will be used to limit the
