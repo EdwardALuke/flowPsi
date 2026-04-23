@@ -226,7 +226,7 @@ namespace gridMotion {
 
   $rule apply(defnode2surf->maxWallDist2<-pos,defnode2surf->pos)[Loci::Maximum] {
     vect3d dv = $pos-$defnode2surf->$pos ;
-    join($defnode2surf->$maxWallDist2,(realF)dot(dv,dv)) ;
+    join($defnode2surf->$maxWallDist2,static_cast<realF>(dot(dv,dv))) ;
   }
 
   $type totMovingArea param<real> ;

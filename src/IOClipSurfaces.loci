@@ -107,7 +107,7 @@ namespace flowPsi {
   $rule pointwise(BCplotFreq<-BC_options),constraint(plotFreq_BCoption) {
     double val = 0 ;
     $BC_options.getOption("plotFreq",val) ;
-    $BCplotFreq = int(val+0.01) ;
+    $BCplotFreq = static_cast<int>(val+0.01) ;
   }
 
   $type plotFreqSurf_X param<int> ;

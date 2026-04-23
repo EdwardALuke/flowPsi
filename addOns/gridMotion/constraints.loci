@@ -184,7 +184,7 @@ $rule apply( face2node->numAdjFixedBoundaryFaces <- facecenter )[Loci::Summation
   constraint( fixedBoundaryFaces ) {
   const int N = $face2node.size();
   for (int i=0; i<N; ++i) {
-    $face2node[i]->$numAdjFixedBoundaryFaces++;
+    join($face2node[i]->$numAdjFixedBoundaryFaces,1);
   }
 }
 
@@ -219,7 +219,7 @@ $rule apply( face2node->numAdjMovingBoundaryFaces <- facecenter )[Loci::Summatio
   constraint( movingBoundaryFaces ) {
   const int N = $face2node.size();
   for (int i=0; i<N; ++i) {
-    $face2node[i]->$numAdjMovingBoundaryFaces++;
+    join($face2node[i]->$numAdjMovingBoundaryFaces,1);
   }
 }
 

@@ -344,7 +344,7 @@ namespace gridMotion {
     case 1:
       { // constrain rotation to stay in x=0 plane
 	gridMotion::vect3d v1(0,1.0,0)  ; // rotate from baseline vector in plane
-	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	gridMotion::vect3d v2 = $nodeRot_b.rotate(v1) ;
 	v2.x = 0 ; // remove x plane part of rotation
 	v2 *= 1./norm(v2) ; // renormalize
 	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
@@ -352,7 +352,7 @@ namespace gridMotion {
     case 2:
       { // constraint rotation to stay in y=0 plane
 	gridMotion::vect3d v1(1.0,0,0)  ; // rotate from baseline vector in plane
-	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	gridMotion::vect3d v2 = $nodeRot_b.rotate(v1) ;
 	v2.y = 0 ; // remove y plane part of rotation
 	v2 *= 1./norm(v2) ; // renormalize
 	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor
@@ -360,7 +360,7 @@ namespace gridMotion {
     case 3:
       { // constraint rotation to stay in z=0 plane
 	gridMotion::vect3d v1(1.0,0,0)  ; // rotat from baseline vector in plane
-	gridMotion::vect3d v2 = ($nodeRot_b)(v1) ;
+	gridMotion::vect3d v2 = $nodeRot_b.rotate(v1) ;
 	v2.z = 0 ; // remove z plane part of rotation
 	v2 *= 1./norm(v2) ; // renormalize
 	$nodeRot_b = Rotor(v1,v2) ; // create new in plane rotor

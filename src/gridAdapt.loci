@@ -260,7 +260,8 @@ namespace flowPsi {
     $cellMean(Xf) = 0 ;
   }
   $rule apply(cellMean(Xf)<-Xf,cellMeanCount)[Loci::Summation] {
-    join($cellMean(Xf),double($Xf)/double($cellMeanCount)) ;
+    join($cellMean(Xf),static_cast<double>($Xf)/
+         static_cast<double>($cellMeanCount)) ;
   }
 
   $rule unit(cellSigmaSq(Xf)), constraint(Xf,geom_cells) {
