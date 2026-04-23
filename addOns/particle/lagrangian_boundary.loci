@@ -422,9 +422,9 @@ namespace lagrangianP {
         tlist[i].weight *= rsum ;
       double injectDensity = $ref->$particleInjectDensity_BC ;
       int nbins = $particleDistSize_f ;
-      double npntsf = injectDensity*$area.sada/double(nbins) ;
-      int npnts = int(floor(npntsf)) ;
-      double residue = npntsf - double(npnts) ;
+      double npntsf = injectDensity*$area.sada/static_cast<double>(nbins) ;
+      int npnts = static_cast<int>(floor(npntsf)) ;
+      double residue = npntsf - static_cast<double>(npnts) ;
 
       
       real mass_per_injection = $particleMassFlux_f*$p_dtmax*$area.sada/npntsf ;
@@ -435,7 +435,7 @@ namespace lagrangianP {
       for(int b=0;b<nbins;++b) {
         //      binw[b] = max($particleDistribution_f[b]*dot($particleVelocity_f[b],n),
         //                    float(0.0)) ;
-        binw[b] = max($particleDistribution_f[b],float(0.0)) ;
+        binw[b] = max($particleDistribution_f[b],0.0F) ;
         bsum += binw[b] ;
       }
       double rbsum = 1./(bsum+1e-30) ;
@@ -452,7 +452,7 @@ namespace lagrangianP {
         // the mass flux every step, otherwise it has to average over several
         // steps
         if(npnts >= 1) 
-          eff_mass = mass_per_injection*npntsf/double(npnts+r) ;
+          eff_mass = mass_per_injection*npntsf/static_cast<double>(npnts+r) ;
         for(int i=0;i<npnts+r;++i) {
           // Get random injection point on face
           vect3d pt = random_face_point(tlist) ;

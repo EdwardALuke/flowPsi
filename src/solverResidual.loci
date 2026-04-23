@@ -104,9 +104,10 @@ namespace flowPsi {
       r.etrms=weight*square(real(rvol*$src[ei])) ;
       r.etmax = rvol*$src[ei] ;
       r.ccmaxe_center = $cellcenter ;
+      using flowPsi::BCErrorCode ;
 
-      r.bcErrorCode = BCErrorCode ;
-      BCErrorCode = 0 ;
+      r.bcErrorCode = flowPsi::BCErrorCode ;
+      flowPsi::BCErrorCode = 0 ;
       join($residual,r) ;
     }
   }
@@ -143,9 +144,10 @@ namespace flowPsi {
       r.etrms=weight*square(real(rvol*$rhs[ei])) ;
       r.etmax = rvol*$rhs[ei] ;
       r.ccmaxe_center = $cellcenter ;
+      using flowPsi::BCErrorCode ;
+      r.bcErrorCode = flowPsi::BCErrorCode ;
 
-      r.bcErrorCode = BCErrorCode ;
-      BCErrorCode = 0 ;
+      flowPsi::BCErrorCode = 0 ;
       join($residual,r) ;
     }
   }

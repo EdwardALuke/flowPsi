@@ -134,10 +134,11 @@ namespace gridMotion {
     /**
      * Rotate vector using chem's quaternion implementation
      */
-    vect3d operator()(const vect3d & rhs) const {
+    vect3d rotate(const vect3d & rhs) const {
       gridMotion::Quaternion Q(beta.x, beta.y, beta.z, alpha);
       return Q*rhs;
     }
+    vect3d operator()(const vect3d & rhs) const { return rotate(rhs); }
 
   public:
     /**
