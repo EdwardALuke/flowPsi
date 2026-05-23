@@ -47,7 +47,7 @@ adpt: adpt.o
 
 
 clean:
-	rm -fr $(OBJS) $(JUNK) $(APPS)
+	rm -fr *.o $(JUNK) $(APPS)
 
 distclean: clean
 	rm -f $(DEPEND_FILES)
