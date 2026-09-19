@@ -165,7 +165,7 @@ namespace flowPsi {
     // current mesh to reach limit and estimate how many refined cells will
     // achieve that size.
     if($maxAdaptCellCount > 0)
-      $maxRefineCellCount = int(max($maxAdaptCellCount-$numCells,0.0)*factor) ;
+      $maxRefineCellCount = static_cast<int>(max($maxAdaptCellCount-$numCells,0.0)*factor) ;
     $[Once] {
       cout << "maxAdaptCellCount=" << $maxAdaptCellCount
            << ", numCells=" << $numCells
@@ -174,7 +174,7 @@ namespace flowPsi {
     }
   }
        
-  $type componentGeometryList blackbox<vector<Loci::CPTR<geometry_type> > > ;
+  $type componentGeometryList blackbox<std::vector<Loci::CPTR<Loci::geometry_type> > > ;
   $type componentID store<int> ;
   $type nblank store<chem::byte_t> ;
 
@@ -903,7 +903,7 @@ namespace flowPsi {
 
 
   $type refineRestart param<int> ;
-  $type componentName_X blackbox<string> ;
+  $type componentName_X blackbox<std::string> ;
   $type adaptRestartXform_X blackbox<vector<componentXform> > ;
   $rule blackbox(adaptRestartXform_X<-componentName_X,refineRestart),
     parametric(volumeTag(X)),prelude {

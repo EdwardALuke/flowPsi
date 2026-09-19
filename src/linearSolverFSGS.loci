@@ -401,7 +401,7 @@ namespace FGSI {
           if(ol.optionExists(setting)) {
             real val = $FSGSDiagnosticLevel(X) ;
             ol.getOption(setting,val) ;
-            $FSGSDiagnosticLevel(X) = int(floor(val + 0.5)) ;
+            $FSGSDiagnosticLevel(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
@@ -431,7 +431,7 @@ namespace FGSI {
           if(ol.optionExists(setting)) {
             real val = $FSGSMaxIter(X) ;
             ol.getOption(setting,val) ;
-            $FSGSMaxIter(X) = int(floor(val + 0.5)) ;
+            $FSGSMaxIter(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:

@@ -53,7 +53,7 @@ namespace flowPsi {
 			  !first_cycle) ;
     $timestepFinished{n} = (restart_cycle ||
 			     ($plot_status{n-1} > 1) ||
-			     ($stime{n} > double($stop_time))) ;
+			     ($stime{n} > static_cast<double>($stop_time))) ;
 
     Loci::storeRepP ac = Loci::DataXFER_DB.getItem("adaptCycle") ;
     if(ac != 0) {

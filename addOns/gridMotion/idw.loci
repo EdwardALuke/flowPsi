@@ -29,7 +29,7 @@ using Loci::pointwise_rule ;
 using Loci::sequence ;
 using Loci::entitySet ;
 using Loci::register_rule ;
-
+using Loci::unit_rule ;
 #include <iostream>
 using std::cout ;
 #include <vector>
