@@ -347,7 +347,7 @@ namespace {
           if(ol.optionExists(setting)) {
             double val = $LSGSMaxIter(X) ;
             ol.getOption(setting,val) ;
-            $LSGSMaxIter(X) = int(floor(val + 0.5)) ;
+            $LSGSMaxIter(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
@@ -375,7 +375,7 @@ namespace {
           if(ol.optionExists(setting)) {
             double val = $LSGSPreconSteps(X) ;
             ol.getOption(setting,val) ;
-            $LSGSPreconSteps(X) = int(floor(val + 0.5)) ;
+            $LSGSPreconSteps(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
@@ -403,7 +403,7 @@ namespace {
           if(ol.optionExists(setting)) {
             double val = $LSGSDiagnosticLevel(X) ;
             ol.getOption(setting,val) ;
-            $LSGSDiagnosticLevel(X) = int(floor(val + 0.5)) ;
+            $LSGSDiagnosticLevel(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:

@@ -173,7 +173,7 @@ namespace LGSI {
           if(ol.optionExists(setting)) {
             double val = $GMRESMaxIter(X) ;
             ol.getOption(setting,val) ;
-            $GMRESMaxIter(X) = int(floor(val + 0.5)) ;
+            $GMRESMaxIter(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
@@ -201,7 +201,7 @@ namespace LGSI {
           if(ol.optionExists(setting)) {
             double val = $GMRESRestart(X) ;
             ol.getOption(setting,val) ;
-            $GMRESRestart(X) = int(floor(val + 0.5)) ;
+            $GMRESRestart(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
@@ -229,7 +229,7 @@ namespace LGSI {
           if(ol.optionExists(setting)) {
             double val = $GMRESDiagnosticLevel(X) ;
             ol.getOption(setting,val) ;
-            $GMRESDiagnosticLevel(X) = int(floor(val + 0.5)) ;
+            $GMRESDiagnosticLevel(X) = static_cast<int>(floor(val + 0.5)) ;
           }
         }
       default:
