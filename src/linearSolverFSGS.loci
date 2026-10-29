@@ -637,7 +637,8 @@ namespace FGSI {
 	    MPI_Send(&(recv_sets[i].second[0]),sz,MPI_INT,p,99,MPI_COMM_WORLD) ;
 	  }
 	  vector<MPI_Status> status(requests.size()) ;
-	  MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+          if(requests.size() > 0)
+            MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
     
 	  // Now convert send and recv lists to local numbering
 	  for(size_t i=0;i<recv_sets.size();++i) {
@@ -1091,7 +1092,8 @@ namespace FGSI {
 	  int p = matrix.send_processors[i] ;
 	  MPI_Send(&send_data[ss],ssz,FSGS_TYPE,p,99,MPI_COMM_WORLD) ;
 	}
-	MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+        if(requests.size() > 0)
+          MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
 	// copy recieved data 
 	for(size_t i=0;i<recv_data.size();++i)
 	  X[matrix.recv_entitiesl[i]] = recv_data[i] ;
@@ -1659,7 +1661,8 @@ namespace FGSI {
 	int p = matrix.send_processors[i] ;
 	MPI_Send(&send_data[ss],ssz,FSGS_TYPE,p,99,MPI_COMM_WORLD) ;
       }
-      MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+      if(requests.size() > 0)
+        MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
       // copy recieved data 
       for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
 	int loc = matrix.recv_entitiesl[i]*vs ;

@@ -90,6 +90,9 @@ namespace flowPsi {
       entitySet dom = ~EMPTY ;
       param<int> meanCount ;
       *meanCount = 0 ;
+#if LOCI_VERSION_GE(4,2)
+      meanCount.Rep()->setPartitionInfo($meanCount_ic.Rep()->getPartitionInfo()) ;
+#endif
       Loci::readContainer(file_id,"meanCount",meanCount.Rep(),dom) ;
       Loci::hdf5CloseFile(file_id) ;
       count.first = 1 ;
