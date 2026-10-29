@@ -12,6 +12,10 @@
 /lib
 /bin
 /Makefile
-Tutorial/docs/Makefile_ex.tex
-Tutorial/docs/entities_cc.tex
-Tutorial/docs/helpers_cc.tex
+/src/flowpsi
+/tools/adpt
+/tools/ndiff
+/addOns/gridMotion/vogdeform
+output
+restart
+debug
