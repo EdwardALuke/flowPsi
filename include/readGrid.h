@@ -25,9 +25,17 @@
 #include <flowTypes.h>
 #include <vector>
 
+#include <FVMAdapt/defines.h>
+#include <FVMAdapt/gridInterface.h>
+#include "FVMAdapt/globals.h"
+#include "FVMAdapt/dataxferDB.h"
+
 namespace flowPsi {
   void read_vars(fact_db &facts, const rule_db &rdb, const char *filename) ;
   void read_vog(fact_db &facts, const char *filename) ;
+  void input_grid(fact_db &facts,
+		  Loci::CPTR<Loci::refinedGridData> gridDataP,
+		  Loci::storeRepP cellwts) ;
   void input_grid(fact_db &facts, const rule_db &rdb, const char *filename,
                   int adapt_step,
                   std::vector<entitySet>& local_nodes,

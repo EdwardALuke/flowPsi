@@ -176,7 +176,7 @@ namespace LGSI {
         MPI_Send(&send_data[ss],ssz*tsz,MPI_BYTE,p,99,MPI_COMM_WORLD) ;
       }
       if(requests.size() > 0)
-        MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+	MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
       // copy recieved data 
       for(size_t i=0;i<recv_data.size();++i)
         X[matrix.recv_entitiesl[i]] = recv_data[i] ;
@@ -458,7 +458,7 @@ namespace LGSI {
       int tsz = sizeof(REALV) ;
       MPI_Send(&send_data[ss],ssz*tsz,MPI_BYTE,p,99,MPI_COMM_WORLD) ;
     }
-    if(requests.size() > 0)
+    if(requests.size() > 0) 
       MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
     // copy recieved data 
     for(int i=0;i<recv_sz;++i)
@@ -605,8 +605,8 @@ namespace LGSI {
           MPI_Isend(&send_data[ss],ssz,MPI_DOUBLE,p,99,MPI_COMM_WORLD,
                     &requests[i+rpsz]) ;
         }
-        if(requests.size() > 0)
-          MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+	if(requests.size() > 0)
+	  MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
         // copy recieved data 
         for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
           int loc = matrix.recv_entitiesl[i]*vs ;
@@ -708,7 +708,7 @@ namespace LGSI {
 
       // Finish communication after local line solve
       if(requests.size() > 0)
-        MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
+	MPI_Waitall(requests.size(),&requests[0],&status[0]) ;
       // copy recieved data 
       for(size_t i=0;i<matrix.recv_entitiesl.size();++i) {
         int loc = matrix.recv_entitiesl[i]*vs ;
