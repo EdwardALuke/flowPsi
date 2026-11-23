@@ -675,18 +675,21 @@ int main(int ac, char *av[]) {
 				 gridDataP->local_cells[MPI_rank]) ;
 					    
 	}
+#if LOCI_VERSION_GT(4,1)        
 	flowPsi::input_grid(facts,gridDataP,cellwts) ;
-        // flowPsi::input_grid(facts, rdb,casename.c_str(),
-        //                  level,
-        //                  gridDataP->local_nodes,
-        //                  gridDataP->local_faces,
-        //                  gridDataP->local_cells,
-        //                  gridDataP->new_pos,
-        //                  gridDataP->new_cl,
-        //                  gridDataP->new_cr,
-        //                  gridDataP->new_face2node,
-        //                  gridDataP->boundary_ids,
-        //                  gridDataP->volTags,cellwts);
+#else
+        flowPsi::input_grid(facts, rdb,casename.c_str(),
+                            level,
+                            gridDataP->local_nodes,
+                            gridDataP->local_faces,
+                            gridDataP->local_cells,
+                            gridDataP->new_pos,
+                            gridDataP->new_cl,
+                            gridDataP->new_cr,
+                            gridDataP->new_face2node,
+                            gridDataP->boundary_ids,
+                            gridDataP->volTags,cellwts);
+#endif
 	gridDataP = 0 ; // gridDataP no longer needed so release it.
       }
 

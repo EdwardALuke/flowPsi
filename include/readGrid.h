@@ -33,9 +33,11 @@
 namespace flowPsi {
   void read_vars(fact_db &facts, const rule_db &rdb, const char *filename) ;
   void read_vog(fact_db &facts, const char *filename) ;
+#if LOCI_VERSION_GT(4,1)
   void input_grid(fact_db &facts,
 		  Loci::CPTR<Loci::refinedGridData> gridDataP,
 		  Loci::storeRepP cellwts) ;
+#else
   void input_grid(fact_db &facts, const rule_db &rdb, const char *filename,
                   int adapt_step,
                   std::vector<entitySet>& local_nodes,
@@ -48,7 +50,8 @@ namespace flowPsi {
                   std::vector<pair<int,string> >& boundary_ids,
                   std::vector<pair<string,entitySet> >& volTags,
 		  Loci::storeRepP cellptn) ;
-
+#endif
+  
   void find_mind_noslip(fact_db &facts) ;
   void find_mind_surf(fact_db &facts) ;
   void find_mind_surf_node(fact_db &facts) ;

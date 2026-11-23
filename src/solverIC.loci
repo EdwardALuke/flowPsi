@@ -27,6 +27,7 @@
 #include "initialConditions.h"
 $include "flowPsi.lh"
 #include <sys/stat.h>
+#include <flowPsiIO.h>
 
 namespace flowPsi {
   using std::string ;
@@ -601,9 +602,8 @@ namespace flowPsi {
     Loci::readContainer(file_id,"gagePressure",$gagePressure_ic.Rep(),read_set) ;
     Loci::readContainer(file_id,"u",$u_ic.Rep(),read_set) ;
     param<real> Pref ;
-#if LOCI_VERSION_GE(4,2)
-    Pref.Rep()->setPartitionInfo($Pambient.Rep()->getPartitionInfo()) ;
-#endif
+    COPY_STORE_PARTITION(Pref,$Pambient) ;
+
     Loci::readContainer(file_id,"Pambient",Pref.Rep(),read_set) ;
     real dp = *Pref-*$Pambient ;
     FORALL(read_set,ii) {
@@ -657,9 +657,8 @@ namespace flowPsi {
     Loci::readContainer(file_id,"gagePressure",$gagePressure_ico.Rep(),read_set) ;
     Loci::readContainer(file_id,"u",$u_ico.Rep(),read_set) ;
     param<real> Pref ;
-#if LOCI_VERSION_GE(4,2)
-    Pref.Rep()->setPartitionInfo($Pambient.Rep()->getPartitionInfo()) ;
-#endif
+    COPY_STORE_PARTITION(Pref,$Pambient) ;
+
     Loci::readContainer(file_id,"Pambient",Pref.Rep(),read_set) ;
     real dp = *Pref-*$Pambient ;
     FORALL(read_set,ii) {
