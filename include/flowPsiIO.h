@@ -334,6 +334,12 @@ namespace flowPsi {
 /*   }; register_rule<OUTB_##Y> register_OUTB_##Y ;			\ */
 /*   variableOperatorList OUT_INFO_##Y(#Y,1) */
 
+//#if LOCI_VERSION_GE(4,2)
+#ifdef LOCI_USING_SET_PARTITION
+#define COPY_STORE_PARTITION(to,from) to.Rep()->setPartitionInfo(from.Rep()->getPartitionInfo())
+#else
+#define COPY_STORE_PARTITION(to,from) 
+#endif
 
 
 #endif

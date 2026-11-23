@@ -314,6 +314,31 @@ namespace flowPsi {
 #endif
   }
 
+#if LOCI_VERSION_GT(4,1)
+  void input_grid(fact_db & facts,
+		  Loci::CPTR<Loci::refinedGridData> gridDataP,
+		  Loci::storeRepP cellwts) {
+    if(!Loci::setupFVMGridFromContainer(facts,*gridDataP,cellwts)) {
+      // Failure to read file
+      if(Loci::MPI_rank == 0) {
+        cerr << "Reading grid file failed in grid reader!" << endl ;
+        cerr << "aborting!" << endl ;
+      }
+      Loci::Abort() ;
+    }
+  
+    if(Loci::MPI_rank == 0)
+      cout << "Reading Grid File Complete" << endl ;
+
+    postprocess_grid(facts) ;
+#ifdef USE_AUTODIFF
+    real val = 1.0 ;
+    
+    setupPosAutoDiff(facts,val) ;
+#endif
+  }
+
+#else
   void input_grid(fact_db &facts, const rule_db &rdb, const char *filename,
                   int adapt_step,
                   vector<entitySet>& local_nodes,
@@ -357,7 +382,7 @@ namespace flowPsi {
     setupPosAutoDiff(facts,val) ;
 #endif
   }
-
+#endif
   
 }
 

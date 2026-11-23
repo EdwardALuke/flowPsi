@@ -29,6 +29,7 @@
 
 $include "FVM.lh"
 $include "flowPsi.lh"
+#include <flowPsiIO.h>
 
 using std::cerr ;
 using std::cout ;
@@ -90,6 +91,8 @@ namespace flowPsi {
       entitySet dom = ~EMPTY ;
       param<int> meanCount ;
       *meanCount = 0 ;
+      COPY_STORE_PARTITION(meanCount,$meanCount_ic) ;
+
       Loci::readContainer(file_id,"meanCount",meanCount.Rep(),dom) ;
       Loci::hdf5CloseFile(file_id) ;
       count.first = 1 ;

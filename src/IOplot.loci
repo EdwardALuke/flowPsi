@@ -320,6 +320,8 @@ namespace flowPsi {
     option(disable_threading) {
     param<double> Pambient_copy ;
     *Pambient_copy = realToDouble($Pambient) ;
+    COPY_STORE_PARTITION(Pambient_copy,$*Pambient) ;
+
     solver_dump_var(seq,Pambient_copy.Rep(),$plot_postfix,$modelName,"par","Pambient") ;
   }
 
